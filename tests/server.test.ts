@@ -6,10 +6,24 @@ import { TestClient } from './ws-client.js';
 let server: HostServer | null = null;
 const clients: TestClient[] = [];
 
+/** 随机取一个高位端口并启动服务，避开 fetch 屏蔽的端口与端口占用 */
 async function startServer(): Promise<HostServer> {
-  server = new HostServer({ port: 0, staticDir: null, host: '127.0.0.1' });
-  await server.listen();
-  return server;
+  let lastErr: unknown = null;
+  for (let i = 0; i < 5; i++) {
+    const candidate = new HostServer({
+      port: 20000 + Math.floor(Math.random() * 30000),
+      staticDir: null,
+      host: '127.0.0.1',
+    });
+    try {
+      await candidate.listen();
+      server = candidate;
+      return candidate;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr ?? new Error('无法启动测试服务');
 }
 
 async function connect(port: number, role: 'host' | 'guest'): Promise<TestClient> {
