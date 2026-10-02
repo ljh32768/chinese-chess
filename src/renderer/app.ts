@@ -237,12 +237,14 @@ function handleMessage(msg: ServerMessage): void {
 }
 
 function handleOpponentLeft(reason: string): void {
+  // 主机视角 reason 就是「对手已离开」，避免标题与说明重复
+  const sub = reason === '对手已离开' ? '本局已结束，可返回首页重新开局' : reason;
   if (S.status === 'playing' || S.status === 'over') {
     S.status = 'over';
     render();
     showModal({
       title: '对手已离开',
-      sub: reason,
+      sub,
       buttons: [{ label: '返回首页', primary: true, onClick: leaveToHome }],
     });
   } else {
@@ -257,7 +259,7 @@ function handleClosed(reason: string): void {
     render();
     showModal({
       title: '连接已断开',
-      sub: reason,
+      sub: '与主机的连接已中断，可返回首页重试',
       buttons: [{ label: '返回首页', primary: true, onClick: leaveToHome }],
     });
   } else {

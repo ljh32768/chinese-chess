@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { HostServer } from '../src/server/host-server.js';
 import { Board } from '../src/shared/types.js';
 import { TestClient } from './ws-client.js';
@@ -260,5 +263,85 @@ describe('主机服务 · HTTP 接口', () => {
       hosting: boolean;
     };
     expect(info.hosting).toBe(true);
+  });
+});
+
+describe('主机服务 · 静态资源', () => {
+  let base = '';
+  let dir = '';
+  let secret = '';
+  let server: HostServer | null = null;
+
+  beforeAll(async () => {
+    // 构造与 dist 相同的目录结构：renderer/* 页面脚本 + shared/* 共享模块
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'lanchess-static-'));
+    dir = path.join(base, 'root');
+    secret = path.join(base, 'lanchess-secret.txt');
+    fs.mkdirSync(path.join(dir, 'renderer'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'shared'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'renderer', 'index.html'), '<!DOCTYPE html><title>t</title>');
+    fs.writeFileSync(path.join(dir, 'renderer', 'app.js'), 'export const app = 1;');
+    fs.writeFileSync(path.join(dir, 'renderer', 'styles.css'), 'body{}');
+    fs.writeFileSync(path.join(dir, 'shared', 'rules.js'), 'export const rules = 1;');
+    // 静态根目录之外的敏感文件不应能被访问
+    fs.writeFileSync(secret, 'top-secret');
+
+    for (let i = 0; i < 5 && !server; i++) {
+      const candidate = new HostServer({
+        port: 20000 + Math.floor(Math.random() * 30000),
+        staticDir: dir,
+        host: '127.0.0.1',
+      });
+      try {
+        await candidate.listen();
+        server = candidate;
+      } catch {
+        server = null;
+      }
+    }
+    if (!server) throw new Error('无法启动静态资源测试服务');
+  });
+
+  afterAll(async () => {
+    await server?.close();
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it('根路径返回页面', async () => {
+    const res = await fetch(`http://127.0.0.1:${server!.address.port}/`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(await res.text()).toContain('<title>t</title>');
+  });
+
+  it('页面脚本可从 renderer 目录取到', async () => {
+    const res = await fetch(`http://127.0.0.1:${server!.address.port}/app.js`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/javascript');
+  });
+
+  it('共享模块 ../shared/rules.js 可以正常加载', async () => {
+    const res = await fetch(`http://127.0.0.1:${server!.address.port}/shared/rules.js`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('export const rules');
+  });
+
+  it('样式表可访问', async () => {
+    const res = await fetch(`http://127.0.0.1:${server!.address.port}/styles.css`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/css');
+  });
+
+  it('不存在的文件返回 404', async () => {
+    const res = await fetch(`http://127.0.0.1:${server!.address.port}/nope.js`);
+    expect(res.status).toBe(404);
+  });
+
+  it('拒绝路径穿越访问项目外的文件', async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${server!.address.port}/../lanchess-secret.txt`,
+    );
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain('secret');
   });
 });

@@ -28,15 +28,37 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
 };
 
-/** 获取本机局域网 IPv4 地址（找不到则回退 127.0.0.1） */
-export function getLanIp(): string {
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const info of ifaces[name] ?? []) {
-      if (info.family === 'IPv4' && !info.internal) return info.address;
+/** 虚拟网卡名字特征（WSL / Hyper-V / VirtualBox / VMware / Docker 等） */
+const VIRTUAL_IFACE = /vEthernet|WSL|Hyper-?V|VirtualBox|VMware|Docker|Loopback|Tailscale|ZeroTier|VPN|TAP|TUN/i;
+
+/**
+ * 从网卡列表中挑选最可能的局域网 IPv4 地址。
+ * 优先真实物理网卡的私有网段（192.168 > 10 > 172.16-31），跳过虚拟网卡。
+ */
+export function pickLanIp(ifaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>): string | null {
+  const candidates: Array<{ ip: string; score: number }> = [];
+  for (const [name, infos] of Object.entries(ifaces)) {
+    for (const info of infos ?? []) {
+      // Node 18+ 的 family 可能是数字 4
+      const isV4 = info.family === 'IPv4' || (info.family as unknown as number) === 4;
+      if (!isV4 || info.internal) continue;
+      let score = 0;
+      if (/^192\.168\./.test(info.address)) score += 40;
+      else if (/^10\./.test(info.address)) score += 30;
+      else if (/^172\.(1[6-9]|2\d|3[01])\./.test(info.address)) score += 20;
+      else score += 10;
+      if (VIRTUAL_IFACE.test(name)) score -= 100;
+      candidates.push({ ip: info.address, score });
     }
   }
-  return '127.0.0.1';
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].ip;
+}
+
+/** 获取本机局域网 IPv4 地址（找不到则回退 127.0.0.1） */
+export function getLanIp(): string {
+  return pickLanIp(os.networkInterfaces()) ?? '127.0.0.1';
 }
 
 interface Conn {
@@ -167,18 +189,28 @@ export class HostServer {
     res.end(data);
   }
 
+  /**
+   * 静态资源解析：
+   * 编译产物目录结构为 dist/renderer/*（页面与脚本）与 dist/shared/*（共享模块），
+   * 页面里的 `../shared/rules.js` 会请求到 /shared/rules.js，因此这里以 dist 为根，
+   * 找不到时再回退到 dist/renderer。
+   */
   private serveStatic(pathname: string, res: http.ServerResponse): void {
-    if (!this.opts.staticDir) {
+    const root = this.opts.staticDir;
+    if (!root) {
       res.writeHead(404);
       res.end('static disabled');
       return;
     }
-    const rel = pathname === '/' ? '/index.html' : pathname;
-    const filePath = path.join(this.opts.staticDir, rel);
-    // 防止路径穿越
-    if (!filePath.startsWith(this.opts.staticDir)) {
-      res.writeHead(403);
-      res.end('forbidden');
+    const rel = pathname === '/' ? 'renderer/index.html' : pathname.replace(/^\/+/, '');
+    const rootResolved = path.resolve(root);
+    const candidates = [path.resolve(rootResolved, rel), path.resolve(rootResolved, 'renderer', rel)];
+    const filePath = candidates.find((p) => p.startsWith(rootResolved) && fs.existsSync(p));
+
+    if (!filePath) {
+      // 路径穿越或文件不存在：一律按 404 处理，不回显敏感信息
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
       return;
     }
     fs.readFile(filePath, (err, data) => {
@@ -400,5 +432,6 @@ export class HostServer {
 }
 
 function defaultStaticDir(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../renderer');
+  // 编译产物：dist/server/host-server.js → 静态根目录为 dist
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 }
