@@ -1,0 +1,173 @@
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{
+  background:radial-gradient(circle at 50% 0%,#2b241c 0%,#14110e 65%);
+  color:#e8dcc8;
+  font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  display:flex;align-items:center;justify-content:center;
+  padding:18px;min-height:100%;
+  -webkit-tap-highlight-color:transparent;
+}
+.app{width:100%;max-width:960px;}
+.screen{display:none;}
+.screen.active{display:block;animation:fadeIn .25s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+
+/* ---------- 卡片 ---------- */
+.card{
+  background:linear-gradient(180deg,#241f19,#1c1814);
+  border:1px solid #3a3128;
+  border-radius:18px;
+  padding:34px 28px;
+  max-width:400px;margin:0 auto;
+  box-shadow:0 24px 60px rgba(0,0,0,.55);
+  text-align:center;
+}
+.card h1{font-size:26px;letter-spacing:2px;margin-bottom:6px;color:#f3e6cc;}
+.card h2{font-size:19px;letter-spacing:1px;margin-bottom:22px;color:#f3e6cc;}
+.logo{
+  width:64px;height:64px;margin:0 auto 16px;
+  border-radius:50%;
+  background:linear-gradient(145deg,#f0d9a8,#d9b877);
+  color:#8a2b22;font-size:34px;line-height:64px;
+  box-shadow:0 8px 24px rgba(224,180,90,.28);
+}
+.sub{color:#8f8371;font-size:13px;margin-bottom:28px;letter-spacing:.5px;}
+.hint{color:#8f8371;font-size:13px;line-height:1.7;margin-top:14px;min-height:20px;}
+.hint.ok{color:#7fc08a;}
+.hint.err{color:#e07a6a;}
+
+.btns{display:flex;flex-direction:column;gap:12px;margin-top:8px;}
+
+.btn{
+  appearance:none;border:none;cursor:pointer;
+  padding:14px 20px;border-radius:12px;
+  font-size:15px;font-weight:600;letter-spacing:1px;
+  font-family:inherit;
+  transition:.18s;
+}
+.btn:active{transform:scale(.97);}
+.btn.primary{
+  background:linear-gradient(180deg,#e8b558,#cf9435);
+  color:#2a1e0c;
+  box-shadow:0 8px 22px rgba(207,148,53,.32);
+}
+.btn.primary:hover{filter:brightness(1.07);}
+.btn.ghost{
+  background:#2b2620;color:#c9bda6;border:1px solid #423a30;
+}
+.btn.ghost:hover{background:#332d26;}
+.btn.small{
+  padding:10px 6px;font-size:13px;font-weight:500;
+  background:#2b2620;color:#c9bda6;border:1px solid #423a30;
+  border-radius:10px;flex:1;
+}
+.btn.small:hover{background:#332d26;color:#e8dcc8;}
+.btn.small.danger:hover{background:#3a201c;color:#e88b7a;border-color:#5c322a;}
+
+input{
+  width:100%;padding:13px 14px;border-radius:11px;
+  background:#141110;border:1px solid #3d352c;color:#e8dcc8;
+  font-size:15px;font-family:inherit;outline:none;transition:.18s;
+}
+input:focus{border-color:#c9963c;box-shadow:0 0 0 3px rgba(201,150,60,.13);}
+label{display:block;text-align:left;font-size:12px;color:#8f8371;margin:14px 0 6px;letter-spacing:1px;}
+
+/* ---------- 主机等待 ---------- */
+.ip-box{
+  background:#141110;border:1px dashed #4a4034;border-radius:14px;
+  padding:18px;margin:4px 0 4px;
+}
+.ip-label{font-size:11px;color:#8f8371;letter-spacing:2px;margin-bottom:8px;}
+.ip-value{
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:20px;color:#f0c46a;letter-spacing:1px;
+}
+.spinner{
+  width:26px;height:26px;margin:22px auto 18px;
+  border:2.5px solid #3a3128;border-top-color:#d9a63f;
+  border-radius:50%;animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ---------- 对局 ---------- */
+.game-layout{
+  display:flex;gap:22px;align-items:flex-start;
+  justify-content:center;flex-wrap:wrap;
+}
+.board-area{flex:1 1 400px;max-width:500px;}
+#board{
+  width:100%;height:auto;display:block;
+  border-radius:14px;
+  box-shadow:0 20px 50px rgba(0,0,0,.6);
+  touch-action:manipulation;
+  cursor:pointer;
+}
+.panel{
+  flex:0 1 240px;min-width:210px;
+  display:flex;flex-direction:column;gap:12px;
+}
+.player-row{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 14px;border-radius:12px;
+  background:#221d18;border:1px solid #332c24;
+  transition:.25s;
+}
+.player-row.active{
+  border-color:#c9963c;
+  background:#2c2419;
+  box-shadow:0 0 0 1px rgba(201,150,60,.25),0 6px 20px rgba(201,150,60,.12);
+}
+.dot{width:11px;height:11px;border-radius:50%;flex:none;background:#4a5568;}
+.player-row.red .dot{background:#c0392b;box-shadow:0 0 8px rgba(192,57,43,.7);}
+.player-row.black .dot{background:#4a5568;box-shadow:0 0 8px rgba(74,85,104,.6);}
+.pname{font-size:14px;color:#cfc3ad;flex:1;}
+.tag{font-size:11px;color:#e0b45a;letter-spacing:1px;}
+
+.status-box{
+  padding:16px 14px;border-radius:12px;
+  background:#1a1613;border:1px solid #332c24;
+  font-size:14px;color:#d8cbb2;text-align:center;
+  line-height:1.5;letter-spacing:.5px;
+}
+.status-box.check{color:#f0a04b;border-color:#5a3d1c;background:#241a10;}
+
+.actions{display:flex;gap:8px;flex-wrap:wrap;}
+.role-hint{font-size:12px;color:#8f8371;text-align:center;letter-spacing:1px;}
+
+/* ---------- 弹层 ---------- */
+.modal-mask{
+  position:fixed;inset:0;background:rgba(8,6,4,.78);
+  display:none;align-items:center;justify-content:center;
+  padding:20px;z-index:50;backdrop-filter:blur(3px);
+}
+.modal-mask.show{display:flex;animation:fadeIn .2s;}
+.modal{
+  background:linear-gradient(180deg,#262019,#1b1713);
+  border:1px solid #453b2f;border-radius:18px;
+  padding:32px 28px;max-width:320px;width:100%;text-align:center;
+  box-shadow:0 24px 70px rgba(0,0,0,.7);
+}
+.modal-title{font-size:24px;letter-spacing:3px;color:#f0c46a;margin-bottom:8px;}
+.modal-sub{font-size:13px;color:#8f8371;margin-bottom:26px;letter-spacing:1px;min-height:18px;}
+.modal .btns{flex-direction:row;gap:10px;}
+.modal .btn{flex:1;padding:12px;font-size:14px;}
+
+.toast{
+  position:fixed;left:50%;bottom:38px;transform:translate(-50%,16px);
+  background:rgba(40,34,27,.96);border:1px solid #4a4034;
+  color:#e8dcc8;font-size:13px;padding:11px 20px;border-radius:10px;
+  opacity:0;pointer-events:none;transition:.25s;z-index:99;
+  white-space:nowrap;letter-spacing:.5px;
+}
+.toast.show{opacity:1;transform:translate(-50%,0);}
+
+@media(max-width:640px){
+  .card{padding:28px 22px;}
+  .game-layout{gap:14px;}
+  .panel{flex:1 1 100%;min-width:0;flex-direction:row;flex-wrap:wrap;}
+  .player-row{flex:1 1 45%;padding:10px;}
+  .status-box{flex:1 1 100%;padding:13px;}
+  .actions{flex:1 1 100%;}
+  .role-hint{flex:1 1 100%;}
+}

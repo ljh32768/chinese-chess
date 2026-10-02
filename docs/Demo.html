@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>局域网象棋 · MVP 演示</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    background:radial-gradient(circle at 50% 0%,#2b241c 0%,#14110e 65%);
+    color:#e8dcc8;
+    font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex;align-items:center;justify-content:center;
+    padding:18px;min-height:100%;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .app{width:100%;max-width:960px;}
+  .screen{display:none;}
+  .screen.active{display:block;animation:fadeIn .25s ease;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+
+  /* ---------- 卡片 ---------- */
+  .card{
+    background:linear-gradient(180deg,#241f19,#1c1814);
+    border:1px solid #3a3128;
+    border-radius:18px;
+    padding:34px 28px;
+    max-width:400px;margin:0 auto;
+    box-shadow:0 24px 60px rgba(0,0,0,.55);
+    text-align:center;
+  }
+  .card h1{font-size:26px;letter-spacing:2px;margin-bottom:6px;color:#f3e6cc;}
+  .card h2{font-size:19px;letter-spacing:1px;margin-bottom:22px;color:#f3e6cc;}
+  .logo{
+    width:64px;height:64px;margin:0 auto 16px;
+    border-radius:50%;
+    background:linear-gradient(145deg,#f0d9a8,#d9b877);
+    color:#8a2b22;font-size:34px;line-height:64px;
+    box-shadow:0 8px 24px rgba(224,180,90,.28);
+  }
+  .sub{color:#8f8371;font-size:13px;margin-bottom:28px;letter-spacing:.5px;}
+  .hint{color:#8f8371;font-size:13px;line-height:1.7;margin-top:14px;min-height:20px;}
+  .hint.ok{color:#7fc08a;}
+  .hint.err{color:#e07a6a;}
+
+  .btns{display:flex;flex-direction:column;gap:12px;margin-top:8px;}
+
+  .btn{
+    appearance:none;border:none;cursor:pointer;
+    padding:14px 20px;border-radius:12px;
+    font-size:15px;font-weight:600;letter-spacing:1px;
+    font-family:inherit;
+    transition:.18s;
+  }
+  .btn:active{transform:scale(.97);}
+  .btn.primary{
+    background:linear-gradient(180deg,#e8b558,#cf9435);
+    color:#2a1e0c;
+    box-shadow:0 8px 22px rgba(207,148,53,.32);
+  }
+  .btn.primary:hover{filter:brightness(1.07);}
+  .btn.ghost{
+    background:#2b2620;color:#c9bda6;border:1px solid #423a30;
+  }
+  .btn.ghost:hover{background:#332d26;}
+  .btn.small{
+    padding:10px 6px;font-size:13px;font-weight:500;
+    background:#2b2620;color:#c9bda6;border:1px solid #423a30;
+    border-radius:10px;flex:1;
+  }
+  .btn.small:hover{background:#332d26;color:#e8dcc8;}
+  .btn.small.danger:hover{background:#3a201c;color:#e88b7a;border-color:#5c322a;}
+
+  input{
+    width:100%;padding:13px 14px;border-radius:11px;
+    background:#141110;border:1px solid #3d352c;color:#e8dcc8;
+    font-size:15px;font-family:inherit;outline:none;transition:.18s;
+  }
+  input:focus{border-color:#c9963c;box-shadow:0 0 0 3px rgba(201,150,60,.13);}
+  label{display:block;text-align:left;font-size:12px;color:#8f8371;margin:14px 0 6px;letter-spacing:1px;}
+
+  /* ---------- 主机等待 ---------- */
+  .ip-box{
+    background:#141110;border:1px dashed #4a4034;border-radius:14px;
+    padding:18px;margin:4px 0 4px;
+  }
+  .ip-label{font-size:11px;color:#8f8371;letter-spacing:2px;margin-bottom:8px;}
+  .ip-value{
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:20px;color:#f0c46a;letter-spacing:1px;
+  }
+  .spinner{
+    width:26px;height:26px;margin:22px auto 18px;
+    border:2.5px solid #3a3128;border-top-color:#d9a63f;
+    border-radius:50%;animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* ---------- 对局 ---------- */
+  .game-layout{
+    display:flex;gap:22px;align-items:flex-start;
+    justify-content:center;flex-wrap:wrap;
+  }
+  .board-area{flex:1 1 400px;max-width:500px;}
+  #board{
+    width:100%;height:auto;display:block;
+    border-radius:14px;
+    box-shadow:0 20px 50px rgba(0,0,0,.6);
+    touch-action:manipulation;
+    cursor:pointer;
+  }
+  .panel{
+    flex:0 1 240px;min-width:210px;
+    display:flex;flex-direction:column;gap:12px;
+  }
+  .player-row{
+    display:flex;align-items:center;gap:10px;
+    padding:12px 14px;border-radius:12px;
+    background:#221d18;border:1px solid #332c24;
+    transition:.25s;
+  }
+  .player-row.active{
+    border-color:#c9963c;
+    background:#2c2419;
+    box-shadow:0 0 0 1px rgba(201,150,60,.25),0 6px 20px rgba(201,150,60,.12);
+  }
+  .dot{width:11px;height:11px;border-radius:50%;flex:none;}
+  .player-row.red .dot{background:#c0392b;box-shadow:0 0 8px rgba(192,57,43,.7);}
+  .player-row.black .dot{background:#4a5568;box-shadow:0 0 8px rgba(74,85,104,.6);}
+  .pname{font-size:14px;color:#cfc3ad;flex:1;}
+  .tag{font-size:11px;color:#e0b45a;letter-spacing:1px;}
+
+  .status-box{
+    padding:16px 14px;border-radius:12px;
+    background:#1a1613;border:1px solid #332c24;
+    font-size:14px;color:#d8cbb2;text-align:center;
+    line-height:1.5;letter-spacing:.5px;
+  }
+  .status-box.check{color:#f0a04b;border-color:#5a3d1c;background:#241a10;}
+
+  .actions{display:flex;gap:8px;flex-wrap:wrap;}
+
+  /* ---------- 弹层 ---------- */
+  .modal-mask{
+    position:fixed;inset:0;background:rgba(8,6,4,.78);
+    display:none;align-items:center;justify-content:center;
+    padding:20px;z-index:50;backdrop-filter:blur(3px);
+  }
+  .modal-mask.show{display:flex;animation:fadeIn .2s;}
+  .modal{
+    background:linear-gradient(180deg,#262019,#1b1713);
+    border:1px solid #453b2f;border-radius:18px;
+    padding:32px 28px;max-width:320px;width:100%;text-align:center;
+    box-shadow:0 24px 70px rgba(0,0,0,.7);
+  }
+  .modal-title{font-size:24px;letter-spacing:3px;color:#f0c46a;margin-bottom:8px;}
+  .modal-sub{font-size:13px;color:#8f8371;margin-bottom:26px;letter-spacing:1px;}
+  .modal .btns{flex-direction:row;gap:10px;}
+  .modal .btn{flex:1;padding:12px;font-size:14px;}
+
+  .toast{
+    position:fixed;left:50%;bottom:38px;transform:translate(-50%,16px);
+    background:rgba(40,34,27,.96);border:1px solid #4a4034;
+    color:#e8dcc8;font-size:13px;padding:11px 20px;border-radius:10px;
+    opacity:0;pointer-events:none;transition:.25s;z-index:99;
+    white-space:nowrap;letter-spacing:.5px;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+
+  @media(max-width:640px){
+    .card{padding:28px 22px;}
+    .game-layout{gap:14px;}
+    .panel{flex:1 1 100%;min-width:0;flex-direction:row;flex-wrap:wrap;}
+    .player-row{flex:1 1 45%;padding:10px;}
+    .status-box{flex:1 1 100%;padding:13px;}
+    .actions{flex:1 1 100%;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ========== 首页 ========== -->
+  <section id="screen-home" class="screen active">
+    <div class="card">
+      <div class="logo">♟</div>
+      <h1>局域网象棋</h1>
+      <p class="sub">MVP 演示 · 无需后端</p>
+      <div class="btns">
+        <button class="btn primary" onclick="startHosting()">创建对局</button>
+        <button class="btn ghost" onclick="showJoin()">加入对局</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 主机等待 ========== -->
+  <section id="screen-host" class="screen">
+    <div class="card">
+      <h2>等待对手加入</h2>
+      <div class="ip-box">
+        <div class="ip-label">本机地址</div>
+        <div class="ip-value" id="host-ip">—</div>
+      </div>
+      <div class="spinner"></div>
+      <p class="hint" id="host-wait">请让对方在「加入对局」中输入上方地址</p>
+      <div class="btns" style="margin-top:22px;">
+        <button class="btn ghost" onclick="cancelHost()">取消</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 加入 ========== -->
+  <section id="screen-join" class="screen">
+    <div class="card">
+      <h2>加入对局</h2>
+      <label>主机地址</label>
+      <input id="join-ip" value="192.168.1.42" autocomplete="off">
+      <label>端口</label>
+      <input id="join-port" value="7777" autocomplete="off">
+      <p class="hint" id="join-msg"></p>
+      <div class="btns" style="margin-top:18px;">
+        <button class="btn primary" onclick="doJoin()">连接</button>
+        <button class="btn ghost" onclick="show('screen-home')">返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 对局 ========== -->
+  <section id="screen-game" class="screen">
+    <div class="game-layout">
+      <div class="board-area">
+        <svg id="board" viewBox="0 0 516 572" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <aside class="panel">
+        <div class="player-row black" id="p-black">
+          <span class="dot"></span>
+          <span class="pname">黑方 · 对手</span>
+          <span class="tag" id="tag-black"></span>
+        </div>
+        <div class="player-row red" id="p-red">
+          <span class="dot"></span>
+          <span class="pname">红方 · 你</span>
+          <span class="tag" id="tag-red"></span>
+        </div>
+        <div class="status-box" id="status-box">准备开始</div>
+        <div class="actions">
+          <button class="btn small" onclick="resign()">认输</button>
+          <button class="btn small" onclick="offerDraw()">和棋</button>
+          <button class="btn small" onclick="restart()">重开</button>
+          <button class="btn small danger" onclick="leave()">离开</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+</div>
+
+<!-- ========== 结束弹层 ========== -->
+<div class="modal-mask" id="modal">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">红方胜</div>
+    <div class="modal-sub" id="modal-sub">将死</div>
+    <div class="btns">
+      <button class="btn primary" onclick="restart()">再来一局</button>
+      <button class="btn ghost" onclick="leave()">返回首页</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   常量与棋盘坐标
+   ========================================================= */
+const CELL = 56, PAD = 34, R = 24;
+const VBW = 8 * CELL + PAD * 2;   // 516
+const VBH = 9 * CELL + PAD * 2;   // 572
+const X = c => PAD + c * CELL;
+const Y = r => PAD + r * CELL;
+
+const NAME = {
+  r: { K:'帅', A:'仕', B:'相', N:'马', R:'车', C:'炮', P:'兵' },
+  b: { K:'将', A:'士', B:'象', N:'马', R:'车', C:'炮', P:'卒' }
+};
+const VALUE = { K:1000, R:90, N:45, C:45, B:20, A:20, P:10 };
+
+/* =========================================================
+   全局对局状态
+   ========================================================= */
+const G = {
+  board: null,
+  turn: 'r',
+  selected: null,
+  moves: [],
+  lastMove: null,
+  status: 'idle',      // idle | playing | over
+  winner: null,        // 'r' | 'b' | null
+  reason: '',
+  check: false,
+  seq: 0
+};
+
+/* =========================================================
+   规则引擎
+   ========================================================= */
+const inBoard = (r,c) => r >= 0 && r < 10 && c >= 0 && c < 9;
+function inPalace(r,c,s){
+  if (c < 3 || c > 5) return false;
+  return s === 'r' ? (r >= 7 && r <= 9) : (r >= 0 && r <= 2);
+}
+
+function initBoard(){
+  const b = Array.from({length:10}, () => Array(9).fill(null));
+  const back = ['R','N','B','A','K','A','B','N','R'];
+  for (let c = 0; c < 9; c++){
+    b[0][c] = { t: back[c], s: 'b' };
+    b[9][c] = { t: back[c], s: 'r' };
+  }
+  b[2][1] = { t:'C', s:'b' }; b[2][7] = { t:'C', s:'b' };
+  b[7][1] = { t:'C', s:'r' }; b[7][7] = { t:'C', s:'r' };
+  for (const c of [0,2,4,6,8]){
+    b[3][c] = { t:'P', s:'b' };
+    b[6][c] = { t:'P', s:'r' };
+  }
+  return b;
+}
+
+/* 生成某棋子的「伪合法」走法（未过滤送将） */
+function pieceMoves(b, r, c){
+  const p = b[r][c];
+  if (!p) return [];
+  const s = p.s, res = [];
+  const push = (rr,cc) => { if (inBoard(rr,cc)) res.push([rr,cc]); };
+
+  switch (p.t){
+    case 'K':
+      for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const rr = r+dr, cc = c+dc;
+        if (inPalace(rr,cc,s) && !(b[rr][cc] && b[rr][cc].s === s)) res.push([rr,cc]);
+      }
+      break;
+
+    case 'A':
+      for (const [dr,dc] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+        const rr = r+dr, cc = c+dc;
+        if (inPalace(rr,cc,s) && !(b[rr][cc] && b[rr][cc].s === s)) res.push([rr,cc]);
+      }
+      break;
+
+    case 'B':
+      for (const [dr,dc] of [[2,2],[2,-2],[-2,2],[-2,-2]]){
+        const rr = r+dr, cc = c+dc;
+        if (!inBoard(rr,cc)) continue;
+        if (s === 'r' && rr < 5) continue;   // 红相不过河
+        if (s === 'b' && rr > 4) continue;   // 黑象不过河
+        if (b[r+dr/2][c+dc/2]) continue;     // 塞象眼
+        const q = b[rr][cc];
+        if (q && q.s === s) continue;
+        res.push([rr,cc]);
+      }
+      break;
+
+    case 'N': {
+      const jumps = [
+        [-2,-1,-1, 0], [-2, 1,-1, 0], [ 2,-1, 1, 0], [ 2, 1, 1, 0],
+        [-1,-2, 0,-1], [ 1,-2, 0,-1], [-1, 2, 0, 1], [ 1, 2, 0, 1]
+      ];
+      for (const [dr,dc,br,bc] of jumps){
+        const rr = r+dr, cc = c+dc;
+        if (!inBoard(rr,cc)) continue;
+        if (b[r+br][c+bc]) continue;         // 蹩马腿
+        const q = b[rr][cc];
+        if (q && q.s === s) continue;
+        res.push([rr,cc]);
+      }
+      break;
+    }
+
+    case 'R':
+      for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        let rr = r+dr, cc = c+dc;
+        while (inBoard(rr,cc)){
+          const q = b[rr][cc];
+          if (q){
+            if (q.s !== s) res.push([rr,cc]);
+            break;
+          }
+          res.push([rr,cc]);
+          rr += dr; cc += dc;
+        }
+      }
+      break;
+
+    case 'C':
+      for (const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        let rr = r+dr, cc = c+dc, jumped = false;
+        while (inBoard(rr,cc)){
+          const q = b[rr][cc];
+          if (!jumped){
+            if (q) jumped = true;
+            else res.push([rr,cc]);
+          } else if (q){
+            if (q.s !== s) res.push([rr,cc]);
+            break;
+          }
+          rr += dr; cc += dc;
+        }
+      }
+      break;
+
+    case 'P': {
+      const fwd = s === 'r' ? -1 : 1;
+      const rr = r + fwd;
+      if (inBoard(rr,c)){
+        const q = b[rr][c];
+        if (!q || q.s !== s) res.push([rr,c]);
+      }
+      const crossed = s === 'r' ? r <= 4 : r >= 5;
+      if (crossed){
+        for (const dc of [-1,1]){
+          const cc = c + dc;
+          if (!inBoard(r,cc)) continue;
+          const q = b[r][cc];
+          if (!q || q.s !== s) res.push([r,cc]);
+        }
+      }
+      break;
+    }
+  }
+  return res;
+}
+
+function findKing(b, s){
+  for (let r = 0; r < 10; r++)
+    for (let c = 0; c < 9; c++){
+      const p = b[r][c];
+      if (p && p.t === 'K' && p.s === s) return [r,c];
+    }
+  return null;
+}
+
+/* 判断 (r,c) 是否被 by 方攻击（含将帅照面） */
+function isAttacked(b, r, c, by){
+  const target = b[r][c];
+  if (target && target.t === 'K'){
+    for (let i = 0; i < 10; i++){
+      const p = b[i][c];
+      if (p && p.t === 'K' && p.s === by){
+        let blocked = false;
+        const lo = Math.min(i,r), hi = Math.max(i,r);
+        for (let k = lo + 1; k < hi; k++) if (b[k][c]) { blocked = true; break; }
+        if (!blocked) return true;
+      }
+    }
+  }
+  for (let i = 0; i < 10; i++)
+    for (let j = 0; j < 9; j++){
+      const p = b[i][j];
+      if (!p || p.s !== by) continue;
+      for (const [rr,cc] of pieceMoves(b,i,j))
+        if (rr === r && cc === c) return true;
+    }
+  return false;
+}
+
+function cloneBoard(b){
+  return b.map(row => row.map(x => x ? { t:x.t, s:x.s } : null));
+}
+
+/* 过滤掉会导致自己被将军的走法 */
+function legalMoves(b, r, c){
+  const p = b[r][c];
+  if (!p) return [];
+  const opp = p.s === 'r' ? 'b' : 'r';
+  return pieceMoves(b, r, c).filter(([rr,cc]) => {
+    const nb = cloneBoard(b);
+    nb[rr][cc] = nb[r][c];
+    nb[r][c] = null;
+    const kp = findKing(nb, p.s);
+    if (!kp) return false;
+    return !isAttacked(nb, kp[0], kp[1], opp);
+  });
+}
+
+/* =========================================================
+   渲染
+   ========================================================= */
+function render(){
+  let h = '';
+  h += `<rect x="0" y="0" width="${VBW}" height="${VBH}" fill="#e9cb8d" rx="6"/>`;
+  h += `<rect x="4" y="4" width="${VBW-8}" height="${VBH-8}" fill="none" stroke="#c9a768" stroke-width="1" rx="5" opacity=".6"/>`;
+
+  const line = (x1,y1,x2,y2,w=1.4,op=.8) =>
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#6b4f2a" stroke-width="${w}" opacity="${op}" stroke-linecap="round"/>`;
+
+  for (let i = 0; i < 10; i++) h += line(X(0), Y(i), X(8), Y(i));
+  for (let c = 0; c < 9; c++){
+    if (c === 0 || c === 8){
+      h += line(X(c), Y(0), X(c), Y(9));
+    } else {
+      h += line(X(c), Y(0), X(c), Y(4));
+      h += line(X(c), Y(5), X(c), Y(9));
+    }
+  }
+  h += line(X(3), Y(0), X(5), Y(2));
+  h += line(X(5), Y(0), X(3), Y(2));
+  h += line(X(3), Y(7), X(5), Y(9));
+  h += line(X(5), Y(7), X(3), Y(9));
+  h += `<rect x="${X(0)}" y="${Y(0)}" width="${8*CELL}" height="${9*CELL}" fill="none" stroke="#6b4f2a" stroke-width="2.6"/>`;
+
+  h += `<text x="${X(2)}" y="${Y(4.5)+9}" text-anchor="middle" font-size="23" fill="#8a6b3f" opacity=".55" letter-spacing="8" font-family="serif">楚河</text>`;
+  h += `<text x="${X(6)}" y="${Y(4.5)+9}" text-anchor="middle" font-size="23" fill="#8a6b3f" opacity=".55" letter-spacing="8" font-family="serif">汉界</text>`;
+
+  // 上一步高亮
+  if (G.lastMove){
+    for (const [r,c] of [G.lastMove.from, G.lastMove.to]){
+      h += `<circle cx="${X(c)}" cy="${Y(r)}" r="${R+5}" fill="none" stroke="#d4a017" stroke-width="2.5" opacity=".65"/>`;
+    }
+  }
+
+  // 合法落点
+  for (const [r,c] of G.moves){
+    if (G.board[r][c]){
+      h += `<circle cx="${X(c)}" cy="${Y(r)}" r="${R+3}" fill="none" stroke="#2e8b57" stroke-width="3.2" opacity=".9"/>`;
+    } else {
+      h += `<circle cx="${X(c)}" cy="${Y(r)}" r="7" fill="#2e8b57" opacity=".55"/>`;
+    }
+  }
+
+  // 棋子
+  for (let r = 0; r < 10; r++)
+    for (let c = 0; c < 9; c++){
+      const p = G.board[r][c];
+      if (!p) continue;
+      const x = X(c), y = Y(r);
+      const red = p.s === 'r';
+      const stroke = red ? '#b3261e' : '#22303c';
+      const fill   = red ? '#fdf2e0' : '#f6f2ea';
+      h += `<g>
+        <circle cx="${x}" cy="${y+2}" r="${R}" fill="rgba(60,40,15,.22)"/>
+        <circle cx="${x}" cy="${y}" r="${R}" fill="${fill}" stroke="${stroke}" stroke-width="2.1"/>
+        <circle cx="${x}" cy="${y}" r="${R-4.5}" fill="none" stroke="${stroke}" stroke-width="1" opacity=".4"/>
+        <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central"
+              font-size="25" font-weight="700" fill="${stroke}"
+              font-family="'PingFang SC','Microsoft YaHei',serif">${NAME[p.s][p.t]}</text>
+      </g>`;
+    }
+
+  // 选中环
+  if (G.selected){
+    const [r,c] = G.selected;
+    h += `<circle cx="${X(c)}" cy="${Y(r)}" r="${R+4}" fill="none" stroke="#f0b429" stroke-width="3.5"/>`;
+  }
+
+  document.getElementById('board').innerHTML = h;
+  updatePanel();
+}
+
+function updatePanel(){
+  const st = document.getElementById('status-box');
+  const tagR = document.getElementById('tag-red');
+  const tagB = document.getElementById('tag-black');
+  const rowR = document.getElementById('p-red');
+  const rowB = document.getElementById('p-black');
+
+  tagR.textContent = (G.status === 'playing' && G.turn === 'r') ? '走棋中' : '';
+  tagB.textContent = (G.status === 'playing' && G.turn === 'b') ? '走棋中' : '';
+  rowR.classList.toggle('active', G.status === 'playing' && G.turn === 'r');
+  rowB.classList.toggle('active', G.status === 'playing' && G.turn === 'b');
+
+  st.classList.toggle('check', G.status === 'playing' && G.check);
+
+  if (G.status === 'over'){
+    const w = G.winner === 'r' ? '红方胜' : G.winner === 'b' ? '黑方胜' : '和棋';
+    st.textContent = `${w} · ${G.reason}`;
+  } else if (G.check){
+    st.textContent = G.turn === 'r' ? '⚠ 你被将军了' : '⚠ 对方被将军';
+  } else {
+    st.textContent = G.turn === 'r' ? '轮到你走棋' : '对方思考中…';
+  }
+}
+
+/* =========================================================
+   流程控制
+   ========================================================= */
+function show(id){
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+let hostToken = 0;
+function startHosting(){
+  const t = ++hostToken;
+  const ip = '192.168.1.' + (Math.floor(Math.random() * 180) + 20);
+  document.getElementById('host-ip').textContent = ip + ':7777';
+  document.getElementById('host-wait').textContent = '请让对方在「加入对局」中输入上方地址';
+  show('screen-host');
+
+  setTimeout(() => {
+    if (t !== hostToken) return;
+    document.getElementById('host-wait').textContent = '对手已加入，正在开局…';
+    setTimeout(() => { if (t === hostToken) startGame(); }, 800);
+  }, 2600);
+}
+function cancelHost(){ hostToken++; show('screen-home'); }
+
+function showJoin(){
+  document.getElementById('join-msg').textContent = '';
+  document.getElementById('join-msg').className = 'hint';
+  show('screen-join');
+}
+
+let joinToken = 0;
+function doJoin(){
+  const ip = document.getElementById('join-ip').value.trim();
+  const port = document.getElementById('join-port').value.trim();
+  const msg = document.getElementById('join-msg');
+  if (!ip || !port){ toast('请输入地址和端口'); return; }
+
+  const t = ++joinToken;
+  msg.textContent = `正在连接 ${ip}:${port} …`;
+  msg.className = 'hint';
+
+  setTimeout(() => {
+    if (t !== joinToken) return;
+    msg.textContent = '连接成功，正在开局…';
+    msg.className = 'hint ok';
+    setTimeout(() => { if (t === joinToken) startGame(); }, 650);
+  }, 1400);
+}
+
+function startGame(){
+  document.getElementById('modal').classList.remove('show');
+  clearTimeout(aiTimer);
+  G.board = initBoard();
+  G.turn = 'r';
+  G.selected = null;
+  G.moves = [];
+  G.lastMove = null;
+  G.status = 'playing';
+  G.winner = null;
+  G.reason = '';
+  G.check = false;
+  G.seq = 0;
+  show('screen-game');
+  render();
+}
+
+/* =========================================================
+   点击走子
+   ========================================================= */
+function svgPoint(e){
+  const svg = document.getElementById('board');
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const scale = Math.min(rect.width / vb.width, rect.height / vb.height);
+  const offX = (rect.width  - vb.width  * scale) / 2;
+  const offY = (rect.height - vb.height * scale) / 2;
+  return {
+    x: (e.clientX - rect.left - offX) / scale,
+    y: (e.clientY - rect.top  - offY) / scale
+  };
+}
+
+document.getElementById('board').addEventListener('click', e => {
+  if (G.status !== 'playing') return;
+  if (G.turn !== 'r'){ toast('还没轮到你走棋'); return; }
+
+  const pt = svgPoint(e);
+  const c = Math.round((pt.x - PAD) / CELL);
+  const r = Math.round((pt.y - PAD) / CELL);
+  if (!inBoard(r,c)) return;
+  if (Math.hypot(pt.x - X(c), pt.y - Y(r)) > CELL * 0.52) return;
+
+  onCellClick(r, c);
+});
+
+function onCellClick(r, c){
+  const p = G.board[r][c];
+
+  if (G.selected){
+    const [sr, sc] = G.selected;
+
+    // 走到合法点
+    if (G.moves.some(([rr,cc]) => rr === r && cc === c)){
+      applyMove([sr,sc], [r,c]);
+      render();
+      scheduleAI();
+      return;
+    }
+    // 换选自己的另一颗子
+    if (p && p.s === 'r'){
+      G.selected = [r,c];
+      G.moves = legalMoves(G.board, r, c);
+      render();
+      return;
+    }
+    // 取消选中
+    G.selected = null;
+    G.moves = [];
+    render();
+    return;
+  }
+
+  if (p && p.s === 'r'){
+    G.selected = [r,c];
+    G.moves = legalMoves(G.board, r, c);
+    render();
+  } else if (p){
+    toast('这是对方的棋子');
+  }
+}
+
+/* =========================================================
+   落子 / 判定
+   ========================================================= */
+function applyMove(from, to){
+  const [fr,fc] = from, [tr,tc] = to;
+  const p = G.board[fr][fc];
+  if (!p) return;
+
+  G.board[tr][tc] = p;
+  G.board[fr][fc] = null;
+  G.lastMove = { from, to };
+  G.selected = null;
+  G.moves = [];
+  G.seq++;
+  G.turn = G.turn === 'r' ? 'b' : 'r';
+
+  const side = G.turn;
+  const kp = findKing(G.board, side);
+  const inCheck = kp ? isAttacked(G.board, kp[0], kp[1], side === 'r' ? 'b' : 'r') : true;
+  G.check = inCheck;
+
+  // 是否还有合法着法
+  let hasMove = false;
+  outer:
+  for (let r = 0; r < 10; r++)
+    for (let c = 0; c < 9; c++){
+      const q = G.board[r][c];
+      if (q && q.s === side && legalMoves(G.board, r, c).length){
+        hasMove = true;
+        break outer;
+      }
+    }
+
+  if (!hasMove){
+    G.status = 'over';
+    G.winner = side === 'r' ? 'b' : 'r';
+    G.reason = inCheck ? '将死' : '困毙';
+    setTimeout(showGameOver, 420);
+  }
+}
+
+function showGameOver(){
+  document.getElementById('modal-title').textContent =
+    G.winner === 'r' ? '红方胜' : G.winner === 'b' ? '黑方胜' : '和棋';
+  document.getElementById('modal-sub').textContent = G.reason || '';
+  document.getElementById('modal').classList.add('show');
+  updatePanel();
+}
+
+/* =========================================================
+   模拟对手（演示用）
+   ========================================================= */
+let aiTimer = null;
+function scheduleAI(){
+  clearTimeout(aiTimer);
+  if (G.status !== 'playing' || G.turn !== 'b') return;
+  aiTimer = setTimeout(() => {
+    if (G.status !== 'playing' || G.turn !== 'b') return;
+    const m = aiMove();
+    if (!m) return;
+    applyMove(m.from, m.to);
+    render();
+  }, 800);
+}
+
+function aiMove(){
+  let best = null, bestScore = -Infinity;
+  for (let r = 0; r < 10; r++)
+    for (let c = 0; c < 9; c++){
+      const p = G.board[r][c];
+      if (!p || p.s !== 'b') continue;
+      for (const [rr,cc] of legalMoves(G.board, r, c)){
+        const cap = G.board[rr][cc];
+        let score = cap ? VALUE[cap.t] * 10 : 0;
+        score += Math.random() * 9;
+        if (score > bestScore){
+          bestScore = score;
+          best = { from:[r,c], to:[rr,cc] };
+        }
+      }
+    }
+  return best;
+}
+
+/* =========================================================
+   对局操作
+   ========================================================= */
+function resign(){
+  if (G.status !== 'playing') return;
+  G.status = 'over';
+  G.winner = 'b';
+  G.reason = '红方认输';
+  clearTimeout(aiTimer);
+  updatePanel();
+  showGameOver();
+}
+
+function offerDraw(){
+  if (G.status !== 'playing') return;
+  toast('已发送和棋请求…');
+  setTimeout(() => {
+    if (G.status !== 'playing') return;
+    toast('对方同意和棋');
+    G.status = 'over';
+    G.winner = null;
+    G.reason = '双方同意和棋';
+    clearTimeout(aiTimer);
+    updatePanel();
+    showGameOver();
+  }, 1300);
+}
+
+function restart(){
+  startGame();
+}
+
+function leave(){
+  clearTimeout(aiTimer);
+  hostToken++;
+  joinToken++;
+  G.status = 'idle';
+  document.getElementById('modal').classList.remove('show');
+  show('screen-home');
+}
+
+/* =========================================================
+   Toast
+   ========================================================= */
+let toastTimer;
+function toast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1700);
+}
+</script>
+</body>
+</html>

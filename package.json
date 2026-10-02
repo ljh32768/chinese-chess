@@ -1,0 +1,24 @@
+{
+  "name": "lan-chess",
+  "version": "0.1.0",
+  "private": true,
+  "description": "局域网两人中国象棋 MVP（主机权威 + WebSocket + 纯 TS 规则引擎）",
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "test": "vitest run",
+    "host": "node dist/server/cli.js",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/ws": "^8.5.12",
+    "electron": "^33.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
