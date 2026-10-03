@@ -5,8 +5,18 @@ Electron 桌面端与浏览器共用同一套渲染页面。
 
 > 一句话：局域网内两台设备连上后，能完整、正确地下一盘棋。
 
-- 版本：v0.1.0
-- 状态：MVP 已实现并通过全部测试
+- 版本：v1.3（v0.1.0 为 MVP 代码基线；v1.1–v1.3 为 A–D 四档优化迭代）
+- 状态：A、B、C、D 四档优化全部完成；135 项自动化测试通过，lint / format / build / CI 全绿
+- 更新日期：2026-10-03
+
+版本里程碑：
+
+| 版本 | 内容 | 记录 |
+|---|---|---|
+| v0.1.0 | MVP：创建/加入对局、走子与裁判、认输/和棋/重开、断线提示、Electron 与浏览器共用页面 | commits `5bcd5cb` … `34c6f36` |
+| v1.1 | A 档 快速见效：错误提示、地址复制、弹层交互与等待态、大屏布局、悬停反馈、快捷键、矮窗口修复 | commit `d3065ad` |
+| v1.2 | B 档 稳健性：断线重连宽限、终局清理 pending、静态路径加固、协议清理 | commit `2f1b609` |
+| v1.3 | C 档 工程化 + D 档 功能扩展：CI/lint/format、dev 脚本、安装包打包、主机日志；局域网主机发现、棋谱/吃子/悔棋、观战、人机对战与计时读秒 | commit `e22f7b0` |
 
 ---
 
@@ -16,8 +26,8 @@ Electron 桌面端与浏览器共用同一套渲染页面。
 |---|---|---|
 | [Product-plan.md](./Product-plan.md) | 产品设计文档（v0.1） | 定位、范围、流程、验收标准 |
 | [Technical-solution.md](./Technical-solution.md) | 技术方案（v1.0） | 架构选型与总体设计 |
-| [adr/](./adr/) | ADR 架构决策 + 模块详细规格 | **各功能入口的详细 spec，见第 5 节** |
-| [Optimization-plan.md](./Optimization-plan.md) | 优化建议与路线图 | 分档列出现状问题、建议方案、代码落点与已完成项 |
+| [adr/](./adr/) | ADR 架构决策 + 模块详细规格（0001–0009） | **各功能入口的详细 spec，见第 5 节** |
+| [Optimization-plan.md](./Optimization-plan.md) | 优化路线图（v1.3） | A–D 四档全部完成；分档列出现状问题、方案、代码落点与完成记录 |
 | [Demo.html](./Demo.html) | 单文件界面原型 | 仅验证界面布局与操作流程，无真实网络 |
 
 ---
@@ -76,6 +86,10 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
                  │ 渲染层页面    │                │ 打开主机 HTTP │
                  └─────────────┘                └──────────────┘
 ```
+
+> v1.3 新增模块：渲染层 [discover.ts](../src/renderer/discover.ts)（局域网主机发现）、
+> 服务端 [ai.ts](../src/server/ai.ts)（人机对战）与 [log.ts](../src/server/log.ts)（主机日志）、
+> 共享层 [notation.ts](../src/shared/notation.ts)（中文记谱）——详见 [ADR-0009](./adr/0009-c-d-extensions.md)。
 
 核心原则（详见 [ADR-0001](./adr/0001-host-authoritative-architecture.md)）：
 
