@@ -17,6 +17,7 @@ Electron 桌面端与浏览器共用同一套渲染页面。
 | [Product-plan.md](./Product-plan.md) | 产品设计文档（v0.1） | 定位、范围、流程、验收标准 |
 | [Technical-solution.md](./Technical-solution.md) | 技术方案（v1.0） | 架构选型与总体设计 |
 | [adr/](./adr/) | ADR 架构决策 + 模块详细规格 | **各功能入口的详细 spec，见第 5 节** |
+| [Optimization-plan.md](./Optimization-plan.md) | 优化建议与路线图 | 分档列出现状问题、建议方案、代码落点与已完成项 |
 | [Demo.html](./Demo.html) | 单文件界面原型 | 仅验证界面布局与操作流程，无真实网络 |
 
 ---
