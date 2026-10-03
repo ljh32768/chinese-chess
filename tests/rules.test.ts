@@ -22,8 +22,7 @@ function makeBoard(pieces: Array<[number, number, PieceType, Side]>): Board {
 }
 
 /** 把 Pos[] 转成 "r,c" 集合，便于断言 */
-const keys = (moves: Array<[number, number]>): string[] =>
-  moves.map(([r, c]) => `${r},${c}`).sort();
+const keys = (moves: Array<[number, number]>): string[] => moves.map(([r, c]) => `${r},${c}`).sort();
 
 describe('开局棋盘', () => {
   it('共 32 枚棋子，红黑各 16', () => {
@@ -126,7 +125,12 @@ describe('象走法', () => {
   it('走田字且不过河', () => {
     const b = makeBoard([[5, 2, 'B', 'r']]);
     const k = keys(pieceMoves(b, 5, 2));
-    expect(k).toEqual(keys([[7, 0], [7, 4]])); // 向前的两点会过河，被排除
+    expect(k).toEqual(
+      keys([
+        [7, 0],
+        [7, 4],
+      ]),
+    ); // 向前的两点会过河，被排除
   });
 
   it('塞象眼不能走', () => {
@@ -143,17 +147,36 @@ describe('象走法', () => {
 describe('士与将走法', () => {
   it('士只能在九宫内斜走一格', () => {
     const b = makeBoard([[8, 4, 'A', 'r']]);
-    expect(keys(pieceMoves(b, 8, 4))).toEqual(keys([[7, 3], [7, 5], [9, 3], [9, 5]]));
+    expect(keys(pieceMoves(b, 8, 4))).toEqual(
+      keys([
+        [7, 3],
+        [7, 5],
+        [9, 3],
+        [9, 5],
+      ]),
+    );
   });
 
   it('将只能在九宫内直走一格', () => {
     const b = makeBoard([[9, 4, 'K', 'r']]);
-    expect(keys(pieceMoves(b, 9, 4))).toEqual(keys([[8, 4], [9, 3], [9, 5]]));
+    expect(keys(pieceMoves(b, 9, 4))).toEqual(
+      keys([
+        [8, 4],
+        [9, 3],
+        [9, 5],
+      ]),
+    );
   });
 
   it('将不能走出九宫', () => {
     const b = makeBoard([[1, 3, 'K', 'b']]);
-    expect(keys(pieceMoves(b, 1, 3))).toEqual(keys([[0, 3], [2, 3], [1, 4]]));
+    expect(keys(pieceMoves(b, 1, 3))).toEqual(
+      keys([
+        [0, 3],
+        [2, 3],
+        [1, 4],
+      ]),
+    );
   });
 });
 
@@ -165,12 +188,24 @@ describe('兵/卒走法', () => {
 
   it('过河后可以横走', () => {
     const b = makeBoard([[4, 4, 'P', 'r']]);
-    expect(keys(pieceMoves(b, 4, 4))).toEqual(keys([[3, 4], [4, 3], [4, 5]]));
+    expect(keys(pieceMoves(b, 4, 4))).toEqual(
+      keys([
+        [3, 4],
+        [4, 3],
+        [4, 5],
+      ]),
+    );
   });
 
   it('卒过河后同样可以横走，且前进方向相反', () => {
     const b = makeBoard([[5, 4, 'P', 'b']]);
-    expect(keys(pieceMoves(b, 5, 4))).toEqual(keys([[6, 4], [5, 3], [5, 5]]));
+    expect(keys(pieceMoves(b, 5, 4))).toEqual(
+      keys([
+        [6, 4],
+        [5, 3],
+        [5, 5],
+      ]),
+    );
   });
 });
 

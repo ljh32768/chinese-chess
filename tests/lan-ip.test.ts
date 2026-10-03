@@ -42,7 +42,7 @@ describe('本机局域网地址选择', () => {
   it('跳过虚拟网卡（即使它是唯一候选）', () => {
     const ip = pickLanIp({
       vEthernet: [iface('172.20.48.1')],
-      '以太网': [iface('10.0.0.7')],
+      以太网: [iface('10.0.0.7')],
     });
     expect(ip).toBe('10.0.0.7');
   });

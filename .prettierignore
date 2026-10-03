@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+docs/
+AGENTS.md
+*.html
+src/renderer/styles.css
+package-lock.json

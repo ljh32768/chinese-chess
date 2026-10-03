@@ -102,6 +102,48 @@ describe('Game 状态机', () => {
     expect(g.pendingDraw).toBe('b');
   });
 
+  it('悔棋回退一步并恢复之前局面与回合', () => {
+    const g = new Game();
+    g.reset('playing');
+    g.applyMove([6, 0], [5, 0], 'r');
+    g.applyMove([3, 0], [4, 0], 'b');
+    expect(g.history).toHaveLength(2);
+    expect(g.moveSeq).toBe(2);
+
+    expect(g.undo()).toBe(true);
+    expect(g.moveSeq).toBe(1);
+    expect(g.turn).toBe('b');
+    expect(g.history).toHaveLength(1);
+    expect(g.board[3][0]).toEqual({ t: 'P', s: 'b' }); // 黑卒回到原位
+    expect(g.board[4][0]).toBeNull();
+
+    expect(g.undo()).toBe(true);
+    expect(g.moveSeq).toBe(0);
+    expect(g.turn).toBe('r');
+    expect(g.history).toHaveLength(0);
+    expect(g.board).toEqual(initBoard());
+
+    expect(g.undo()).toBe(false); // 没有可悔的棋
+  });
+
+  it('未开局 / 已终局时不能悔棋', () => {
+    const idle = new Game();
+    expect(idle.undo()).toBe(false);
+
+    const g = new Game();
+    g.reset('playing');
+    g.applyMove([6, 0], [5, 0], 'r');
+    g.resign('r');
+    expect(g.undo()).toBe(false);
+  });
+
+  it('snapshot 包含完整着法序列', () => {
+    const g = new Game();
+    g.reset('playing');
+    g.applyMove([6, 0], [5, 0], 'r');
+    expect(g.snapshot().history).toEqual([{ from: [6, 0], to: [5, 0] }]);
+  });
+
   it('未开始时拒绝走子', () => {
     const g = new Game();
     const r = g.applyMove([6, 0], [5, 0], 'r');

@@ -58,7 +58,15 @@ describe('棋盘渲染标记 boardMarkup', () => {
     const b = emptyBoard();
     b[5][0] = { t: 'R', s: 'r' };
     b[4][4] = { t: 'P', s: 'b' };
-    const h = boardMarkup(view({ board: b, moves: [[4, 0], [4, 4]] }));
+    const h = boardMarkup(
+      view({
+        board: b,
+        moves: [
+          [4, 0],
+          [4, 4],
+        ],
+      }),
+    );
     expect(h).toContain('r="7"'); // 空位落点小圆点
     expect(h).toContain('stroke-width="3.2"'); // 可吃子空心环
     expect(h).toContain('class="mv mv-dot"'); // 悬停 / 光标样式标记

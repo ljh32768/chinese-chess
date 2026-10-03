@@ -4,7 +4,7 @@
  */
 
 import { BrowserWindow, app } from 'electron';
-import { HostServer } from '../server/host-server.js';
+import { HostServer, listenWithFallback } from '../server/host-server.js';
 
 let server: HostServer | null = null;
 let port = 0;
@@ -12,16 +12,10 @@ let port = 0;
 async function ensureServer(): Promise<number> {
   if (server) return port;
   const preferred = Number(process.env.LANSCHESS_PORT ?? 7777);
-  const first = new HostServer({ port: preferred });
-  try {
-    port = await first.listen();
-    server = first;
-  } catch {
-    // 端口被占用时退回随机端口，保证程序不崩溃
-    const fallback = new HostServer({ port: 0 });
-    port = await fallback.listen();
-    server = fallback;
-  }
+  // Electron 模式下端口被占用时始终回退随机端口，保证程序不崩溃（与 CLI 的显式端口策略不同）
+  const started = await listenWithFallback(preferred, false);
+  server = started.server;
+  port = started.port;
   return port;
 }
 

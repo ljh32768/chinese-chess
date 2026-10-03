@@ -167,6 +167,32 @@ label{display:block;text-align:left;font-size:12px;color:#8f8371;margin:14px 0 6
 }
 .req-hint[hidden]{display:none;}
 
+/* 棋谱与吃子（D2） */
+.history-box{
+  display:flex;flex-direction:column;gap:6px;
+  background:#1a1613;border:1px solid #332c24;border-radius:12px;
+  padding:10px 12px;
+}
+.box-title{font-size:11px;color:#8f8371;letter-spacing:2px;}
+.move-list{
+  font-size:12px;color:#cfc3ad;line-height:1.8;
+  max-height:150px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+}
+.captured-box{
+  display:flex;flex-direction:column;gap:4px;
+  background:#1a1613;border:1px solid #332c24;border-radius:12px;
+  padding:10px 12px;font-size:12px;
+}
+.cap-row{display:flex;gap:8px;align-items:baseline;}
+.cap-label{color:#8f8371;flex:none;letter-spacing:1px;}
+.cap-list{color:#d8cbb2;word-break:break-all;}
+
+/* 局域网主机搜索（D1） */
+.scan-result{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;justify-content:center;}
+.scan-result[hidden]{display:none;}
+.scan-result .btn.small{flex:0 0 auto;padding:8px 12px;}
+
 .actions{display:flex;gap:8px;flex-wrap:wrap;}
 .role-hint{font-size:12px;color:#8f8371;text-align:center;letter-spacing:1px;}
 
@@ -204,6 +230,7 @@ label{display:block;text-align:left;font-size:12px;color:#8f8371;margin:14px 0 6
   .player-row{flex:1 1 45%;padding:10px;}
   .status-box{flex:1 1 100%;padding:13px;}
   .req-hint{flex:1 1 100%;}
+  .history-box,.captured-box{flex:1 1 100%;}
   .actions{flex:1 1 100%;}
   .role-hint{flex:1 1 100%;}
 }

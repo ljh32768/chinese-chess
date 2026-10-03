@@ -157,6 +157,8 @@ describe('完整对局回放', () => {
     expect(overGuest.winner).toBe('r');
     expect(boardKey(overHost.state.board)).toBe(boardKey(overGuest.state.board));
     expect(overHost.state.moveSeq).toBe(MATE_LINE.length);
+    expect(overHost.state.history).toHaveLength(MATE_LINE.length);
+    expect(overHost.state.history[0]).toEqual(MATE_LINE[0]);
 
     // 终局后走子会被拒绝，程序不崩溃
     guest.send({ type: 'move', from: [9, 4], to: [8, 4] });

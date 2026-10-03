@@ -310,12 +310,7 @@ export function judgeAfterMove(
  * 校验一步是否合法（主机权威校验入口）。
  * 返回 null 表示合法，否则返回中文原因。
  */
-export function validateMove(
-  b: Board,
-  from: Pos,
-  to: Pos,
-  expectedSide: Side,
-): string | null {
+export function validateMove(b: Board, from: Pos, to: Pos, expectedSide: Side): string | null {
   const [fr, fc] = from;
   const [tr, tc] = to;
   if (!inBoard(fr, fc) || !inBoard(tr, tc)) return '越界';

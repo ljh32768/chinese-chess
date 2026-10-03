@@ -2,11 +2,12 @@
  * 浏览器端 WebSocket 客户端：连接、心跳、消息分发。
  */
 
-import { ClientMessage, ServerMessage, decode, encode } from '../shared/protocol.js';
+import { ClientMessage, Role, ServerMessage, decode, encode } from '../shared/protocol.js';
 import { GameSnapshot, Side } from '../shared/types.js';
 
 export interface WelcomeInfo {
-  side: Side;
+  /** 分配阵营；观战者为 null */
+  side: Side | null;
   hostIp: string;
   port: number;
   state: GameSnapshot;
@@ -35,7 +36,7 @@ export class Net {
   }
 
   /** 建立连接并发送 join；收到 welcome 或错误后 resolve / reject */
-  connect(url: string, role: 'host' | 'guest'): Promise<void> {
+  connect(url: string, role: Role): Promise<void> {
     this.closing = false;
     return new Promise<void>((resolve, reject) => {
       let settled = false;

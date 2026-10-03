@@ -43,6 +43,10 @@ export interface GameSnapshot {
   reason: string;
   lastMove: Move | null;
   check: boolean;
+  /** 完整着法序列（棋谱 / 悔棋 / 回放基础），红黑交替从红方开始 */
+  history: Move[];
+  /** 本回合截止时间（epoch ms）；null 表示不限时（计时读秒关闭） */
+  deadline: number | null;
 }
 
 /** 棋盘尺寸常量 */
@@ -50,4 +54,4 @@ export const ROWS = 10;
 export const COLS = 9;
 
 /** 对局结束原因 */
-export type GameOverReason = '将死' | '困毙' | '认输' | '同意和棋';
+export type GameOverReason = '将死' | '困毙' | '认输' | '同意和棋' | '超时判负';

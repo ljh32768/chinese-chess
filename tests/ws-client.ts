@@ -50,9 +50,7 @@ export class TestClient {
     });
   }
 
-  waitType<T extends ServerMessage['type']>(
-    type: T,
-  ): Promise<Extract<ServerMessage, { type: T }>> {
+  waitType<T extends ServerMessage['type']>(type: T): Promise<Extract<ServerMessage, { type: T }>> {
     return this.wait((m) => m.type === type) as Promise<Extract<ServerMessage, { type: T }>>;
   }
 

@@ -1,24 +1,32 @@
-import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { HostServer } from '../src/server/host-server.js';
+import { HostServer, listenWithFallback } from '../src/server/host-server.js';
 import { Board } from '../src/shared/types.js';
 import { TestClient } from './ws-client.js';
 
 let server: HostServer | null = null;
 const clients: TestClient[] = [];
 
+interface ServerOpts {
+  graceMs?: number;
+  turnMs?: number;
+  aiDelayMs?: number;
+}
+
 /** 随机取一个高位端口并启动服务，避开 fetch 屏蔽的端口与端口占用 */
-async function startServer(graceMs?: number): Promise<HostServer> {
+async function startServer(opts: ServerOpts = {}): Promise<HostServer> {
   let lastErr: unknown = null;
   for (let i = 0; i < 5; i++) {
     const candidate = new HostServer({
       port: 20000 + Math.floor(Math.random() * 30000),
       staticDir: null,
       host: '127.0.0.1',
-      graceMs,
+      graceMs: opts.graceMs,
+      turnMs: opts.turnMs,
+      aiDelayMs: opts.aiDelayMs,
     });
     try {
       await candidate.listen();
@@ -45,7 +53,7 @@ function rawGet(port: number, rawPath: string): Promise<{ status: number; body: 
   });
 }
 
-async function connect(port: number, role: 'host' | 'guest'): Promise<TestClient> {
+async function connect(port: number, role: 'host' | 'guest' | 'spectator'): Promise<TestClient> {
   const c = new TestClient(port);
   clients.push(c);
   await c.open();
@@ -57,6 +65,8 @@ afterEach(async () => {
   for (const c of clients.splice(0)) c.close();
   await server?.close();
   server = null;
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 /** 从 move_applied 里取某一格，便于断言 */
@@ -125,7 +135,9 @@ describe('主机服务 · 走子同步', () => {
     expect(hMsg.turn).toBe('b');
     expect(at(hMsg.board, 8, 0)).toEqual({ t: 'R', s: 'r' });
     expect(at(hMsg.board, 9, 0)).toBeNull();
+    expect(hMsg.history).toEqual([{ from: [9, 0], to: [8, 0] }]);
     expect(gMsg.seq).toBe(1);
+    expect(gMsg.history).toEqual([{ from: [9, 0], to: [8, 0] }]);
 
     guest.send({ type: 'move', from: [3, 0], to: [4, 0] });
     const hMsg2 = await host.waitType('move_applied');
@@ -232,6 +244,150 @@ describe('主机服务 · 对局控制', () => {
     expect(restart.state.turn).toBe('r');
     expect(restart.state.status).toBe('playing');
   });
+
+  it('拒绝重开请求则维持结束状态，不广播 start', async () => {
+    const { host, guest } = await setup();
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+    await guest.waitType('game_over');
+
+    guest.send({ type: 'restart_request' });
+    await host.waitType('restart_request');
+    host.send({ type: 'restart_response', accept: false });
+    const resp = await guest.waitType('restart_response');
+    expect(resp.accept).toBe(false);
+    await guest.expectNo('start');
+  });
+});
+
+describe('主机服务 · 悔棋（请求-回应）', () => {
+  async function setup() {
+    const s = await startServer();
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+    await guest.waitType('start');
+    return { s, host, guest };
+  }
+
+  it('对方同意后回退一步，双方棋盘与棋谱同步', async () => {
+    const { host, guest } = await setup();
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    await guest.waitType('move_applied');
+
+    guest.send({ type: 'undo_request' });
+    await host.waitType('undo_request');
+    host.send({ type: 'undo_response', accept: true });
+
+    expect((await guest.waitType('undo_response')).accept).toBe(true);
+    const st = await guest.waitType('state');
+    expect(st.state.moveSeq).toBe(0);
+    expect(st.state.history).toEqual([]);
+    expect(at(st.state.board, 9, 0)).toEqual({ t: 'R', s: 'r' }); // 红车回到原位
+    expect(st.state.turn).toBe('r');
+
+    const st2 = await host.waitType('state');
+    expect(st2.state.moveSeq).toBe(0);
+  });
+
+  it('拒绝悔棋则局面保持不变', async () => {
+    const { s, host, guest } = await setup();
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    await guest.waitType('move_applied');
+
+    guest.send({ type: 'undo_request' });
+    await host.waitType('undo_request');
+    host.send({ type: 'undo_response', accept: false });
+    expect((await guest.waitType('undo_response')).accept).toBe(false);
+    expect(s.game.moveSeq).toBe(1);
+    expect(s.game.history).toHaveLength(1);
+  });
+
+  it('没有可悔的棋时请求被拒绝（error 提示）', async () => {
+    const { host } = await setup();
+    host.send({ type: 'undo_request' });
+    const err = await host.waitType('error');
+    expect(err.message).toBe('当前没有可悔的棋');
+  });
+
+  it('对方不在线（宽限中）时不能悔棋', async () => {
+    const { host, guest } = await setup();
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    await guest.waitType('move_applied');
+
+    guest.close();
+    await host.waitType('opponent_away');
+    host.send({ type: 'undo_request' });
+    const err = await host.waitType('error');
+    expect(err.message).toBe('对方不在线，无法悔棋');
+  });
+});
+
+describe('主机服务 · 观战', () => {
+  it('观战者随时可加入、不占席位，并收到对局广播', async () => {
+    const s = await startServer();
+    const watcher = await connect(s.address.port, 'spectator');
+    const w = await watcher.waitType('welcome');
+    expect(w.side).toBeNull();
+
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+    const start = await watcher.waitType('start');
+    expect(start.state.status).toBe('playing');
+
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    const applied = await watcher.waitType('move_applied');
+    expect(applied.seq).toBe(1);
+    await host.waitType('move_applied'); // 双方与观战者都收到广播
+  });
+
+  it('观战者不能走子或发起请求（只读）', async () => {
+    const s = await startServer();
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+    await guest.waitType('start');
+
+    const watcher = await connect(s.address.port, 'spectator');
+    await watcher.waitType('welcome');
+    watcher.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await watcher.waitType('error')).message).toBe('观战模式只读');
+    watcher.send({ type: 'draw_request' });
+    expect((await watcher.waitType('error')).message).toBe('观战模式只读');
+    await host.expectNo('move_applied');
+  });
+
+  it('观战者离开不影响对局，也不触发宽限', async () => {
+    const s = await startServer();
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+    await guest.waitType('start');
+
+    const watcher = await connect(s.address.port, 'spectator');
+    await watcher.waitType('welcome');
+    watcher.close();
+    await host.expectNo('opponent_away');
+
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await host.waitType('move_applied')).seq).toBe(1);
+  });
 });
 
 describe('主机服务 · 断线与心跳', () => {
@@ -274,7 +430,7 @@ describe('主机服务 · 断线与心跳', () => {
 describe('主机服务 · 断线重连（宽限期）', () => {
   /** 开局并走一步，制造可验证的进行中局面（红车 [9,0]→[8,0]） */
   async function setupPlaying(graceMs: number) {
-    const s = await startServer(graceMs);
+    const s = await startServer({ graceMs });
     s.setHosting(true);
     const host = await connect(s.address.port, 'host');
     await host.waitType('welcome');
@@ -421,6 +577,9 @@ describe('主机服务 · 静态资源', () => {
     fs.writeFileSync(path.join(dir, 'renderer', 'index.html'), '<!DOCTYPE html><title>t</title>');
     fs.writeFileSync(path.join(dir, 'renderer', 'app.js'), 'export const app = 1;');
     fs.writeFileSync(path.join(dir, 'renderer', 'styles.css'), 'body{}');
+    fs.writeFileSync(path.join(dir, 'renderer', 'data.json'), '{"ok":true}');
+    fs.writeFileSync(path.join(dir, 'renderer', 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    fs.writeFileSync(path.join(dir, 'renderer', 'blob.bin'), 'binary');
     fs.writeFileSync(path.join(dir, 'shared', 'rules.js'), 'export const rules = 1;');
     // 静态根目录之外的敏感文件不应能被访问
     fs.writeFileSync(secret, 'top-secret');
@@ -474,15 +633,27 @@ describe('主机服务 · 静态资源', () => {
     expect(res.headers.get('content-type')).toContain('text/css');
   });
 
+  it('MIME 白名单覆盖 json / svg，未知扩展名回退 octet-stream', async () => {
+    const json = await fetch(`http://127.0.0.1:${server!.address.port}/data.json`);
+    expect(json.status).toBe(200);
+    expect(json.headers.get('content-type')).toContain('application/json');
+
+    const svg = await fetch(`http://127.0.0.1:${server!.address.port}/icon.svg`);
+    expect(svg.status).toBe(200);
+    expect(svg.headers.get('content-type')).toContain('image/svg+xml');
+
+    const bin = await fetch(`http://127.0.0.1:${server!.address.port}/blob.bin`);
+    expect(bin.status).toBe(200);
+    expect(bin.headers.get('content-type')).toContain('application/octet-stream');
+  });
+
   it('不存在的文件返回 404', async () => {
     const res = await fetch(`http://127.0.0.1:${server!.address.port}/nope.js`);
     expect(res.status).toBe(404);
   });
 
   it('拒绝路径穿越访问项目外的文件', async () => {
-    const res = await fetch(
-      `http://127.0.0.1:${server!.address.port}/../lanchess-secret.txt`,
-    );
+    const res = await fetch(`http://127.0.0.1:${server!.address.port}/../lanchess-secret.txt`);
     expect(res.status).toBe(404);
     expect(await res.text()).not.toContain('secret');
   });
@@ -492,5 +663,165 @@ describe('主机服务 · 静态资源', () => {
     const res = await rawGet(server!.address.port, '/..%2Froot-evil%2Fsecret.txt');
     expect(res.status).toBe(404);
     expect(res.body).not.toContain('sibling-secret');
+  });
+});
+
+describe('主机服务 · 人机对战与计时读秒', () => {
+  /** 创建人机对局并连接主机，等对局开始 */
+  async function setupAi(s: HostServer) {
+    const res = await fetch(`http://127.0.0.1:${s.address.port}/api/host/start-ai`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+    const host = await connect(s.address.port, 'host');
+    const w = await host.waitType('welcome');
+    return { host, welcome: w };
+  }
+
+  it('人机对战：主机执红，AI 延迟后自动走黑', async () => {
+    const s = await startServer({ aiDelayMs: 20 });
+    const { host, welcome } = await setupAi(s);
+    expect(welcome.side).toBe('r');
+    expect(welcome.state.status).toBe('playing');
+
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    const mine = await host.waitType('move_applied');
+    expect(mine.seq).toBe(1);
+
+    const ai = await host.waitType('move_applied');
+    expect(ai.seq).toBe(2);
+    expect(ai.turn).toBe('r'); // AI 走完轮到红方
+    expect(ai.history).toHaveLength(2);
+    expect(ai.board[ai.from[0]][ai.from[1]]).toBeNull();
+    expect(s.game.history[1]).toEqual({ from: ai.from, to: ai.to });
+  }, 10000);
+
+  it('人机对战：guest 无法加入，观战者可加入', async () => {
+    const s = await startServer({ aiDelayMs: 1000 });
+    await setupAi(s);
+
+    const guest = await connect(s.address.port, 'guest');
+    expect((await guest.waitType('error')).message).toBe('人机对局，无法加入');
+
+    const watcher = await connect(s.address.port, 'spectator');
+    expect((await watcher.waitType('welcome')).side).toBeNull();
+  });
+
+  it('人机对战：悔棋自动同意（AI 重新走子）、和棋被拒、重开自动同意', async () => {
+    const s = await startServer({ aiDelayMs: 20 });
+    const { host } = await setupAi(s);
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    await host.waitType('move_applied'); // AI 应招
+
+    host.send({ type: 'undo_request' });
+    expect((await host.waitType('undo_response')).accept).toBe(true);
+    await host.waitType('state');
+    // 悔棋后轮到黑方（AI），AI 会重新走子
+    const aiAgain = await host.waitType('move_applied');
+    expect(aiAgain.seq).toBe(2);
+
+    host.send({ type: 'draw_request' });
+    expect((await host.waitType('draw_response')).accept).toBe(false);
+
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+    host.send({ type: 'restart_request' });
+    const restarted = await host.waitType('start');
+    expect(restarted.state.moveSeq).toBe(0);
+    expect(restarted.state.status).toBe('playing');
+  }, 10000);
+
+  it('计时读秒：本回合超时判负并清空 deadline', async () => {
+    const s = await startServer({ turnMs: 150 });
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    const start = await host.waitType('start');
+    expect(start.state.deadline).toBeGreaterThan(Date.now());
+
+    const over = await host.waitType('game_over');
+    expect(over.reason).toBe('超时判负');
+    expect(over.winner).toBe('b'); // 红方先行且未走子
+    expect(over.state.deadline).toBeNull();
+  });
+
+  it('计时读秒：走子后 deadline 顺延给下一方', async () => {
+    const s = await startServer({ turnMs: 5000 });
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    const start = await host.waitType('start');
+    const firstDeadline = start.state.deadline as number;
+
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    const applied = await host.waitType('move_applied');
+    expect(applied.deadline).toBeGreaterThanOrEqual(firstDeadline);
+  });
+});
+
+describe('主机服务 · 日志与端口回退（C2/C5）', () => {
+  it('默认输出连接/走子/终局打点，LANSCHESS_DEBUG=0 可关闭', async () => {
+    vi.stubEnv('LANSCHESS_DEBUG', '1'); // 打开（同时包含 debug 明细）
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const s = await startServer();
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+
+    const logs = spy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logs).toContain('主机连接（红方');
+    expect(logs).toContain('加入者连接（黑方');
+    expect(logs).toContain('走子：红方');
+    expect(logs).toContain('对局结束：黑方胜（认输）');
+
+    // 关闭开关后不再输出
+    vi.stubEnv('LANSCHESS_DEBUG', '0');
+    spy.mockClear();
+    guest.send({ type: 'ping', t: 1 });
+    await guest.waitType('pong');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('listenWithFallback：端口占用时回退随机端口', async () => {
+    // 占用者与待启动者都用默认 0.0.0.0，保证两平台都能触发 EADDRINUSE
+    const first = new HostServer({ port: 0 });
+    const occupied = await first.listen();
+    try {
+      const started = await listenWithFallback(occupied);
+      try {
+        expect(started.fallback).toBe(true);
+        expect(started.port).not.toBe(occupied);
+      } finally {
+        await started.server.close();
+      }
+    } finally {
+      await first.close();
+    }
+  });
+
+  it('listenWithFallback：显式指定端口被占用时抛出 EADDRINUSE', async () => {
+    const first = new HostServer({ port: 0 });
+    const occupied = await first.listen();
+    try {
+      await expect(listenWithFallback(occupied, true)).rejects.toMatchObject({
+        code: 'EADDRINUSE',
+      });
+    } finally {
+      await first.close();
+    }
   });
 });

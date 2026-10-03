@@ -5,18 +5,27 @@
 
 import { findKing, initBoard, legalMoves } from '../shared/rules.js';
 import { ServerMessage } from '../shared/protocol.js';
-import { Board, GameSnapshot, Move, Pos, Side } from '../shared/types.js';
+import { Board, GameSnapshot, Move, PieceType, Pos, Side } from '../shared/types.js';
+import { capturedPieces, describeHistory } from '../shared/notation.js';
+import { DiscoveredHost, discoverSubnet, probeHost } from './discover.js';
 import { pickCell, renderBoard, svgPoint } from './board.js';
 import { Net, WelcomeInfo } from './net.js';
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
-  document.getElementById(id) as T;
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const boardEl = document.getElementById('board') as unknown as SVGSVGElement;
+
+/** 棋子汉字（红黑两套用字，用于吃子展示） */
+const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
+  r: { K: '帅', A: '仕', B: '相', N: '马', R: '车', C: '炮', P: '兵' },
+  b: { K: '将', A: '士', B: '象', N: '马', R: '车', C: '炮', P: '卒' },
+};
 
 /** 客户端本地视图状态（仅用于渲染，非权威） */
 const S = {
   role: 'host' as 'host' | 'guest',
+  /** 观战者模式：只读旁观（不占红黑席位） */
+  spectator: false,
   side: 'r' as Side,
   board: initBoard() as Board,
   turn: 'r' as Side,
@@ -29,9 +38,15 @@ const S = {
   check: false,
   moveSeq: 0,
   /** 已发出、等待对方回应的请求（用于侧栏等待状态） */
-  pending: null as null | 'draw' | 'restart',
+  pending: null as null | 'draw' | 'restart' | 'undo',
   /** 对手意外断线、宽限期等待重连中（服务端 opponent_away） */
   oppAway: false,
+  /** 完整着法序列（棋谱 / 吃子 / 悔棋展示） */
+  history: [] as Move[],
+  /** 本回合截止时间（epoch ms）；null 表示不限时 */
+  deadline: null as number | null,
+  /** 人机对战（本机创建的对局，AI 执黑） */
+  aiMode: false,
 };
 
 let net: Net | null = null;
@@ -87,7 +102,7 @@ function closeModal(): void {
 // -------------------------------------------------------------- 渲染
 
 function render(): void {
-  const canPlay = S.status === 'playing' && S.turn === S.side && !S.oppAway;
+  const canPlay = !S.spectator && S.status === 'playing' && S.turn === S.side && !S.oppAway;
   renderBoard(boardEl, {
     board: S.board,
     selected: S.selected,
@@ -101,9 +116,24 @@ function render(): void {
 }
 
 function updateRoleHint(): void {
+  if (S.spectator) {
+    $('role-hint').textContent = '观战 · 只读';
+    return;
+  }
+  if (S.aiMode) {
+    $('role-hint').textContent = '人机对战 · AI 执黑';
+    return;
+  }
   $('role-hint').textContent = `你执${S.side === 'r' ? '红' : '黑'} · ${
     S.role === 'host' ? '主机' : '加入者'
   }`;
+}
+
+/** 计时读秒剩余时间文案（未启用计时返回空串） */
+function remainText(): string {
+  if (!S.deadline || S.status !== 'playing') return '';
+  const sec = Math.max(0, Math.ceil((S.deadline - Date.now()) / 1000));
+  return `（剩余 ${sec}s）`;
 }
 
 function updatePanel(): void {
@@ -112,14 +142,16 @@ function updatePanel(): void {
   const rowBottom = $('p-bottom');
   rowTop.className = 'player-row ' + (opp === 'r' ? 'red' : 'black');
   rowBottom.className = 'player-row ' + (S.side === 'r' ? 'red' : 'black');
-  $('p-top-name').textContent = `${sideName(opp)} · 对手`;
-  $('p-bottom-name').textContent = `${sideName(S.side)} · 你`;
+  // 观战者视角显示红黑双方，不出现「你 / 对手」
+  $('p-top-name').textContent = S.spectator ? sideName(opp) : `${sideName(opp)} · 对手`;
+  $('p-bottom-name').textContent = S.spectator ? sideName(S.side) : `${sideName(S.side)} · 你`;
 
   const active = S.status === 'playing';
   const over = S.status === 'over';
-  // 结束态切换操作组：对局中（认输/和棋/离开）↔ 已结束（再来一局/返回首页）
-  $('actions-play').hidden = over;
-  $('actions-over').hidden = !over;
+  // 操作组：观战者隐藏对局操作（只读），对局中与结束态互斥切换
+  $('actions-play').hidden = over || S.spectator;
+  $('actions-over').hidden = !over || S.spectator;
+  $('actions-spectate').hidden = !S.spectator;
   rowTop.classList.toggle('active', active && S.turn === opp);
   rowBottom.classList.toggle('active', active && S.turn === S.side);
   $('p-top-tag').textContent = active && S.turn === opp ? '走棋中' : '';
@@ -131,24 +163,58 @@ function updatePanel(): void {
   st.classList.toggle('win-red', over && S.winner === 'r');
   st.classList.toggle('win-black', over && S.winner === 'b');
   st.classList.toggle('draw', over && S.winner === null);
+  let statusText: string;
   if (S.status === 'over') {
-    st.textContent = `${resultText()} · ${S.reason}`;
+    statusText = `${resultText()} · ${S.reason}`;
   } else if (active && S.oppAway) {
-    st.textContent = '对手已断开，等待重连…';
+    statusText = '对手已断开，等待重连…';
   } else if (active && S.check) {
-    st.textContent = S.turn === S.side ? '⚠ 你被将军了' : '⚠ 对方被将军';
+    statusText = S.spectator
+      ? `⚠ ${sideName(S.turn)}被将军`
+      : S.turn === S.side
+        ? '⚠ 你被将军了'
+        : '⚠ 对方被将军';
   } else if (active) {
-    st.textContent = S.turn === S.side ? '轮到你走棋' : '对方思考中…';
+    statusText = S.spectator
+      ? `${sideName(S.turn)}行棋中…`
+      : S.turn === S.side
+        ? '轮到你走棋'
+        : '对方思考中…';
   } else {
-    st.textContent = '准备开始';
+    statusText = S.spectator ? '等待对局开始' : '准备开始';
   }
+  st.textContent = active ? `${statusText}${remainText()}` : statusText;
 
-  // 请求等待状态（和棋 / 重开发出后）
+  // 请求等待状态（和棋 / 重开 / 悔棋发出后）
   const req = $('req-hint');
   req.hidden = !S.pending;
   if (S.pending) {
-    req.textContent = S.pending === 'draw' ? '已发送和棋请求，等待对方回应…' : '已发送重开请求，等待对方回应…';
+    req.textContent =
+      S.pending === 'draw'
+        ? '已发送和棋请求，等待对方回应…'
+        : S.pending === 'undo'
+          ? '已发送悔棋请求，等待对方回应…'
+          : '已发送重开请求，等待对方回应…';
   }
+
+  renderNotation();
+}
+
+/** 渲染棋谱与吃子面板（由着法序列推导，纯展示） */
+function renderNotation(): void {
+  const names = describeHistory(S.history);
+  const rows: string[] = [];
+  for (let i = 0; i < names.length; i += 2) {
+    const black = names[i + 1] ? `  ${names[i + 1]}` : '';
+    rows.push(`${i / 2 + 1}. ${names[i]}${black}`);
+  }
+  const list = $('move-list');
+  list.textContent = rows.length ? rows.join('\n') : '尚未走子';
+  list.scrollTop = list.scrollHeight;
+
+  const cap = capturedPieces(S.history);
+  $('cap-red-list').textContent = cap.byRed.map((t) => PIECE_NAME.b[t]).join(' ') || '—';
+  $('cap-black-list').textContent = cap.byBlack.map((t) => PIECE_NAME.r[t]).join(' ') || '—';
 }
 
 function applySnapshot(s: GameSnapshot): void {
@@ -164,6 +230,8 @@ function applySnapshot(s: GameSnapshot): void {
   S.moves = [];
   S.pending = null;
   S.oppAway = false;
+  S.history = s.history ?? [];
+  S.deadline = s.deadline ?? null;
   updateRoleHint();
   if ($('screen-game').classList.contains('active')) render();
 }
@@ -193,6 +261,8 @@ function handleMessage(msg: ServerMessage): void {
       S.lastMove = msg.lastMove;
       S.selected = null;
       S.moves = [];
+      S.history = msg.history;
+      S.deadline = msg.deadline;
       render();
       break;
     case 'move_rejected':
@@ -241,6 +311,25 @@ function handleMessage(msg: ServerMessage): void {
     case 'restart_response':
       S.pending = null;
       if (!msg.accept) toast('对方拒绝了重开请求');
+      updatePanel();
+      break;
+    case 'undo_request':
+      showModal({
+        title: '对方请求悔棋',
+        sub: '同意则回退一步',
+        buttons: [
+          { label: '同意', primary: true, onClick: () => respondUndo(true) },
+          { label: '拒绝', onClick: () => respondUndo(false) },
+        ],
+      });
+      break;
+    case 'undo_response':
+      S.pending = null;
+      if (msg.accept) {
+        toast('悔棋成功，已回退一步');
+      } else {
+        toast('对方拒绝了悔棋请求');
+      }
       updatePanel();
       break;
     case 'opponent_joined':
@@ -294,6 +383,13 @@ function respondRestart(accept: boolean): void {
   updatePanel();
 }
 
+/** 回应对方的悔棋请求 */
+function respondUndo(accept: boolean): void {
+  S.pending = null;
+  net?.send({ type: 'undo_response', accept });
+  updatePanel();
+}
+
 function handleOpponentLeft(reason: string): void {
   // 主机视角 reason 就是「对手已离开」，避免标题与说明重复
   const sub = reason === '对手已离开' ? '本局已结束，可返回首页重新开局' : reason;
@@ -329,14 +425,20 @@ function handleClosed(reason: string): void {
 
 // -------------------------------------------------------------- 连接
 
-async function openNet(url: string, role: 'host' | 'guest'): Promise<void> {
+async function openNet(url: string, role: 'host' | 'guest' | 'spectator'): Promise<void> {
   net?.close();
   net = new Net({
     onWelcome(info: WelcomeInfo) {
-      S.side = info.side;
-      S.role = role;
+      S.side = info.side ?? 'r'; // 观战者 side 为 null，统一按红方视角渲染
+      S.spectator = info.side === null;
+      S.role = role === 'host' ? 'host' : 'guest';
       applySnapshot(info.state);
-      if (info.state.status === 'playing') enterGame();
+      if (S.spectator) {
+        enterGame();
+        toast('已进入观战（只读）');
+      } else if (info.state.status === 'playing') {
+        enterGame();
+      }
     },
     onMessage: handleMessage,
     onClosed: handleClosed,
@@ -350,10 +452,25 @@ async function createGame(): Promise<void> {
     if (!res.ok) throw new Error('当前页面无法创建对局，请通过主机端打开');
     const info = (await res.json()) as { ip: string; port: number };
     S.role = 'host';
+    S.aiMode = false;
     $('host-ip').textContent = `${info.ip}:${info.port}`;
     $('host-wait').textContent = '请让对方在「加入对局」中输入上方地址';
     show('screen-host');
     await openNet(`ws://${location.host}/ws`, 'host');
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** 人机对战：AI 执黑，创建后直接进入对局 */
+async function createAiGame(): Promise<void> {
+  try {
+    const res = await fetch('/api/host/start-ai', { method: 'POST' });
+    if (!res.ok) throw new Error('当前页面无法创建对局，请通过主机端打开');
+    S.role = 'host';
+    S.aiMode = true;
+    await openNet(`ws://${location.host}/ws`, 'host');
+    toast('人机对战开始，你执红先行');
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
   }
@@ -403,10 +520,74 @@ function showJoin(): void {
   const msg = $('join-msg');
   msg.textContent = '';
   msg.className = 'hint';
+  $('scan-result').hidden = true;
   show('screen-join');
 }
 
-async function doJoin(): Promise<void> {
+/** 从 IP 中取前三段作为 /24 网段前缀；不合法返回 null */
+function subnetPrefix(ip: string): string | null {
+  const m = /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/.exec(ip.trim());
+  return m ? m[1] : null;
+}
+
+/** 把发现的候选主机渲染为可点击按钮（点击后填入加入表单） */
+function renderScanResult(hosts: DiscoveredHost[]): void {
+  const box = $('scan-result');
+  box.replaceChildren();
+  box.hidden = hosts.length === 0;
+  for (const h of hosts) {
+    const btn = document.createElement('button');
+    btn.className = 'btn small';
+    btn.textContent = `${h.ip}:${h.port}`;
+    btn.addEventListener('click', () => {
+      $<HTMLInputElement>('join-ip').value = h.ip;
+      $<HTMLInputElement>('join-port').value = String(h.port);
+      toast(`已选择 ${h.ip}:${h.port}`);
+    });
+    box.appendChild(btn);
+  }
+}
+
+/** 搜索局域网主机（D1）：先直探已知地址，再扫描同网段并合并去重 */
+async function scanHosts(): Promise<void> {
+  const msg = $('join-msg');
+  const setMsg = (t: string, kind?: 'ok' | 'err') => {
+    msg.textContent = t;
+    msg.className = 'hint' + (kind ? ` ${kind}` : '');
+  };
+  const ipInput = $<HTMLInputElement>('join-ip').value.trim();
+  const port = Number($<HTMLInputElement>('join-port').value.trim() || '7777');
+  const prefix = subnetPrefix(ipInput) ?? subnetPrefix(location.hostname);
+  if (!prefix || !Number.isInteger(port)) {
+    return setMsg('请先填写同网段的任意主机地址与端口，再进行搜索', 'err');
+  }
+
+  const found = new Map<string, DiscoveredHost>();
+  const add = (h: DiscoveredHost | null) => {
+    if (h) found.set(`${h.ip}:${h.port}`, h);
+  };
+
+  // 已知地址优先（输入框中的地址 / 当前页面来源主机），再扫网段
+  setMsg('正在探测已知地址…');
+  if (subnetPrefix(ipInput)) add(await probeHost(ipInput, port, { timeoutMs: 800 }));
+  if (location.hostname !== ipInput) {
+    add(await probeHost(location.hostname, port, { timeoutMs: 800 }));
+  }
+
+  const sweep = await discoverSubnet(prefix, port, {
+    onProgress: (done, total) => setMsg(`正在搜索 ${prefix}.0/24 … ${done}/${total}`),
+  });
+  for (const h of sweep) add(h);
+
+  const hosts = [...found.values()];
+  renderScanResult(hosts);
+  setMsg(
+    hosts.length ? `发现 ${hosts.length} 台主机，点击即可填入` : '未发现主机，请确认在同一局域网',
+    hosts.length ? 'ok' : 'err',
+  );
+}
+
+async function doJoin(asSpectator = false): Promise<void> {
   const ip = $<HTMLInputElement>('join-ip').value.trim();
   const port = $<HTMLInputElement>('join-port').value.trim();
   const msg = $('join-msg');
@@ -419,10 +600,10 @@ async function doJoin(): Promise<void> {
   if (!/^\d+$/.test(port)) return setMsg('端口必须是数字', 'err');
 
   setMsg(`正在连接 ${ip}:${port} …`);
-  S.role = 'guest';
+  S.aiMode = false;
   try {
-    await openNet(`ws://${ip}:${port}/ws`, 'guest');
-    setMsg('连接成功，正在开局…', 'ok');
+    await openNet(`ws://${ip}:${port}/ws`, asSpectator ? 'spectator' : 'guest');
+    setMsg(asSpectator ? '已进入观战（只读）' : '连接成功，正在开局…', 'ok');
   } catch (e) {
     setMsg(e instanceof Error ? e.message : '连接失败', 'err');
   }
@@ -439,6 +620,8 @@ function leaveToHome(): void {
   S.status = 'idle';
   S.selected = null;
   S.moves = [];
+  S.aiMode = false;
+  S.deadline = null;
   show('screen-home');
 }
 
@@ -472,6 +655,17 @@ function requestRestart(): void {
   S.pending = 'restart';
   updatePanel();
   toast('已发送重开请求…');
+}
+
+/** 悔棋：请求回退一步（与和棋同构的「请求-回应」） */
+function offerUndo(): void {
+  if (S.status !== 'playing') return toast('对局尚未开始');
+  if (S.pending) return toast('请求已发送，等待对方回应');
+  if (S.history.length === 0) return toast('当前没有可悔的棋');
+  net?.send({ type: 'undo_request' });
+  S.pending = 'undo';
+  updatePanel();
+  toast('已发送悔棋请求…');
 }
 
 /** 取消当前选中（ESC / 右键触发） */
@@ -520,18 +714,24 @@ function onCell([r, c]: Pos): void {
 
 function bindEvents(): void {
   $('btn-create').addEventListener('click', () => void createGame());
+  $('btn-create-ai').addEventListener('click', () => void createAiGame());
   $('btn-show-join').addEventListener('click', showJoin);
   $('btn-cancel-host').addEventListener('click', () => void cancelHost());
   $('btn-copy-ip').addEventListener('click', () => void copyHostAddr());
   $('btn-connect').addEventListener('click', () => void doJoin());
+  $('btn-spectate').addEventListener('click', () => void doJoin(true));
+  $('btn-scan').addEventListener('click', () => void scanHosts());
+  $('btn-spectate-leave').addEventListener('click', leaveToHome);
   $('btn-join-back').addEventListener('click', () => show('screen-home'));
   $('btn-resign').addEventListener('click', resign);
   $('btn-draw').addEventListener('click', offerDraw);
+  $('btn-undo').addEventListener('click', offerUndo);
   $('btn-play-again').addEventListener('click', requestRestart);
   $('btn-home').addEventListener('click', leaveToHome);
   $('btn-leave').addEventListener('click', leaveToHome);
 
   boardEl.addEventListener('click', (e) => {
+    if (S.spectator) return toast('观战模式只读');
     if (S.status !== 'playing') return;
     if (S.oppAway) return toast('对手已断开，等待重连');
     if (S.turn !== S.side) return toast('还没轮到你走棋');
@@ -567,6 +767,10 @@ function bindEvents(): void {
 async function init(): Promise<void> {
   bindEvents();
   render();
+  // 计时读秒（D4）：定时刷新剩余时间显示（未启用计时时几乎零开销）
+  window.setInterval(() => {
+    if (S.deadline && S.status === 'playing') updatePanel();
+  }, 500);
   try {
     const res = await fetch('/api/host-info');
     if (res.ok) {
