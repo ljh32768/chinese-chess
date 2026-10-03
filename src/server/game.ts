@@ -77,6 +77,9 @@ export class Game {
       this.status = 'over';
       this.winner = outcome.winner;
       this.reason = outcome.reason;
+      // 终局清理待处理请求（与 resign / acceptDraw / reset 保持一致）
+      this.pendingDraw = null;
+      this.pendingRestart = null;
     }
     return { ok: true };
   }

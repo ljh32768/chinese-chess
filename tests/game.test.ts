@@ -72,6 +72,36 @@ describe('Game 状态机', () => {
     expect(g.reason).toBe('同意和棋');
   });
 
+  it('走子致将死时清空待处理的求和 / 重开请求', () => {
+    const g = new Game();
+    g.reset('playing');
+    // 构造「双车错」一步杀：红方 [2,8] → [0,8] 将死黑方
+    g.board = Array.from({ length: 10 }, () => Array(9).fill(null));
+    g.board[0][4] = { t: 'K', s: 'b' };
+    g.board[9][4] = { t: 'K', s: 'r' };
+    g.board[1][0] = { t: 'R', s: 'r' };
+    g.board[2][8] = { t: 'R', s: 'r' };
+    g.board[5][4] = { t: 'P', s: 'r' }; // 挡住将帅照面
+    g.pendingDraw = 'b';
+    g.pendingRestart = 'r';
+
+    const r = g.applyMove([2, 8], [0, 8], 'r');
+    expect(r.ok).toBe(true);
+    expect(g.status).toBe('over');
+    expect(g.winner).toBe('r');
+    expect(g.reason).toBe('将死');
+    expect(g.pendingDraw).toBeNull();
+    expect(g.pendingRestart).toBeNull();
+  });
+
+  it('对局继续时不清理待处理请求', () => {
+    const g = new Game();
+    g.reset('playing');
+    g.pendingDraw = 'b';
+    expect(g.applyMove([6, 0], [5, 0], 'r').ok).toBe(true);
+    expect(g.pendingDraw).toBe('b');
+  });
+
   it('未开始时拒绝走子', () => {
     const g = new Game();
     const r = g.applyMove([6, 0], [5, 0], 'r');

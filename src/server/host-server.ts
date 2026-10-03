@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
-import { ClientMessage, ServerMessage, decode, encode } from '../shared/protocol.js';
+import { ClientMessage, ServerMessage, decode, encode, isValidPos } from '../shared/protocol.js';
 import { Side } from '../shared/types.js';
 import { Game } from './game.js';
 
@@ -65,6 +65,8 @@ interface Conn {
   ws: WebSocket;
   role: 'host' | 'guest' | null;
   side: Side | null;
+  /** 客户端主动发送 leave 后置位：断开时不做宽限等待，按「主动离开」立即清理 */
+  leaving?: boolean;
 }
 
 export interface HostServerOptions {
@@ -74,6 +76,8 @@ export interface HostServerOptions {
   staticDir?: string | null;
   /** 监听地址，默认 0.0.0.0 */
   host?: string;
+  /** 意外断线后的重连宽限期（毫秒）；默认 30000 */
+  graceMs?: number;
 }
 
 export class HostServer {
@@ -84,6 +88,9 @@ export class HostServer {
   private guestConn: Conn | null = null;
   private hosting = false;
   private port = 0;
+  /** 意外断线后的宽限计时器（超时才真正清理席位） */
+  private hostGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  private guestGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly opts: Required<HostServerOptions>;
 
   constructor(opts: HostServerOptions = {}) {
@@ -91,6 +98,7 @@ export class HostServer {
       port: opts.port ?? 7777,
       staticDir: opts.staticDir === undefined ? defaultStaticDir() : opts.staticDir,
       host: opts.host ?? '0.0.0.0',
+      graceMs: opts.graceMs ?? 30000,
     };
   }
 
@@ -114,8 +122,10 @@ export class HostServer {
     });
   }
 
-  /** 关闭服务（断开所有连接） */
+  /** 关闭服务（断开所有连接，并取消宽限计时器） */
   close(): Promise<void> {
+    this.cancelHostGrace();
+    this.cancelGuestGrace();
     return new Promise((resolve) => {
       for (const c of [this.hostConn, this.guestConn]) c?.ws.close();
       const wss = this.wss;
@@ -205,7 +215,7 @@ export class HostServer {
     const rel = pathname === '/' ? 'renderer/index.html' : pathname.replace(/^\/+/, '');
     const rootResolved = path.resolve(root);
     const candidates = [path.resolve(rootResolved, rel), path.resolve(rootResolved, 'renderer', rel)];
-    const filePath = candidates.find((p) => p.startsWith(rootResolved) && fs.existsSync(p));
+    const filePath = candidates.find((p) => isInsideRoot(rootResolved, p) && fs.existsSync(p));
 
     if (!filePath) {
       // 路径穿越或文件不存在：一律按 404 处理，不回显敏感信息
@@ -255,7 +265,8 @@ export class HostServer {
         if (conn.side === null) return this.send(conn.ws, { type: 'error', message: '尚未加入对局' });
         const from = msg.from;
         const to = msg.to;
-        if (!Array.isArray(from) || !Array.isArray(to)) {
+        // 坐标必须是整数对；越界由规则引擎按「越界」拒绝
+        if (!isValidPos(from) || !isValidPos(to)) {
           return this.send(conn.ws, { type: 'move_rejected', from: from ?? [0, 0], to: to ?? [0, 0], reason: '坐标非法' });
         }
         const result = this.game.applyMove(from, to, conn.side);
@@ -329,7 +340,19 @@ export class HostServer {
         }
         return;
       }
+      case 'wait_new_opponent': {
+        // 仅主机可用：放弃等待断线对手，立即清空席位并回到「等待新对手」
+        if (conn.role !== 'host') return;
+        if (!this.guestGraceTimer) {
+          return this.send(conn.ws, { type: 'error', message: '当前没有等待重连的对手' });
+        }
+        this.cancelGuestGrace();
+        this.dropGuestSeat('已放弃等待对方重连');
+        return;
+      }
       case 'leave': {
+        // 标记为主动离开：断开时不做宽限等待
+        conn.leaving = true;
         conn.ws.close();
         return;
       }
@@ -349,10 +372,13 @@ export class HostServer {
       if (this.hostConn && this.hostConn.ws !== conn.ws) {
         return this.send(conn.ws, { type: 'error', message: '主机端已存在' });
       }
+      // 宽限期内同阵营重连：保留原对局与回合
+      const rejoining = this.game.status === 'playing';
+      this.cancelHostGrace();
       conn.role = 'host';
       conn.side = 'r';
       this.hostConn = conn;
-      this.game.status = this.hosting ? 'waiting' : 'idle';
+      if (!rejoining) this.game.status = this.hosting ? 'waiting' : 'idle';
       this.send(conn.ws, {
         type: 'welcome',
         side: 'r',
@@ -360,7 +386,13 @@ export class HostServer {
         port: this.port,
         state: this.game.snapshot(),
       });
-      if (this.hosting && this.guestConn) this.send(conn.ws, { type: 'opponent_joined' });
+      if (rejoining) {
+        // 通知加入者主机已回来，并同步最新快照
+        this.sendTo('b', { type: 'opponent_joined' });
+        this.broadcast({ type: 'state', state: this.game.snapshot() });
+      } else if (this.hosting && this.guestConn) {
+        this.send(conn.ws, { type: 'opponent_joined' });
+      }
       this.maybeStart();
       return;
     }
@@ -372,6 +404,9 @@ export class HostServer {
     if (this.guestConn && this.guestConn.ws !== conn.ws) {
       return this.send(conn.ws, { type: 'error', message: '对局已满，无法加入' });
     }
+    // 宽限期内同阵营重连：保留原对局与回合
+    const rejoining = this.game.status === 'playing';
+    this.cancelGuestGrace();
     conn.role = 'guest';
     conn.side = 'b';
     this.guestConn = conn;
@@ -383,6 +418,7 @@ export class HostServer {
       state: this.game.snapshot(),
     });
     this.sendTo('r', { type: 'opponent_joined' });
+    if (rejoining) this.broadcast({ type: 'state', state: this.game.snapshot() });
     this.maybeStart();
   }
 
@@ -402,16 +438,90 @@ export class HostServer {
   private handleClose(conn: Conn): void {
     if (conn.role === 'host' && this.hostConn === conn) {
       this.hostConn = null;
-      this.sendTo('b', { type: 'opponent_left', reason: '主机已离开' });
-      this.hosting = false;
-      if (this.game.status === 'playing') this.game.status = 'idle';
+      if (conn.leaving || this.game.status !== 'playing') {
+        // 主动离开或未在局中：立即清理（原语义）
+        this.cancelGuestGrace();
+        this.sendTo('b', { type: 'opponent_left', reason: '主机已离开' });
+        this.hosting = false;
+        if (this.game.status === 'playing') this.game.status = 'idle';
+      } else {
+        // 意外断线：保留对局与主机席位，宽限期内可重连
+        this.startHostGrace();
+        this.sendTo('b', { type: 'opponent_away', reason: '主机已断开', graceMs: this.opts.graceMs });
+      }
     } else if (conn.role === 'guest' && this.guestConn === conn) {
       this.guestConn = null;
-      this.sendTo('r', { type: 'opponent_left', reason: '对手已离开' });
-      if (this.game.status === 'playing') {
-        this.game.status = this.hosting ? 'waiting' : 'idle';
+      if (conn.leaving || this.game.status !== 'playing') {
+        this.sendTo('r', { type: 'opponent_left', reason: '对手已离开' });
+        if (this.game.status === 'playing') {
+          this.game.status = this.hosting ? 'waiting' : 'idle';
+        }
+      } else {
+        // 意外断线：保留对局与客方席位，宽限期内可重连
+        this.startGuestGrace();
+        this.sendTo('r', { type: 'opponent_away', reason: '对手已断开', graceMs: this.opts.graceMs });
       }
     }
+  }
+
+  // ------------------------------------------------------- 断线重连宽限
+
+  /** 主机意外断线：启动宽限计时，超时前可重连恢复原局 */
+  private startHostGrace(): void {
+    this.cancelHostGrace();
+    const timer = setTimeout(() => {
+      this.hostGraceTimer = null;
+      this.expireHostGrace();
+    }, this.opts.graceMs);
+    timer.unref();
+    this.hostGraceTimer = timer;
+  }
+
+  private cancelHostGrace(): void {
+    if (this.hostGraceTimer) {
+      clearTimeout(this.hostGraceTimer);
+      this.hostGraceTimer = null;
+    }
+  }
+
+  /** 主机宽限超时：释放席位，服务回到未开局状态 */
+  private expireHostGrace(): void {
+    if (this.hostConn) return; // 宽限期内已重连
+    this.hosting = false;
+    this.game.reset('idle');
+    this.sendTo('b', { type: 'opponent_left', reason: '主机已离开' });
+  }
+
+  /** 加入者意外断线：启动宽限计时，超时前可重连恢复原局 */
+  private startGuestGrace(): void {
+    this.cancelGuestGrace();
+    const timer = setTimeout(() => {
+      this.guestGraceTimer = null;
+      this.expireGuestGrace();
+    }, this.opts.graceMs);
+    timer.unref();
+    this.guestGraceTimer = timer;
+  }
+
+  private cancelGuestGrace(): void {
+    if (this.guestGraceTimer) {
+      clearTimeout(this.guestGraceTimer);
+      this.guestGraceTimer = null;
+    }
+  }
+
+  /** 加入者宽限超时：清空席位，主机回到等待新对手 */
+  private expireGuestGrace(): void {
+    if (this.guestConn) return; // 宽限期内已重连
+    this.dropGuestSeat('对手已离开');
+  }
+
+  /** 清空客方席位并重置为等待状态（宽限超时 / 主机放弃等待时调用） */
+  private dropGuestSeat(reason: string): void {
+    this.guestConn = null;
+    this.game.reset(this.hosting ? 'waiting' : 'idle');
+    this.sendTo('r', { type: 'state', state: this.game.snapshot() });
+    this.sendTo('r', { type: 'opponent_left', reason });
   }
 
   // ------------------------------------------------------------ 发送工具
@@ -429,6 +539,12 @@ export class HostServer {
     this.sendTo('r', msg);
     this.sendTo('b', msg);
   }
+}
+
+/** 目标路径必须位于 root 内：防 `../` 穿越，也防「dist-evil」类同前缀兄弟目录误判 */
+function isInsideRoot(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 function defaultStaticDir(): string {

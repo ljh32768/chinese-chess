@@ -30,6 +30,8 @@ const S = {
   moveSeq: 0,
   /** 已发出、等待对方回应的请求（用于侧栏等待状态） */
   pending: null as null | 'draw' | 'restart',
+  /** 对手意外断线、宽限期等待重连中（服务端 opponent_away） */
+  oppAway: false,
 };
 
 let net: Net | null = null;
@@ -85,7 +87,7 @@ function closeModal(): void {
 // -------------------------------------------------------------- 渲染
 
 function render(): void {
-  const canPlay = S.status === 'playing' && S.turn === S.side;
+  const canPlay = S.status === 'playing' && S.turn === S.side && !S.oppAway;
   renderBoard(boardEl, {
     board: S.board,
     selected: S.selected,
@@ -131,6 +133,8 @@ function updatePanel(): void {
   st.classList.toggle('draw', over && S.winner === null);
   if (S.status === 'over') {
     st.textContent = `${resultText()} · ${S.reason}`;
+  } else if (active && S.oppAway) {
+    st.textContent = '对手已断开，等待重连…';
   } else if (active && S.check) {
     st.textContent = S.turn === S.side ? '⚠ 你被将军了' : '⚠ 对方被将军';
   } else if (active) {
@@ -159,6 +163,7 @@ function applySnapshot(s: GameSnapshot): void {
   S.selected = null;
   S.moves = [];
   S.pending = null;
+  S.oppAway = false;
   updateRoleHint();
   if ($('screen-game').classList.contains('active')) render();
 }
@@ -195,6 +200,15 @@ function handleMessage(msg: ServerMessage): void {
       break;
     case 'state':
       applySnapshot(msg.state);
+      // 宽限超时 / 放弃等待后主机回到等待页（等待新对手加入）；顺带关闭断线弹层
+      if (S.role === 'host' && S.status === 'waiting') {
+        closeModal();
+        $('host-wait').textContent = '对手已离开，等待新对手加入…';
+        show('screen-host');
+      } else if (S.role === 'host' && S.status === 'idle') {
+        closeModal();
+        show('screen-home');
+      }
       break;
     case 'game_over':
       applySnapshot(msg.state);
@@ -230,7 +244,29 @@ function handleMessage(msg: ServerMessage): void {
       updatePanel();
       break;
     case 'opponent_joined':
-      $('host-wait').textContent = '对手已加入，正在开局…';
+      closeModal();
+      if (S.status === 'playing') {
+        toast('对手已重新连接');
+      } else {
+        $('host-wait').textContent = '对手已加入，正在开局…';
+      }
+      updatePanel();
+      break;
+    case 'opponent_away':
+      // 对手意外断线：进入宽限等待（主机可放弃等待，改为等待新对手）
+      S.oppAway = true;
+      updatePanel();
+      showModal({
+        title: '对手已断开',
+        sub: '正在等待对方重连（限时恢复）',
+        buttons:
+          S.role === 'host'
+            ? [
+                { label: '继续等待重连', primary: true },
+                { label: '等待新对手', onClick: () => net?.send({ type: 'wait_new_opponent' }) },
+              ]
+            : [{ label: '继续等待重连', primary: true }],
+      });
       break;
     case 'opponent_left':
       handleOpponentLeft(msg.reason);
@@ -263,6 +299,7 @@ function handleOpponentLeft(reason: string): void {
   const sub = reason === '对手已离开' ? '本局已结束，可返回首页重新开局' : reason;
   if (S.status === 'playing' || S.status === 'over') {
     S.status = 'over';
+    S.oppAway = false;
     render();
     showModal({
       title: '对手已离开',
@@ -278,6 +315,7 @@ function handleOpponentLeft(reason: string): void {
 function handleClosed(reason: string): void {
   if (S.status === 'playing' || S.status === 'over') {
     S.status = 'over';
+    S.oppAway = false;
     render();
     showModal({
       title: '连接已断开',
@@ -495,6 +533,7 @@ function bindEvents(): void {
 
   boardEl.addEventListener('click', (e) => {
     if (S.status !== 'playing') return;
+    if (S.oppAway) return toast('对手已断开，等待重连');
     if (S.turn !== S.side) return toast('还没轮到你走棋');
     const pt = svgPoint(boardEl, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
     const pos = pickCell(pt.x, pt.y, flip());

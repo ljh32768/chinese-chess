@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { HostServer } from '../src/server/host-server.js';
@@ -10,13 +11,14 @@ let server: HostServer | null = null;
 const clients: TestClient[] = [];
 
 /** 随机取一个高位端口并启动服务，避开 fetch 屏蔽的端口与端口占用 */
-async function startServer(): Promise<HostServer> {
+async function startServer(graceMs?: number): Promise<HostServer> {
   let lastErr: unknown = null;
   for (let i = 0; i < 5; i++) {
     const candidate = new HostServer({
       port: 20000 + Math.floor(Math.random() * 30000),
       staticDir: null,
       host: '127.0.0.1',
+      graceMs,
     });
     try {
       await candidate.listen();
@@ -27,6 +29,20 @@ async function startServer(): Promise<HostServer> {
     }
   }
   throw lastErr ?? new Error('无法启动测试服务');
+}
+
+/** 用原始路径发请求（fetch 会规范化 URL，无法发送 `..%2F` 这类路径） */
+function rawGet(port: number, rawPath: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path: rawPath, method: 'GET' }, (res) => {
+      let body = '';
+      res.setEncoding('utf-8');
+      res.on('data', (chunk: string) => (body += chunk));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 async function connect(port: number, role: 'host' | 'guest'): Promise<TestClient> {
@@ -140,6 +156,16 @@ describe('主机服务 · 走子同步', () => {
     await guest.expectNo('move_applied');
   });
 
+  it('非整数坐标被拒绝为坐标非法，服务仍可继续走子', async () => {
+    const { host } = await setup();
+    host.send({ type: 'move', from: [1.5, 0], to: [2, 0] });
+    const rejected = await host.waitType('move_rejected');
+    expect(rejected.reason).toBe('坐标非法');
+
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await host.waitType('move_applied')).seq).toBe(1);
+  });
+
   it('走子后轮到对方，双方棋盘一致', async () => {
     const { host, guest } = await setup();
     host.send({ type: 'move', from: [7, 1], to: [7, 4] }); // 红炮平移到中路
@@ -209,7 +235,7 @@ describe('主机服务 · 对局控制', () => {
 });
 
 describe('主机服务 · 断线与心跳', () => {
-  it('对手断线会给另一方提示', async () => {
+  it('对手意外断线进入宽限等待并通知另一方', async () => {
     const s = await startServer();
     s.setHosting(true);
     const host = await connect(s.address.port, 'host');
@@ -219,8 +245,9 @@ describe('主机服务 · 断线与心跳', () => {
     await host.waitType('start');
 
     guest.close();
-    const left = await host.waitType('opponent_left');
-    expect(left.reason).toBe('对手已离开');
+    const away = await host.waitType('opponent_away');
+    expect(away.reason).toBe('对手已断开');
+    expect(away.graceMs).toBe(30000);
   });
 
   it('ping 会得到 pong', async () => {
@@ -241,6 +268,118 @@ describe('主机服务 · 断线与心跳', () => {
     expect(err.message).toBe('无法解析的消息');
     host.send({ type: 'ping', t: 1 });
     expect((await host.waitType('pong')).t).toBe(1);
+  });
+});
+
+describe('主机服务 · 断线重连（宽限期）', () => {
+  /** 开局并走一步，制造可验证的进行中局面（红车 [9,0]→[8,0]） */
+  async function setupPlaying(graceMs: number) {
+    const s = await startServer(graceMs);
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+    await guest.waitType('start');
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    await guest.waitType('move_applied');
+    return { s, host, guest };
+  }
+
+  it('加入者意外断线后对局保留，宽限期内重连恢复原局面', async () => {
+    const { s, host, guest } = await setupPlaying(1000);
+    guest.close();
+    const away = await host.waitType('opponent_away');
+    expect(away.reason).toBe('对手已断开');
+    expect(away.graceMs).toBe(1000);
+    expect(s.game.status).toBe('playing');
+    expect(s.game.moveSeq).toBe(1);
+
+    const guest2 = await connect(s.address.port, 'guest');
+    const w = await guest2.waitType('welcome');
+    expect(w.side).toBe('b');
+    expect(w.state.status).toBe('playing');
+    expect(w.state.moveSeq).toBe(1);
+    expect(at(w.state.board, 8, 0)).toEqual({ t: 'R', s: 'r' });
+
+    await host.waitType('opponent_joined');
+    const sync = await host.waitType('state');
+    expect(sync.state.status).toBe('playing');
+    expect(sync.state.moveSeq).toBe(1);
+
+    // 恢复后对局可继续（轮到黑方）
+    guest2.send({ type: 'move', from: [3, 0], to: [4, 0] });
+    const applied = await host.waitType('move_applied');
+    expect(applied.seq).toBe(2);
+    expect(applied.turn).toBe('r');
+  });
+
+  it('宽限超时后清空席位并回到等待新对手', async () => {
+    const { host, guest } = await setupPlaying(80);
+    guest.close();
+    await host.waitType('opponent_away');
+
+    const st = await host.waitType('state');
+    expect(st.state.status).toBe('waiting');
+    expect(st.state.moveSeq).toBe(0); // 已重置为等待状态
+    const left = await host.waitType('opponent_left');
+    expect(left.reason).toBe('对手已离开');
+
+    // 新加入者加入即可开新局
+    const guest2 = await connect(server!.address.port, 'guest');
+    const start = await guest2.waitType('start');
+    expect(start.state.status).toBe('playing');
+    expect(start.state.moveSeq).toBe(0);
+  });
+
+  it('主机可放弃等待断线对手，立即转为等待新对手', async () => {
+    const { host, guest } = await setupPlaying(5000);
+    guest.close();
+    await host.waitType('opponent_away');
+
+    host.send({ type: 'wait_new_opponent' });
+    const st = await host.waitType('state');
+    expect(st.state.status).toBe('waiting');
+    const left = await host.waitType('opponent_left');
+    expect(left.reason).toBe('已放弃等待对方重连');
+
+    // 宽限计时器已取消，新对手可立即加入开局
+    const guest2 = await connect(server!.address.port, 'guest');
+    const start = await guest2.waitType('start');
+    expect(start.state.status).toBe('playing');
+  });
+
+  it('主动离开（leave）不走宽限，立即通知对手', async () => {
+    const { host, guest } = await setupPlaying(5000);
+    guest.send({ type: 'leave' });
+    const left = await host.waitType('opponent_left');
+    expect(left.reason).toBe('对手已离开');
+    await host.expectNo('opponent_away');
+  });
+
+  it('主机意外断线保留对局，宽限期内重连恢复', async () => {
+    const { s, host, guest } = await setupPlaying(1000);
+    host.close();
+    const away = await guest.waitType('opponent_away');
+    expect(away.reason).toBe('主机已断开');
+    expect(s.game.status).toBe('playing');
+
+    const host2 = await connect(s.address.port, 'host');
+    const w = await host2.waitType('welcome');
+    expect(w.side).toBe('r');
+    expect(w.state.status).toBe('playing');
+    expect(w.state.moveSeq).toBe(1);
+
+    await guest.waitType('opponent_joined');
+    const sync = await guest.waitType('state');
+    expect(sync.state.status).toBe('playing');
+
+    // 恢复后仍可继续走子（轮到黑方）
+    guest.send({ type: 'move', from: [3, 0], to: [4, 0] });
+    const applied = await host2.waitType('move_applied');
+    expect(applied.seq).toBe(2);
   });
 });
 
@@ -285,6 +424,9 @@ describe('主机服务 · 静态资源', () => {
     fs.writeFileSync(path.join(dir, 'shared', 'rules.js'), 'export const rules = 1;');
     // 静态根目录之外的敏感文件不应能被访问
     fs.writeFileSync(secret, 'top-secret');
+    // 与根目录前缀相同的兄弟目录（dist-evil 类）：startsWith 判断会误判放行
+    fs.mkdirSync(path.join(base, 'root-evil'), { recursive: true });
+    fs.writeFileSync(path.join(base, 'root-evil', 'secret.txt'), 'sibling-secret');
 
     for (let i = 0; i < 5 && !server; i++) {
       const candidate = new HostServer({
@@ -343,5 +485,12 @@ describe('主机服务 · 静态资源', () => {
     );
     expect(res.status).toBe(404);
     expect(await res.text()).not.toContain('secret');
+  });
+
+  it('拒绝同前缀兄弟目录（root-evil）的路径穿越', async () => {
+    // 原始请求路径保留编码，避免 fetch/URL 规范化掉 `..`
+    const res = await rawGet(server!.address.port, '/..%2Froot-evil%2Fsecret.txt');
+    expect(res.status).toBe(404);
+    expect(res.body).not.toContain('sibling-secret');
   });
 });

@@ -10,10 +10,10 @@ export type Role = 'host' | 'guest';
 
 /** 客户端 → 服务端 */
 export type ClientMessage =
-  /** 加入对局，声明角色 */
+  /** 加入对局，声明角色（宽限期内同阵营重新 join 即恢复原对局） */
   | { type: 'join'; role: Role }
   /** 走子请求（加入者 / 主机都走这条；由主机校验） */
-  | { type: 'move'; from: Pos; to: Pos; seq?: number }
+  | { type: 'move'; from: Pos; to: Pos }
   /** 认输 */
   | { type: 'resign' }
   /** 发起和棋请求 */
@@ -24,6 +24,8 @@ export type ClientMessage =
   | { type: 'restart_request' }
   /** 回应重开请求 */
   | { type: 'restart_response'; accept: boolean }
+  /** 主机放弃等待断线对手，立即转为等待新对手 */
+  | { type: 'wait_new_opponent' }
   /** 离开对局 */
   | { type: 'leave' }
   /** 心跳 */
@@ -51,7 +53,7 @@ export type ServerMessage =
     }
   /** 走子被拒绝 */
   | { type: 'move_rejected'; from: Pos; to: Pos; reason: string }
-  /** 全量状态同步（重开 / 重连 / 加入后） */
+  /** 全量状态同步（断线重连恢复 / 宽限结束回到等待 / 重开） */
   | { type: 'state'; state: GameSnapshot }
   /** 对手发起和棋请求 */
   | { type: 'draw_request' }
@@ -65,6 +67,8 @@ export type ServerMessage =
   | { type: 'game_over'; winner: Side | null; reason: string; state: GameSnapshot }
   /** 对手加入（通知主机） */
   | { type: 'opponent_joined' }
+  /** 对手意外断线，进入宽限期等待重连（graceMs 为宽限时长） */
+  | { type: 'opponent_away'; reason: string; graceMs: number }
   /** 对手离开 / 断线 */
   | { type: 'opponent_left'; reason: string }
   /** 协议或状态错误 */
@@ -85,4 +89,9 @@ export function decode(raw: string): { type: string } & Record<string, unknown> 
   } catch {
     return null;
   }
+}
+
+/** 校验走子坐标：必须是 [行, 列] 的整数对（越界由规则引擎另行判定） */
+export function isValidPos(p: unknown): p is Pos {
+  return Array.isArray(p) && p.length === 2 && p.every((n) => Number.isInteger(n));
 }
