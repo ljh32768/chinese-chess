@@ -2,7 +2,7 @@
 
 - 状态：已接受（记录现状实现）
 - 日期：2026-10-03
-- 关联入口：首页、主机等待页、加入页、对局页、结束结果卡、断线提示、视角翻转、心跳
+- 关联入口：首页、主机等待页（含地址复制）、加入页、对局页、结束结果卡、断线提示、视角翻转、悬停反馈、快捷键、心跳
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0005 主机服务](./0005-host-server.md)
 
 ---
@@ -31,10 +31,10 @@
 | 屏 | id | 元素与入口 |
 |---|---|---|
 | 首页 | `screen-home` | 「创建对局」`btn-create`、「加入对局」`btn-show-join`、本机地址提示 `home-hint` |
-| 主机等待 | `screen-host` | 地址 `host-ip`、等待文案 `host-wait`、取消 `btn-cancel-host` |
+| 主机等待 | `screen-host` | 地址大字显示 `host-ip`、复制地址 `btn-copy-ip`（非安全上下文降级）、等待文案 `host-wait`、取消 `btn-cancel-host` |
 | 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、返回 `btn-join-back`、错误提示 `join-msg` |
-| 对局 | `screen-game` | SVG 棋盘 `board`、双方信息 `p-top/p-bottom`、状态框 `status-box`（对局中提示 / 结束结果卡）、两组操作按钮 `actions-play`（`btn-resign/btn-draw/btn-leave`）与 `actions-over`（`btn-play-again/btn-home`）、角色提示 `role-hint` |
-| 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；仅用于和棋/重开请求、认输确认、对手离开与断线提示，**不用于对局结束** |
+| 对局 | `screen-game` | SVG 棋盘 `board`、双方信息 `p-top/p-bottom`、状态框 `status-box`（对局中提示 / 结束结果卡）、请求等待提示 `req-hint`（和棋/重开发出后显示）、两组操作按钮 `actions-play`（`btn-resign/btn-draw/btn-leave`）与 `actions-over`（`btn-play-again/btn-home`）、角色提示 `role-hint` |
+| 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；仅用于和棋/重开请求、认输确认、对手离开与断线提示，**不用于对局结束** |
 | 轻提示 | `toast` | 1.8s 自动消失 |
 
 ### 3.2 客户端镜像状态 `S`（app.ts）
@@ -47,6 +47,7 @@
 | `status` / `winner` / `reason` | 对局状态与结果 |
 | `selected` / `moves` | 当前选中的棋子与本地计算的合法落点（仅提示用） |
 | `lastMove` | 上一步高亮 |
+| `pending` | 已发出、等待对方回应的请求（`'draw'` / `'restart'` / null），驱动 `req-hint` 等待提示 |
 
 ### 3.3 页面流转
 
@@ -65,12 +66,15 @@
 | `move_rejected` | toast「走子无效：<原因>」 |
 | `state` | 应用快照 |
 | `game_over` | 应用快照（结果卡由 `updatePanel` 呈现，不遮挡棋盘） |
-| `draw_request` | 弹层「对方请求和棋」→ 发送 `draw_response` |
-| `draw_response` | 拒绝时 toast 提示 |
-| `restart_request` | 弹层「对方请求重开」→ 发送 `restart_response` |
-| `restart_response` | 拒绝时 toast 提示 |
+| `draw_request` | 弹层「对方请求和棋」→ 同意/拒绝发送 `draw_response` |
+| `draw_response` | 清空 `pending`；拒绝时 toast 提示 |
+| `restart_request` | 弹层「对方请求重开」→ 同意/拒绝发送 `restart_response` |
+| `restart_response` | 清空 `pending`；拒绝时 toast 提示 |
 | `opponent_joined` | 等待页文案更新为「对手已加入，正在开局…」 |
 | `opponent_left` | 对局中：弹「对手已离开」；否则 toast |
+| `error` | toast 服务端错误消息（如「尚未加入对局」），不再静默丢弃 |
+
+`applySnapshot` 会同时清空 `selected` / `moves` / `pending`，保证任何全量同步后回到干净状态。
 
 ### 3.5 棋盘渲染规格（board.ts）
 
@@ -86,8 +90,8 @@
 | 棋盘线 | 10 条横线 + 9 条竖线（中间列在楚河汉界处断开）+ 九宫斜线 + 外框 |
 | 文字 | 「楚河」「汉界」 |
 | 上一步 | 金色双圆环（from/to） |
-| 合法落点 | 空点=绿色实心小圆；可吃子=绿色空心环 |
-| 棋子 | 圆盘 + 内圈 + 汉字（帅仕相马车炮兵 / 将士象马车炮卒），红黑配色 |
+| 合法落点 | 空点=绿色实心小圆（`mv mv-dot`）；可吃子=绿色空心环（`mv mv-cap`） |
+| 棋子 | 圆盘 + 内圈 + 汉字（帅仕相马车炮兵 / 将士象马车炮卒），红黑配色；`interactiveSide` 一方的棋子带 `hoverable` 类与悬停环（`ring`，默认透明） |
 | 选中 | 金色高亮环 |
 | 将军/将死警示 | 被将军（含将死）一方的将/帅加红色脉冲环（`checkKing`，CSS `checkPulse`） |
 | 视角翻转 | `toView/toLogic`：黑方视角 `[9-r, 8-c]` |
@@ -107,7 +111,18 @@
 | 非本方回合点击 | toast「还没轮到你走棋」 |
 | 对局已结束点击 | 无响应（棋盘只读，保留终局画面） |
 
-### 3.7 连接与心跳（net.ts）
+### 3.7 悬停反馈与快捷键（A 档增强）
+
+| 项 | 规格 |
+|---|---|
+| 悬停预高亮 | `render()` 在「对局中且轮到自己」时传入 `interactiveSide`；己方棋子带 `hoverable`，CSS `:hover` 显示金色环；合法落点 `mv-dot` / `mv-cap` 悬停放大/加粗 |
+| 光标 | `#board` 默认光标；仅 `.piece.hoverable`、`.mv-dot`、`.mv-cap` 为手型。触摸设备无 hover，不受影响 |
+| ESC | 有弹层时关闭弹层；否则调用 `clearSelection()` 取消棋盘选中 |
+| 右键 | 棋盘 `contextmenu` 阻止默认菜单并取消选中 |
+| 遮罩点击 | 点击 `modal` 遮罩空白处关闭弹层（等效「取消」） |
+| 请求等待态 | `offerDraw` / `requestRestart` 发出后置 `pending` 并在 `req-hint` 显示等待文案，已有 `pending` 时防重复发送；收到响应或快照同步时清空 |
+
+### 3.8 连接与心跳（net.ts）
 
 | 项 | 规格 |
 |---|---|
@@ -116,7 +131,7 @@
 | 主动关闭 | `close()` 置 `closing=true`，不触发断线提示 |
 | 地址来源 | 主机：`ws://${location.host}/ws`；加入者：`ws://${ip}:${port}/ws`，端口须为纯数字 |
 
-### 3.8 明确不做
+### 3.9 明确不做
 
 动画/音效/皮肤、移动端专门适配（仅基础 viewport）、断线自动重连、聊天、悔棋、计时显示。
 
@@ -125,14 +140,15 @@
 | 内容 | 位置 |
 |---|---|
 | 页面结构 / 控件 id | [index.html](../../src/renderer/index.html) |
-| 镜像状态 `S` | [app.ts](../../src/renderer/app.ts#L18-L31) |
-| 页面切换/弹层/toast | [app.ts](../../src/renderer/app.ts#L41-L81) |
-| 消息处理 | [app.ts `handleMessage()`](../../src/renderer/app.ts#L161-L233) |
-| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts#L103-L137) |
-| 创建/取消/加入/离开 | [app.ts](../../src/renderer/app.ts#L283-L351) |
-| 走子交互 | [app.ts `onCell()`](../../src/renderer/app.ts#L381-L411) |
-| 棋盘标记生成 | [board.ts `boardMarkup()`](../../src/renderer/board.ts#L64-L147) |
-| 棋盘挂载 / 坐标与点击 | [board.ts `renderBoard()`](../../src/renderer/board.ts#L149-L152)、[board.ts](../../src/renderer/board.ts#L23-L62) |
+| 镜像状态 `S` | [app.ts](../../src/renderer/app.ts#L18-L33) |
+| 页面切换/弹层/toast | [app.ts](../../src/renderer/app.ts#L43-L85) |
+| 消息处理 | [app.ts `handleMessage()`](../../src/renderer/app.ts#L173-L245) |
+| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts#L107-L148) |
+| 创建/取消/复制地址/加入/离开 | [app.ts](../../src/renderer/app.ts#L309-L407) |
+| 走子交互 | [app.ts `onCell()`](../../src/renderer/app.ts#L449-L481) |
+| 取消选中与快捷键 | [app.ts `clearSelection()`](../../src/renderer/app.ts#L440-L445)、[app.ts `bindEvents()`](../../src/renderer/app.ts#L483-L526) |
+| 棋盘标记生成 | [board.ts `boardMarkup()`](../../src/renderer/board.ts#L72-L154) |
+| 棋盘挂载 / 坐标与点击 | [board.ts `renderBoard()`](../../src/renderer/board.ts#L157-L159)、[board.ts](../../src/renderer/board.ts#L23-L62) |
 | WebSocket 客户端 | [net.ts](../../src/renderer/net.ts#L38-L103) |
 | 心跳 | [net.ts `startPing()`](../../src/renderer/net.ts#L120-L133) |
 
@@ -142,3 +158,6 @@
 - 加入者执黑时棋盘自动上下翻转，点击命中与显示一致。
 - 主机广播的任何快照都能正确渲染（包括 `check` 提示与终局状态）。
 - 对方断线/主机断线均有明确弹层提示，不白屏、不崩溃。
+- 等待页地址可一键复制（非安全上下文降级为选中文本 + `execCommand`）。
+- 悬停己方棋子/合法落点有预高亮且光标为手型；ESC / 右键可取消选中，ESC / 遮罩可关闭弹层。
+- 请求发出后侧栏显示等待状态；矮窗口下内容不被裁剪、可滚动。

@@ -1,7 +1,7 @@
 # 局域网象棋 MVP 优化建议（Roadmap）
 
-- 版本：v1.0
-- 状态：建议清单（未排期；已完成项见第 3 节）
+- 版本：v1.1
+- 状态：A 档（A1–A7）已完成并验证（见第 3 节）；B/C/D 档待排期
 - 日期：2026-10-03
 - 关联文档：[README.md](./README.md)（模块化与功能入口）、[adr/](./adr/)（现状规格）、[Product-plan.md](./Product-plan.md)（产品规划）
 
@@ -20,40 +20,7 @@
 
 ### A 快速见效（改动小、可感知）
 
-**A1 客户端补齐 `error` 消息处理**
-- 现状：服务端在 `join` 之后回的错误消息（如"尚未加入对局"）在客户端被静默丢弃——[handleMessage](../src/renderer/app.ts#L161-L233) 没有 `error` 分支。
-- 方案：补 `case 'error'` → toast 提示。
-- 落点：[app.ts `handleMessage()`](../src/renderer/app.ts#L161-L233)。
-
-**A2 等待页地址展示增强（电脑/平板场景）**
-- 现状：主机等待页仅展示地址文本，对手需手动输入。
-- 方案：地址大字显示 + 一键复制（注意：局域网为 http 非安全上下文，`navigator.clipboard` 不可用，需用选中文本 / `execCommand('copy')` 降级）；二维码作为可选项（平板相机扫码可直达页面，打开后加入表单会自动预填地址）。
-- 落点：[index.html](../src/renderer/index.html)、[app.ts `init()`](../src/renderer/app.ts#L441-L455)。
-
-**A3 弹层交互完善**
-- 现状：弹层只能通过按钮关闭；和棋/重开请求发出后仅一闪而过的 toast，无"等待对方响应"状态。
-- 方案：ESC / 点击遮罩关闭；请求发出后侧栏状态区显示等待状态。
-- 落点：[app.ts](../src/renderer/app.ts)（`showModal` / `offerDraw` / `requestRestart`）、[styles.css](../src/renderer/styles.css)。
-
-**A4 大屏空间利用**
-- 现状：[.app 上限 960px](../src/renderer/styles.css#L11)、[棋盘最大 500px](../src/renderer/styles.css#L94-L105)，在 1080p/2K 显示器上棋盘偏小、留白多。
-- 方案：放开宽带上限（约 1180px）；棋盘按视口高度自适应（如 `max-height: calc(100vh - 100px)` 等比缩放）；侧栏加宽，为棋谱/吃子面板预留位置（与 D2 联动）。
-- 落点：[styles.css](../src/renderer/styles.css)。
-
-**A5 鼠标悬停反馈**
-- 现状：棋盘光标恒为手型，没有悬停态。
-- 方案：hover 预高亮（悬停己方棋子、悬停合法落点）；光标仅在可交互位置为手型。触摸设备无 hover，不影响平板。
-- 落点：[board.ts](../src/renderer/board.ts)、[app.ts `bindEvents()`](../src/renderer/app.ts#L415-L439)、[styles.css](../src/renderer/styles.css)。
-
-**A6 键鼠快捷操作**
-- 现状：仅加入页支持 Enter 提交。
-- 方案：ESC 取消选中；右键（`contextmenu`）取消选中；弹层 ESC 关闭（与 A3 合并实现）。
-- 落点：[app.ts `bindEvents()`](../src/renderer/app.ts#L415-L439)。
-
-**A7 矮窗口 / 页面缩放裁剪修复**
-- 现状：[body](../src/renderer/styles.css#L3-L11) 为 `height:100%` + flex 垂直居中，内容高于视口时上半部分溢出且无法滚动到（经典 flex 居中裁剪）。
-- 方案：`min-height:100%`（或 `align-items:safe center`）。
-- 落点：[styles.css](../src/renderer/styles.css#L3-L11)。
+A1–A7 已全部完成并验证（commit `d3065ad`），明细见第 3 节。
 
 ### B 稳健性
 
@@ -109,6 +76,13 @@
 
 | 项 | 说明 | 记录 |
 |---|---|---|
+| A1 错误提示 | 客户端补齐 `error` 分支，服务端错误消息以 toast 呈现，不再静默丢弃 | commit `d3065ad` |
+| A2 地址复制 | 等待页地址大字显示 + 一键复制；http 非安全上下文降级「选中文本 + `execCommand('copy')`」 | commit `d3065ad` |
+| A3 弹层与等待态 | 弹层支持 ESC / 点击遮罩关闭；和棋/重开请求发出后侧栏显示等待状态并防重复发送 | commit `d3065ad` |
+| A4 大屏布局 | 布局宽度上限 960→1180px；棋盘按视口高度等比缩放；侧栏加宽（为 D2 棋谱预留） | commit `d3065ad` |
+| A5 悬停反馈 | 己方棋子悬停金色预高亮环、合法落点悬停放大；光标仅在可交互位置为手型 | commit `d3065ad` |
+| A6 快捷键 | ESC / 右键取消选中（ESC 优先关闭弹层）；触摸设备不受影响 | commit `d3065ad` |
+| A7 矮窗口修复 | body 高度改 `min-height`，内容高于视口时随内容撑开，修复 flex 居中裁剪 | commit `d3065ad` |
 | 终局结果卡 | 对局结束不再全屏遮挡，侧栏结果卡 + 操作组切换（再来一局 / 返回首页） | commit `34c6f36` |
 | 将帅警示高亮 | 被将军 / 将死一方的将、帅红色脉冲环（`checkKing`） | commit `34c6f36` |
 | 移除失效「重开」 | 对局中重开服务端不受理，重开语义由结束态「再来一局」承担 | commit `34c6f36` |

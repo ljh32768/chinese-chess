@@ -104,7 +104,7 @@ B ── restart_response{accept:true} ─►  双方 ◄── restart_response
 | ClientMessage / ServerMessage 联合类型 | [protocol.ts](../../src/shared/protocol.ts#L12-L73) |
 | encode / decode | [protocol.ts](../../src/shared/protocol.ts#L75-L88) |
 | 消息路由实现 | [host-server.ts `handleMessage()`](../../src/server/host-server.ts#L250-L342) |
-| 客户端消息分发 | [app.ts `handleMessage()`](../../src/renderer/app.ts#L163-L237) |
+| 客户端消息分发 | [app.ts `handleMessage()`](../../src/renderer/app.ts#L173-L245) |
 | 客户端发送封装 | [net.ts `send()`](../../src/renderer/net.ts#L105-L107) |
 
 ## 5. 验收标准
