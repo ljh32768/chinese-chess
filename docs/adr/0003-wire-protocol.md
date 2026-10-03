@@ -21,6 +21,8 @@ MVP 不做房间系统与二进制优化，优先保证「创建、加入、走�
 - `seq`（= `Game.moveSeq`）随每步走子**单调递增（+1）**，作为状态版本号随广播下发。
 - 编解码：`encode()` 为 `JSON.stringify`；`decode()` 做基础结构校验（必须是含字符串 `type` 的对象），
   解析失败返回 `null`，由调用方回复 `error`。
+- C/D 档扩展（观战 `spectator`、悔棋 `undo_request/undo_response`、`move_applied.history/deadline`、
+  `pong.ip/port`、`join.role` 三态）详见 [ADR-0009](./0009-c-d-extensions.md)。
 
 ## 3. 详细规格
 

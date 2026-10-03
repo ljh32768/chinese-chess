@@ -30,19 +30,28 @@ MVP 的交付底线是「能完整、正确地下一盘棋」。
 | 文件 | 层级 | 覆盖内容 |
 |---|---|---|
 | [rules.test.ts](../../tests/rules.test.ts) | 单元 | 开局 32 子；将帅九宫；各棋子走法（车/马蹩腿/炮架/象塞眼/士/将/过河卒）；照面；将军；将死/困毙；`validateMove` 各拒绝原因 |
-| [game.test.ts](../../tests/game.test.ts) | 单元 | `reset` 初始态；合法走子切换回合/`seq+1`/`lastMove`；非本方回合拒绝；非法走子棋盘不变；吃子；认输/和棋/重开 |
-| [fullgame.test.ts](../../tests/fullgame.test.ts) | 端到端 | 35 步将杀线回放：双方每步棋盘一致且与主机权威一致；`seq` 单调 +1；终局 `game_over` 原因=`将死`；结束后可重开回到初始局面 |
-| [server.test.ts](../../tests/server.test.ts) | 集成 | 未创建对局 guest 被拒；创建后双方加入自动开局；走子广播；非法走子拒绝；认输/和棋/重开/离开；断线通知 |
+| [game.test.ts](../../tests/game.test.ts) | 单元 | `reset` 初始态；合法走子切换回合/`seq+1`/`lastMove`；非本方回合拒绝；非法走子棋盘不变；吃子；认输/和棋/重开；终局清理 pending；悔棋回退；history 快照 |
+| [board.test.ts](../../tests/board.test.ts) | 单元 | 棋子与楚河汉界渲染；将军警示环；视角翻转；上一步；合法落点；悬停标记 |
+| [notation.test.ts](../../tests/notation.test.ts) | 单元 | 传统中文记谱（炮二平五/马八进七/卒3进1/前后消歧/斜走目标列）；describeHistory 回放；capturedPieces 吃子统计 |
+| [ai.test.ts](../../tests/ai.test.ts) | 单元 | 一步杀、白吃子、无着法返回 null、开局着法合法且 depth=2 耗时 < 1500ms |
+| [net.test.ts](../../tests/net.test.ts) | 单元 | 连接握手（join/welcome/error）；心跳 5s 与 16s 无 pong 判离线（假定时器 + 假 WebSocket）；主动关闭不提示 |
+| [fullgame.test.ts](../../tests/fullgame.test.ts) | 端到端 | 35 步将杀线回放：双方每步棋盘一致且与主机权威一致；`seq` 单调 +1；终局 `game_over` 原因=`将死`；history 与着法线一致；结束后可重开回到初始局面 |
+| [server.test.ts](../../tests/server.test.ts) | 集成 | 加入/开局/走子广播/拒绝；非整数坐标；认输/和棋/重开（含拒绝分支）/悔棋/离开；断线宽限与重连恢复；宽限超时；观战只读；人机对战（AI 自动应招/自动同意悔棋/拒绝和棋）；计时超时判负；日志打点与端口回退；静态资源 MIME 与路径穿越 |
+| [discover.test.ts](../../tests/discover.test.ts) | 单元/集成 | 真实主机探测；无服务端口返回 null；网段扫描聚合、按声明地址去重与进度回调 |
 | [lan-ip.test.ts](../../tests/lan-ip.test.ts) | 单元 | 无候选返回 null；192.168 优先；虚拟网卡降权；忽略 IPv6 |
 
 ### 3.2 执行方式
 
 ```bash
 npm test          # 全量（vitest run，CI 友好，非 watch）
+npm run lint      # ESLint（typescript-eslint recommended）
+npm run format:check   # Prettier 校验（printWidth 110；CSS/HTML/docs 不纳入）
+npm run build     # tsc + 静态资源复制
 ```
 
 - 交付前必须全绿；新增功能/修复必须同步新增或更新对应用例（项目约定）。
 - 端到端用例的等待消息均有超时保护，失败时给出明确断言信息，而非挂起。
+- GitHub Actions（`.github/workflows/ci.yml`）按 lint → format → build → test 顺序执行。
 
 ### 3.3 端到端回放的关键断言（对应验收标准）
 
@@ -59,13 +68,15 @@ npm test          # 全量（vitest run，CI 友好，非 watch）
 
 - 真实局域网双设备连通性（涉及防火墙与网卡环境）；
 - Electron 窗口行为与视觉布局；
-- 棋盘点击命中、视角翻转的交互观感。
+- 棋盘点击命中、视角翻转、悬停反馈的交互观感；
+- 人机对战应招、观战只读、棋谱/吃子面板、搜索主机、倒计时显示的端到端观感。
 
-建议回归路径：`npm start` → 创建对局 → 本机浏览器打开地址加入 → 走子/认输/和棋/重开各验证一次。
+建议回归路径：`npm start`（或 `npm run dev`）→ 创建对局 → 本机浏览器打开地址加入 → 走子/悔棋/认输/和棋/重开各验证一次；
+再以「人机对战」与「观战」各跑一遍。
 
 ### 3.5 明确不做
 
-覆盖率门禁、性能基准、混沌/模糊测试、浏览器 E2E 驱动（Playwright 等）、CI 配置。
+覆盖率门禁、性能基准、混沌/模糊测试、浏览器 E2E 驱动（Playwright 等）。
 
 ## 4. 代码入口
 

@@ -36,6 +36,11 @@
 | `check` | `boolean` | 当前行棋方是否被将军 |
 | `pendingDraw` | `Side \| null` | 和棋请求发起方（服务层辅助字段） |
 | `pendingRestart` | `Side \| null` | 重开请求发起方（服务层辅助字段） |
+| `pendingUndo` | `Side \| null` | 悔棋请求发起方（服务层辅助字段） |
+| `history` / `past` | `Move[]` / 局面快照栈 | 着法序列与走子前局面（棋谱 / 悔棋回放基础） |
+| `deadline` | `number \| null` | 本回合截止时间（计时读秒，由主机服务写入；null = 不限时） |
+
+> C/D 档扩展的 `undo()`、`timeout()`、history/deadline、人机对战与观战行为见 [ADR-0009](./0009-c-d-extensions.md)。
 
 ### 3.2 状态流转
 

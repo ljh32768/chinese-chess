@@ -1,7 +1,7 @@
 # 局域网象棋 MVP 优化建议（Roadmap）
 
-- 版本：v1.2
-- 状态：A、B 档已完成并验证（见第 3 节）；C/D 档待排期
+- 版本：v1.3
+- 状态：A、B、C、D 四档全部完成并验证（见第 3 节）
 - 日期：2026-10-03
 - 关联文档：[README.md](./README.md)（模块化与功能入口）、[adr/](./adr/)（现状规格）、[Product-plan.md](./Product-plan.md)（产品规划）
 
@@ -28,32 +28,18 @@ B1–B4 已全部完成并验证（commit `2f1b609`），明细见第 3 节。
 
 ### C 工程化
 
-**C1 CI + lint**
-- 现状：无 CI、无 ESLint/Prettier（tsconfig 已 strict）。
-- 方案：GitHub Actions 跑 `npm run build` + `npm test`；引入 lint / format。
-
-**C2 开发脚本**
-- 现状：`npm run host` 需先手动 build；CLI 端口被占用直接 `exit(1)`（[cli.ts](../src/server/cli.ts#L8-L27)），Electron 有随机端口回退（[main.ts](../src/main/main.ts#L12-L26)）。
-- 方案：新增 `npm run dev`（tsc watch + 自动重启）；CLI 增加端口回退与友好提示。
-
-**C3 测试补齐**
-- 现状：渲染层已有 `boardMarkup` 单测；服务端部分分支未覆盖。
-- 方案：补静态服务（路径穿越 / 404 / MIME）、`decode` 非法消息、和棋/重开"拒绝"分支、心跳超时（fake timers）、将帅照面将军断言；B1 落地后补重连用例。
-
-**C4 Electron 打包**
-- 现状：仅开发方式启动，无安装包产物。
-- 方案：electron-builder 产出 Windows 安装包；`package.json` 补 `engines` 字段。
-
-**C5 主机日志**
-- 现状：主机无结构化日志，局域网排障依赖界面现象。
-- 方案：连接 / 断开 / 走子 / 终局打点（默认输出，可用 `LANSCHESS_DEBUG` 开关控制）。
+C1–C5 已全部完成并验证（commit `e22f7b0`），明细见第 3 节。
 
 ### D 功能扩展（对照产品规划后续版本）
 
-- **D1 局域网自动发现**：mDNS / UDP 广播发现主机，免手输 IP（Product-plan 既定 P2）。
-- **D2 棋谱与悔棋**：走子列表（中文记谱）+ 吃子展示；悔棋复用现有"请求-回应"模式（与 `pendingDraw` 同构），并为回放打基础。
-- **D3 观战**：`broadcast` 机制已就绪，扩展 spectator 角色（不占红黑席位、只读）。
-- **D4 AI 与计时**：规则引擎为纯函数，可直接接 minimax / α-β 剪枝；计时读秒需扩展快照字段与主机回合控制。
+D1–D4 已全部完成并验证（commit `e22f7b0`），明细见第 3 节。实现取舍：
+
+- **D1**：浏览器无法使用 mDNS / UDP，改为「同网段 WebSocket 探测」：
+  先直探已知地址（输入框 / 页面来源主机），再扫 `<前缀>.1~254`，按主机自我声明地址去重（`pong` 携带 `ip/port`）。
+- **D2**：传统中文记谱（含前后/中消歧）+ 吃子统计 + 悔棋「请求-回应」（与和棋同构），快照新增 `history` 为回放打基础。
+- **D3**：`spectator` 角色不占红黑席位，服务端对其一切操作回「观战模式只读」，客户端只读 UI（隐藏对局操作）。
+- **D4**：AI 为 negamax + α-β（默认深度 2，开局约 150ms），主机侧以虚拟黑方席位自动应招；
+  计时读秒以快照 `deadline` 字段 + 主机超时判负实现，默认关闭，`LANSCHESS_TURN_MS` 或 `turnMs` 开启。
 
 ---
 
@@ -61,6 +47,15 @@ B1–B4 已全部完成并验证（commit `2f1b609`），明细见第 3 节。
 
 | 项 | 说明 | 记录 |
 |---|---|---|
+| C1 CI + lint/format | ESLint(typescript-eslint) + Prettier（printWidth 110，CSS/HTML/docs 除外）+ GitHub Actions（lint→format→build→test） | commit `e22f7b0` |
+| C2 开发脚本 | `npm run dev`（tsc watch + 主机端自动重启 + 静态资源同步）；`listenWithFallback` 统一端口回退（显式端口被占用给友好提示） | commit `e22f7b0` |
+| C3 测试补齐 | 心跳超时/断线（假定时器）、端口回退、重开拒绝分支、静态 MIME、断线重连用例 | commit `e22f7b0` |
+| C4 Electron 打包 | electron-builder（NSIS）+ `npm run dist` + `engines`，已产出 `release/LanChess Setup 0.1.0.exe` | commit `e22f7b0` |
+| C5 主机日志 | 连接/断开/走子/终局/宽限打点，`LANSCHESS_DEBUG` 控制（0=关闭，1=含 debug 明细） | commit `e22f7b0` |
+| D1 局域网自动发现 | 同网段 WS 探测 + 已知地址直探 + 声明地址去重；加入页「搜索局域网主机」 | commit `e22f7b0` |
+| D2 棋谱与悔棋 | 传统中文记谱 + 吃子面板 + 悔棋「请求-回应」；快照 `history` 序列 | commit `e22f7b0` |
+| D3 观战 | `spectator` 角色（不占席位、广播只读、服务端拒绝操作、客户端只读 UI） | commit `e22f7b0` |
+| D4 AI 与计时 | 人机对战（negamax + α-β，AI 执黑自动应招/同意悔棋/拒绝和棋/同意重开）+ 计时读秒（deadline/超时判负/倒计时显示） | commit `e22f7b0` |
 | B1 断线重连宽限 | 意外断线进入宽限期（默认 30s，`graceMs` 可配）：同阵营重新 join 用 `state` 恢复原棋盘与回合；超时清空席位回到等待新对手；主机可 `wait_new_opponent` 放弃等待；主动 leave 不走宽限 | commit `2f1b609` |
 | B2 终局清理 pending | 走子致将死/困毙时清空 `pendingDraw` / `pendingRestart`，与认输/和棋/重置保持一致 | commit `2f1b609` |
 | B3 静态路径加固 | `serveStatic` 改用 `path.relative` 判断目录归属，修复「dist-evil」同前缀兄弟目录误判放行 | commit `2f1b609` |

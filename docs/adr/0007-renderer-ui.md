@@ -30,10 +30,10 @@
 
 | 屏 | id | 元素与入口 |
 |---|---|---|
-| 首页 | `screen-home` | 「创建对局」`btn-create`、「加入对局」`btn-show-join`、本机地址提示 `home-hint` |
+| 首页 | `screen-home` | 「创建对局」`btn-create`、「人机对战」`btn-create-ai`、「加入对局」`btn-show-join`、本机地址提示 `home-hint` |
 | 主机等待 | `screen-host` | 地址大字显示 `host-ip`、复制地址 `btn-copy-ip`（非安全上下文降级）、等待文案 `host-wait`、取消 `btn-cancel-host` |
-| 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、返回 `btn-join-back`、错误提示 `join-msg` |
-| 对局 | `screen-game` | SVG 棋盘 `board`、双方信息 `p-top/p-bottom`、状态框 `status-box`（对局中提示 / 结束结果卡）、请求等待提示 `req-hint`（和棋/重开发出后显示）、两组操作按钮 `actions-play`（`btn-resign/btn-draw/btn-leave`）与 `actions-over`（`btn-play-again/btn-home`）、角色提示 `role-hint` |
+| 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`、返回 `btn-join-back`、错误提示 `join-msg` |
+| 对局 | `screen-game` | SVG 棋盘 `board`、双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、棋谱 `move-list`、吃子 `cap-red-list`/`cap-black-list`、三组操作 `actions-play`（`btn-resign/btn-draw/btn-undo/btn-leave`）、`actions-over`（`btn-play-again/btn-home`）、`actions-spectate`（`btn-spectate-leave`）、角色提示 `role-hint` |
 | 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；仅用于和棋/重开请求、认输确认、对手离开与断线提示，**不用于对局结束** |
 | 轻提示 | `toast` | 1.8s 自动消失 |
 
@@ -47,8 +47,12 @@
 | `status` / `winner` / `reason` | 对局状态与结果 |
 | `selected` / `moves` | 当前选中的棋子与本地计算的合法落点（仅提示用） |
 | `lastMove` | 上一步高亮 |
-| `pending` | 已发出、等待对方回应的请求（`'draw'` / `'restart'` / null），驱动 `req-hint` 等待提示 |
+| `pending` | 已发出、等待对方回应的请求（`'draw'` / `'restart'` / `'undo'` / null），驱动 `req-hint` 等待提示 |
 | `oppAway` | 对手意外断线、宽限等待重连中：状态框显示等待文案，棋盘冻结不可交互；收到快照或对手回来时清除 |
+| `history` | 完整着法序列（棋谱 / 吃子 / 悔棋展示的数据源） |
+| `deadline` | 本回合截止时间（计时读秒倒计时显示）；null 表示不限时 |
+| `spectator` | 观战模式：只读渲染、隐藏对局操作、双方名称不带「你/对手」 |
+| `aiMode` | 本机创建的人机对战（AI 执黑）：角色提示显示「人机对战 · AI 执黑」 |
 
 ### 3.3 页面流转
 
@@ -71,6 +75,8 @@
 | `draw_response` | 清空 `pending`；拒绝时 toast 提示 |
 | `restart_request` | 弹层「对方请求重开」→ 同意/拒绝发送 `restart_response` |
 | `restart_response` | 清空 `pending`；拒绝时 toast 提示 |
+| `undo_request` | 弹层「对方请求悔棋」→ 同意/拒绝发送 `undo_response` |
+| `undo_response` | 清空 `pending`；同意 → toast「悔棋成功，已回退一步」，随后 `state` 全量同步；拒绝 → toast 提示 |
 | `opponent_joined` | 关闭弹层；对局中 → toast「对手已重新连接」；等待中 → 更新等待页文案 |
 | `opponent_away` | 置 `oppAway`：状态框显示「对手已断开，等待重连…」，棋盘冻结；弹层「对手已断开」，主机可选「等待新对手」（发 `wait_new_opponent`） |
 | `opponent_left` | 对局中：弹「对手已离开」；否则 toast |
@@ -137,24 +143,28 @@
 ### 3.9 明确不做
 
 动画/音效/皮肤、移动端专门适配（仅基础 viewport）、断线自动重连（宽限期内手动重新加入即可恢复原局）、
-聊天、悔棋、计时显示。
+聊天、棋谱导出/回放播放器。
 
 ## 4. 代码入口
 
 | 内容 | 位置 |
 |---|---|
 | 页面结构 / 控件 id | [index.html](../../src/renderer/index.html) |
-| 镜像状态 `S` | [app.ts](../../src/renderer/app.ts#L18-L35) |
-| 页面切换/弹层/toast | [app.ts](../../src/renderer/app.ts#L45-L85) |
-| 消息处理（含断线重连分支） | [app.ts `handleMessage()`](../../src/renderer/app.ts#L178-L281) |
-| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts#L109-L152) |
-| 创建/取消/复制地址/加入/离开 | [app.ts](../../src/renderer/app.ts#L347-L443) |
-| 走子交互 | [app.ts `onCell()`](../../src/renderer/app.ts#L487-L517) |
-| 取消选中与快捷键 | [app.ts `clearSelection()`](../../src/renderer/app.ts#L478-L483)、[app.ts `bindEvents()`](../../src/renderer/app.ts#L521-L565) |
+| 镜像状态 `S` | [app.ts](../../src/renderer/app.ts#L25-L49) |
+| 页面切换/弹层/toast | [app.ts](../../src/renderer/app.ts#L53-L95) |
+| 消息处理（断线重连/悔棋分支） | [app.ts `handleMessage()`](../../src/renderer/app.ts#L246-L371) |
+| 棋谱与吃子渲染 | [app.ts `renderNotation()`](../../src/renderer/app.ts#L204-L244) |
+| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts#L139-L202) |
+| 创建/人机/复制地址/搜索/加入/离开 | [app.ts](../../src/renderer/app.ts#L449-L628) |
+| 走子交互 | [app.ts `onCell()`](../../src/renderer/app.ts#L681-L713) |
+| 取消选中与快捷键 | [app.ts `clearSelection()`](../../src/renderer/app.ts#L672-L677)、[app.ts `bindEvents()`](../../src/renderer/app.ts#L715-L765) |
 | 棋盘标记生成 | [board.ts `boardMarkup()`](../../src/renderer/board.ts#L72-L154) |
 | 棋盘挂载 / 坐标与点击 | [board.ts `renderBoard()`](../../src/renderer/board.ts#L157-L159)、[board.ts](../../src/renderer/board.ts#L23-L62) |
-| WebSocket 客户端 | [net.ts](../../src/renderer/net.ts#L38-L103) |
-| 心跳 | [net.ts `startPing()`](../../src/renderer/net.ts#L120-L133) |
+| 局域网主机发现 | [discover.ts](../../src/renderer/discover.ts) |
+| WebSocket 客户端 | [net.ts](../../src/renderer/net.ts#L38-L107) |
+| 心跳 | [net.ts `startPing()`](../../src/renderer/net.ts#L124-L137) |
+
+> 观战/悔棋/人机对战/计时读秒/主机搜索的完整规格见 [ADR-0009](./0009-c-d-extensions.md)。
 
 ## 5. 验收标准
 

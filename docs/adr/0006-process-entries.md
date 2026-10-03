@@ -32,9 +32,12 @@
 | 脚本 | 命令 | 说明 |
 |---|---|---|
 | `npm run build` | `tsc && node scripts/copy-assets.mjs` | 编译 + 复制静态资源 |
+| `npm run dev` | `node scripts/dev.mjs` | 开发模式：首次构建 → tsc watch → dist 变化自动重启主机端，渲染层 html/css 变化自动同步 |
 | `npm test` | `vitest run` | 全量测试 |
+| `npm run lint` / `format:check` | `eslint .` / `prettier --check .` | 规范与格式门禁（CI 依赖） |
 | `npm run host` | `node dist/server/cli.js` | 无界面主机（**需先 build**） |
 | `npm start` | `npm run build && electron .` | 桌面端（自动先构建） |
+| `npm run dist` | `npm run build && electron-builder --win` | 产出 Windows 安装包到 `release/`（NSIS，可改安装目录） |
 
 ### 3.2 构建配置
 
@@ -44,15 +47,16 @@
 | 模块解析 | NodeNext，源码内相对导入需带 `.js` 后缀（ESM 输出） |
 | 静态资源 | [copy-assets.mjs](../../scripts/copy-assets.mjs)：复制 `src/renderer/index.html`、`styles.css` → `dist/renderer/` |
 | 产物结构 | `dist/server/*`、`dist/shared/*`、`dist/renderer/*`、`dist/main/*` |
-| 静态服务根 | `dist/`（[defaultStaticDir](../../src/server/host-server.ts#L434-L437)），页面内 `../shared/*.js` 请求可正确命中 |
-| `package.json` | `"main": "dist/main/main.js"`，`"type": "module"` |
+| 静态服务根 | `dist/`（[defaultStaticDir](../../src/server/host-server.ts#L667-L670)），页面内 `../shared/*.js` 请求可正确命中 |
+| `package.json` | `"main": "dist/main/main.js"`，`"type": "module"`，`"engines": { "node": ">=18" }` |
+| 打包配置 | `package.json` 的 `build` 字段：appId `com.lanchess.app`、productName `LanChess`、NSIS（`oneClick=false`，快捷方式「局域网象棋」）、输出 `release/` |
 
 ### 3.3 Electron 主进程（`main.ts`）
 
 | 步骤 | 行为 |
 |---|---|
 | `app.whenReady()` | 进入 `createWindow()` |
-| `ensureServer()` | 端口 `7777` 启动成功则用之；失败（占用等）回退 `port: 0` 随机端口；已有实例则复用 |
+| `ensureServer()` | 经 `listenWithFallback(7777)` 启动：端口占用时回退 `port: 0` 随机端口；已有实例则复用 |
 | `new BrowserWindow` | 1120×840，最小 720×640，背景 `#14110e`，标题「局域网象棋」，隐藏菜单栏 |
 | 安全配置 | `contextIsolation: true`、`nodeIntegration: false` |
 | 加载 | `http://127.0.0.1:<port>/`（即主机服务页面） |
@@ -63,14 +67,15 @@
 
 | 步骤 | 行为 |
 |---|---|
-| 端口 | `Number(process.env.LANSCHESS_PORT ?? 7777)` |
-| 启动 | `server.listen()` 成功后打印 `[局域网象棋] 主机端已启动：http://<lan-ip>:<port>` |
+| 端口 | `Number(process.env.LANSCHESS_PORT ?? 7777)`；经 [listenWithFallback](../../src/server/host-server.ts) 启动 |
+| 启动 | 成功后打印 `[局域网象棋] 主机端已启动：http://<lan-ip>:<port>`（服务端另行输出结构化日志） |
+| 端口占用 | 未显式设置 `LANSCHESS_PORT` → 自动回退随机端口；显式设置 → 提示更换端口并 `exit(1)` |
 | 失败 | 打印错误并 `process.exit(1)` |
 | 退出 | `SIGINT/SIGTERM` → `close()` → `exit(0)` |
 
 ### 3.5 明确不做
 
-自动更新、安装包打包（electron-builder 等）、托盘、多窗口、开机自启、HTTPS。
+自动更新、托盘、多窗口、开机自启、HTTPS（安装包打包已由 `npm run dist` 支持）。
 
 ## 4. 代码入口
 

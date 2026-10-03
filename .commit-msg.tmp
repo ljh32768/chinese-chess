@@ -1,24 +1,12 @@
-feat: 落地优化路线图 C、D 两档（C1-C5 工程化 / D1-D4 功能扩展）
+docs: 同步 C、D 档落地后的规格与索引（ADR-0009 新增 + 0003/0004/0005/0006/0007/0008、README、路线图）
 
-C 工程化：
-- C1 CI + lint/format：ESLint(typescript-eslint) + Prettier（printWidth 110，CSS/HTML/docs 除外），
-  GitHub Actions 跑 lint + format:check + build + test
-- C2 开发脚本：npm run dev（tsc watch + 主机端自动重启 + 静态资源同步）；
-  listenWithFallback 统一 CLI/Electron 端口回退（显式端口被占用给出友好提示）
-- C3 测试补齐：net 心跳/断线（假定时器 + 假 WebSocket）、端口回退、重开拒绝分支、静态 MIME
-- C4 Electron 打包：electron-builder（nsis）配置 + npm run dist + engines，
-  已实际产出 release/LanChess Setup 0.1.0.exe
-- C5 主机日志：新增 log 模块（默认 info 打点：连接/断开/走子/终局/宽限；LANSCHESS_DEBUG 控制）
-
-D 功能扩展：
-- D1 局域网自动发现：renderer/discover.ts（WS 探测 + 网段扫描 + 声明地址去重），
-  加入页「搜索局域网主机」；pong 携带主机自我声明地址
-- D2 棋谱与悔棋：shared/notation.ts（传统中文记谱 + 吃子统计）、快照携带 history、
-  侧栏棋谱/吃子面板、悔棋「请求-回应」（与和棋同构）
-- D3 观战：spectator 角色（不占席位、广播只读、服务端拒绝一切操作），客户端只读 UI
-- D4 AI 与计时：server/ai.ts（negamax + alpha-beta，depth 2，开局约 150ms）、
-  「人机对战」入口（AI 执黑，自动应招/同意悔棋/拒绝和棋/同意重开）、
-  计时读秒（快照 deadline 字段、超时判负、客户端倒计时显示，LANSCHESS_TURN_MS 启用）
-
-测试：135 测试全部通过；lint/format 通过；浏览器实测人机对战、棋谱、悔棋、观战、
-双人悔棋、吃子面板、主机搜索、计时倒计时均通过
+- ADR-0009（新增）：日志/中文记谱/AI/自动发现四个新模块与观战、悔棋、人机对战、计时读秒规格
+- ADR-0003：协议扩展说明（spectator/undo/history/deadline/pong.ip）
+- ADR-0004：状态机新增 pendingUndo/history/past/deadline 字段与 undo/timeout 说明
+- ADR-0005：新增 /api/host/start-ai、turnMs/aiDelayMs/aiDepth 配置说明
+- ADR-0006：新增 dev/lint/format/dist 脚本、打包配置与端口回退行为
+- ADR-0007：人机/观战/悔棋/棋谱/倒计时/搜索的 UI 元素与消息分支，移除已完成项
+- ADR-0008：测试清单补齐 notation/ai/net/discover 与 server 新增覆盖，CI 说明
+- README：功能入口新增六行并更新全部行号锚点、脚本/环境变量/目录结构/测试表/常见问题
+- Optimization-plan：C1–C5、D1–D4 移入「已完成」，记录 commit e22f7b0（v1.3）
+- .gitignore 忽略提交信息临时文件 .commit-msg.tmp

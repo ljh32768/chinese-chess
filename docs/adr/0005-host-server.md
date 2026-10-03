@@ -38,7 +38,10 @@
 | `isHosting()` | 是否处于等待加入状态 |
 
 默认配置：`port=7777`（`LANSCHESS_PORT` 环境变量可覆盖）、`host='0.0.0.0'`、静态根为 `dist/`、
-断线宽限 `graceMs=30000`（`HostServerOptions` 可覆盖，测试用小值）。
+断线宽限 `graceMs=30000`（`HostServerOptions` 可覆盖，测试用小值）、
+计时读秒 `turnMs=0`（`LANSCHESS_TURN_MS` 可开启）、AI `aiDelayMs=400` / `aiDepth=2`。
+
+> C/D 档新增能力（观战席位、人机对战、计时读秒、日志打点、主机自我声明地址）详见 [ADR-0009](./0009-c-d-extensions.md)。
 
 ### 3.2 HTTP 接口
 
@@ -46,7 +49,8 @@
 |---|---|---|---|
 | `GET /api/host-info` | — | `{ ip, port, hosting, hasHost, hasGuest, state }` | 页面初始化：展示本机地址、预填加入表单 |
 | `POST /api/host/start` | — | `{ ip, port }` | 创建对局（进入 waiting） |
-| `POST /api/host/stop` | — | `{ ok: true }` | 取消等待 |
+| `POST /api/host/start-ai` | — | `{ ip, port }` | 创建人机对战（AI 占黑方席位，立即开局） |
+| `POST /api/host/stop` | — | `{ ok: true }` | 取消等待（同时结束人机对战） |
 | `GET /api/*`（其他） | — | 404 `{ error: 'not found' }` | 未定义接口 |
 | `GET 其他路径` | — | 静态文件 | `/` → `renderer/index.html`；其余按 `dist/` 解析，未命中回退 `dist/renderer/` |
 
