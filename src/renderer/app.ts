@@ -28,6 +28,8 @@ const S = {
   reason: '',
   check: false,
   moveSeq: 0,
+  /** 已发出、等待对方回应的请求（用于侧栏等待状态） */
+  pending: null as null | 'draw' | 'restart',
 };
 
 let net: Net | null = null;
@@ -83,6 +85,7 @@ function closeModal(): void {
 // -------------------------------------------------------------- 渲染
 
 function render(): void {
+  const canPlay = S.status === 'playing' && S.turn === S.side;
   renderBoard(boardEl, {
     board: S.board,
     selected: S.selected,
@@ -90,6 +93,7 @@ function render(): void {
     lastMove: S.lastMove,
     flip: flip(),
     checkKing: S.check ? findKing(S.board, S.turn) : null,
+    interactiveSide: canPlay ? S.side : null,
   });
   updatePanel();
 }
@@ -134,6 +138,13 @@ function updatePanel(): void {
   } else {
     st.textContent = '准备开始';
   }
+
+  // 请求等待状态（和棋 / 重开发出后）
+  const req = $('req-hint');
+  req.hidden = !S.pending;
+  if (S.pending) {
+    req.textContent = S.pending === 'draw' ? '已发送和棋请求，等待对方回应…' : '已发送重开请求，等待对方回应…';
+  }
 }
 
 function applySnapshot(s: GameSnapshot): void {
@@ -147,6 +158,7 @@ function applySnapshot(s: GameSnapshot): void {
   S.check = s.check;
   S.selected = null;
   S.moves = [];
+  S.pending = null;
   updateRoleHint();
   if ($('screen-game').classList.contains('active')) render();
 }
@@ -192,34 +204,30 @@ function handleMessage(msg: ServerMessage): void {
         title: '对方请求和棋',
         sub: '同意则本局判和',
         buttons: [
-          {
-            label: '同意',
-            primary: true,
-            onClick: () => net?.send({ type: 'draw_response', accept: true }),
-          },
-          { label: '拒绝', onClick: () => net?.send({ type: 'draw_response', accept: false }) },
+          { label: '同意', primary: true, onClick: () => respondDraw(true) },
+          { label: '拒绝', onClick: () => respondDraw(false) },
         ],
       });
       break;
     case 'draw_response':
+      S.pending = null;
       if (!msg.accept) toast('对方拒绝了和棋请求');
+      updatePanel();
       break;
     case 'restart_request':
       showModal({
         title: '对方请求重开',
         sub: '同意则立即重新开局',
         buttons: [
-          {
-            label: '同意',
-            primary: true,
-            onClick: () => net?.send({ type: 'restart_response', accept: true }),
-          },
-          { label: '拒绝', onClick: () => net?.send({ type: 'restart_response', accept: false }) },
+          { label: '同意', primary: true, onClick: () => respondRestart(true) },
+          { label: '拒绝', onClick: () => respondRestart(false) },
         ],
       });
       break;
     case 'restart_response':
+      S.pending = null;
       if (!msg.accept) toast('对方拒绝了重开请求');
+      updatePanel();
       break;
     case 'opponent_joined':
       $('host-wait').textContent = '对手已加入，正在开局…';
@@ -227,9 +235,27 @@ function handleMessage(msg: ServerMessage): void {
     case 'opponent_left':
       handleOpponentLeft(msg.reason);
       break;
+    case 'error':
+      // 主机端的协议 / 状态错误提示（如「尚未加入对局」）
+      toast(msg.message);
+      break;
     default:
       break;
   }
+}
+
+/** 回应对方的和棋请求（同时清空自己已发出的同名请求等待态） */
+function respondDraw(accept: boolean): void {
+  S.pending = null;
+  net?.send({ type: 'draw_response', accept });
+  updatePanel();
+}
+
+/** 回应对方的重开请求 */
+function respondRestart(accept: boolean): void {
+  S.pending = null;
+  net?.send({ type: 'restart_response', accept });
+  updatePanel();
 }
 
 function handleOpponentLeft(reason: string): void {
@@ -307,6 +333,34 @@ async function cancelHost(): Promise<void> {
   show('screen-home');
 }
 
+/**
+ * 复制本机地址（A2）。
+ * 局域网页面是 http 非安全上下文，navigator.clipboard 多数不可用，
+ * 因此降级为「选中文本 + execCommand('copy')」。
+ */
+async function copyHostAddr(): Promise<void> {
+  const el = $('host-ip');
+  const text = el.textContent?.trim() ?? '';
+  if (!text || text === '—') return;
+  try {
+    if (!navigator.clipboard || !window.isSecureContext) throw new Error('clipboard unavailable');
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    try {
+      document.execCommand('copy');
+    } catch {
+      /* 忽略：即使复制失败也已选中文本，用户可手动复制 */
+    }
+    sel?.removeAllRanges();
+  }
+  toast('地址已复制');
+}
+
 function showJoin(): void {
   const msg = $('join-msg');
   msg.textContent = '';
@@ -366,14 +420,28 @@ function resign(): void {
 
 function offerDraw(): void {
   if (S.status !== 'playing') return toast('对局尚未开始');
+  if (S.pending) return toast('请求已发送，等待对方回应');
   net?.send({ type: 'draw_request' });
+  S.pending = 'draw';
+  updatePanel();
   toast('已发送和棋请求…');
 }
 
 function requestRestart(): void {
   if (S.status !== 'over') return toast('对局结束后才能重开');
+  if (S.pending) return toast('请求已发送，等待对方回应');
   net?.send({ type: 'restart_request' });
+  S.pending = 'restart';
+  updatePanel();
   toast('已发送重开请求…');
+}
+
+/** 取消当前选中（ESC / 右键触发） */
+function clearSelection(): void {
+  if (!S.selected) return;
+  S.selected = null;
+  S.moves = [];
+  render();
 }
 
 // -------------------------------------------------------------- 走子交互
@@ -416,6 +484,7 @@ function bindEvents(): void {
   $('btn-create').addEventListener('click', () => void createGame());
   $('btn-show-join').addEventListener('click', showJoin);
   $('btn-cancel-host').addEventListener('click', () => void cancelHost());
+  $('btn-copy-ip').addEventListener('click', () => void copyHostAddr());
   $('btn-connect').addEventListener('click', () => void doJoin());
   $('btn-join-back').addEventListener('click', () => show('screen-home'));
   $('btn-resign').addEventListener('click', resign);
@@ -430,6 +499,24 @@ function bindEvents(): void {
     const pt = svgPoint(boardEl, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
     const pos = pickCell(pt.x, pt.y, flip());
     if (pos) onCell(pos);
+  });
+
+  // 右键取消选中（与 ESC 等效）
+  boardEl.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    clearSelection();
+  });
+
+  // 弹层：点击遮罩关闭
+  $('modal').addEventListener('click', (e) => {
+    if (e.target === $('modal')) closeModal();
+  });
+
+  // ESC：优先关闭弹层，否则取消棋盘选中
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if ($('modal').classList.contains('show')) return closeModal();
+    clearSelection();
   });
 
   const joinIp = $<HTMLInputElement>('join-ip');

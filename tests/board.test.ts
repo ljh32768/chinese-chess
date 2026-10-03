@@ -61,10 +61,25 @@ describe('棋盘渲染标记 boardMarkup', () => {
     const h = boardMarkup(view({ board: b, moves: [[4, 0], [4, 4]] }));
     expect(h).toContain('r="7"'); // 空位落点小圆点
     expect(h).toContain('stroke-width="3.2"'); // 可吃子空心环
+    expect(h).toContain('class="mv mv-dot"'); // 悬停 / 光标样式标记
+    expect(h).toContain('class="mv mv-cap"');
   });
 
   it('选中棋子显示金色选中环', () => {
     const h = boardMarkup(view({ selected: [6, 0] }));
     expect(h).toContain('#f0b429');
+  });
+
+  it('可交互一方棋子带 hoverable 类（含悬停预高亮环），对方不带', () => {
+    const h = boardMarkup(view({ interactiveSide: 'r' }));
+    // 红方 16 枚棋子可悬停，黑方 16 枚不可
+    expect(h.match(/class="piece hoverable"/g)).toHaveLength(16);
+    expect(h.match(/class="piece"/g)).toHaveLength(16);
+    expect(h).toContain('class="ring"');
+  });
+
+  it('不可交互（非自己回合 / 未开局）时不生成任何可悬停棋子', () => {
+    expect(boardMarkup(view({ interactiveSide: null }))).not.toContain('piece hoverable');
+    expect(boardMarkup(view())).not.toContain('piece hoverable');
   });
 });

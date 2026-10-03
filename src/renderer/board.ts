@@ -37,6 +37,11 @@ export interface BoardView {
   flip: boolean;
   /** 被将军（含将死）一方的将/帅位置，用于警示高亮 */
   checkKing?: Pos | null;
+  /**
+   * 当前可交互（可选中 / 可落子）的一方；null 表示本方不可操作。
+   * 仅用于悬停预高亮与光标样式，不参与任何规则判定。
+   */
+  interactiveSide?: Side | null;
 }
 
 /** 把点击位置（SVG 内部坐标）映射为逻辑棋盘坐标；不在有效落点返回 null */
@@ -105,17 +110,17 @@ export function boardMarkup(v: BoardView): string {
     h += `<circle class="check-king" cx="${X(vc)}" cy="${Y(vr)}" r="${R + 7}" fill="none" stroke="#d94f3d" stroke-width="3.5"/>`;
   }
 
-  // 合法落点
+  // 合法落点（mv 类供悬停反馈与光标样式使用）
   for (const pos of v.moves) {
     const [vr, vc] = toView(pos, v.flip);
     if (v.board[pos[0]][pos[1]]) {
-      h += `<circle cx="${X(vc)}" cy="${Y(vr)}" r="${R + 3}" fill="none" stroke="#2e8b57" stroke-width="3.2" opacity=".9"/>`;
+      h += `<circle class="mv mv-cap" cx="${X(vc)}" cy="${Y(vr)}" r="${R + 3}" fill="none" stroke="#2e8b57" stroke-width="3.2" opacity=".9"/>`;
     } else {
-      h += `<circle cx="${X(vc)}" cy="${Y(vr)}" r="7" fill="#2e8b57" opacity=".55"/>`;
+      h += `<circle class="mv mv-dot" cx="${X(vc)}" cy="${Y(vr)}" r="7" fill="#2e8b57" opacity=".55"/>`;
     }
   }
 
-  // 棋子
+  // 棋子（己方可交互棋子带 hoverable 类，悬停时显示预高亮环）
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 9; c++) {
       const p = v.board[r][c];
@@ -126,13 +131,15 @@ export function boardMarkup(v: BoardView): string {
       const red = p.s === 'r';
       const stroke = red ? '#b3261e' : '#22303c';
       const fill = red ? '#fdf2e0' : '#f6f2ea';
-      h += `<g>
+      const hoverable = v.interactiveSide === p.s;
+      h += `<g class="piece${hoverable ? ' hoverable' : ''}">
         <circle cx="${x}" cy="${y + 2}" r="${R}" fill="rgba(60,40,15,.22)"/>
         <circle cx="${x}" cy="${y}" r="${R}" fill="${fill}" stroke="${stroke}" stroke-width="2.1"/>
         <circle cx="${x}" cy="${y}" r="${R - 4.5}" fill="none" stroke="${stroke}" stroke-width="1" opacity=".4"/>
         <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central"
               font-size="25" font-weight="700" fill="${stroke}"
               font-family="'PingFang SC','Microsoft YaHei',serif">${NAME[p.s][p.t]}</text>
+        <circle class="ring" cx="${x}" cy="${y}" r="${R + 4}" fill="none" stroke="#f0b429" stroke-width="3" opacity="0"/>
       </g>`;
     }
   }
