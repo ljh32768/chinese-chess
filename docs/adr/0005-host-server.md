@@ -2,7 +2,7 @@
 
 - 状态：已接受（记录现状实现）
 - 日期：2026-10-03
-- 关联入口：创建对局、显示本机地址、加入对局、WebSocket 消息路由、断线清理
+- 关联入口：创建对局、显示本机地址、加入对局、WebSocket 消息路由、断线重连宽限与断线清理
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0004 状态机](./0004-game-state-machine.md)
 
 ---
@@ -37,7 +37,8 @@
 | `address` | 返回 `{ ip: getLanIp(), port }` |
 | `isHosting()` | 是否处于等待加入状态 |
 
-默认配置：`port=7777`（`LANSCHESS_PORT` 环境变量可覆盖）、`host='0.0.0.0'`、静态根为 `dist/`。
+默认配置：`port=7777`（`LANSCHESS_PORT` 环境变量可覆盖）、`host='0.0.0.0'`、静态根为 `dist/`、
+断线宽限 `graceMs=30000`（`HostServerOptions` 可覆盖，测试用小值）。
 
 ### 3.2 HTTP 接口
 
@@ -49,8 +50,9 @@
 | `GET /api/*`（其他） | — | 404 `{ error: 'not found' }` | 未定义接口 |
 | `GET 其他路径` | — | 静态文件 | `/` → `renderer/index.html`；其余按 `dist/` 解析，未命中回退 `dist/renderer/` |
 
-静态服务安全规则（[serveStatic](../../src/server/host-server.ts#L198-L229)）：
-解析后的绝对路径必须以静态根为前缀，否则按 404 处理；所有响应带 `Cache-Control: no-store`。
+静态服务安全规则（[serveStatic](../../src/server/host-server.ts#L208-L240)）：
+解析后的绝对路径必须位于静态根内（`path.relative` 判断，不得以 `..` 开头），否则按 404 处理；
+`startsWith(root)` 会把 `dist-evil` 类同前缀兄弟目录误判放行，已弃用。所有响应带 `Cache-Control: no-store`。
 MIME 白名单覆盖 html/js/mjs/css/json/map/svg/ico/png。
 
 ### 3.3 局域网 IP 选择 `pickLanIp(ifaces)`
@@ -70,24 +72,27 @@ MIME 白名单覆盖 html/js/mjs/css/json/map/svg/ico/png。
 
 | 事件 | 条件 | 服务端行为 |
 |---|---|---|
-| `join(host)` | 席位空闲 | 绑定 `hostConn`，`side='r'`，回 `welcome`；若 guest 已在场通知 `opponent_joined` |
+| `join(host)` | 席位空闲 | 绑定 `hostConn`，`side='r'`，回 `welcome`；宽限期内重连则保留 `playing` 并广播 `state`；若 guest 已在场通知 `opponent_joined` |
 | `join(host)` | 席位已占（不同连接） | `error: 主机端已存在` |
 | `join(guest)` | `hosting=false` | `error: 主机尚未创建对局` |
-| `join(guest)` | 主机等待中且席位空闲 | 绑定 `guestConn`，`side='b'`，回 `welcome`，通知主机 `opponent_joined` |
+| `join(guest)` | 主机等待中且席位空闲 | 绑定 `guestConn`，`side='b'`，回 `welcome`，通知主机 `opponent_joined`；宽限期内重连则保留 `playing` 并广播 `state` |
 | `join(guest)` | 席位已占 | `error: 对局已满，无法加入` |
 | 双方到齐 | `hosting && hostConn && guestConn && status ∈ {idle, waiting}` | `startGame()`：`reset('playing')` + 广播 `start` |
-| host 断开 | — | 清空 `hostConn`，通知 guest `opponent_left('主机已离开')`，`hosting=false`；进行中对局置 `idle` |
-| guest 断开 | — | 清空 `guestConn`，通知 host `opponent_left('对手已离开')`；进行中对局回 `waiting`（hosting 时）或 `idle` |
+| host 主动离开 | `leave` 或非 `playing` | 清空 `hostConn`，通知 guest `opponent_left('主机已离开')`，`hosting=false`；进行中对局置 `idle`，取消客方宽限计时 |
+| host 意外断开 | `playing` 且非 `leave` | 保留对局与席位，启动宽限计时，通知 guest `opponent_away`；超时后 `hosting=false` + `reset('idle')` + `opponent_left('主机已离开')` |
+| guest 主动离开 | `leave` 或非 `playing` | 清空 `guestConn`，通知 host `opponent_left('对手已离开')`；进行中对局回 `waiting`（hosting 时）或 `idle` |
+| guest 意外断开 | `playing` 且非 `leave` | 保留对局与席位，启动宽限计时，通知 host `opponent_away`；超时（或 host 发 `wait_new_opponent`）后清空席位、`reset('waiting')`，回 `state` + `opponent_left` |
 
 ### 3.5 WebSocket 消息路由（`handleMessage`）
 
 | 消息 | 处理 |
 |---|---|
-| `move` | 校验已加入 → 坐标数组校验 → `Game.applyMove` → 合法广播 `move_applied`（终局追加 `game_over`）；非法单播 `move_rejected` |
+| `move` | 校验已加入 → 坐标整数校验（`isValidPos`）→ `Game.applyMove` → 合法广播 `move_applied`（终局追加 `game_over`）；非法单播 `move_rejected` |
 | `resign` | `Game.resign` → 广播 `game_over` |
 | `draw_request` / `draw_response` | 仅 `playing` 有效；发起方记录于 `pendingDraw`；同意 → `acceptDraw` + `game_over`；拒绝 → 清空并通知发起方 |
 | `restart_request` / `restart_response` | 仅 `over` 有效（`canRestart`）；同意 → 广播 `restart_response` + `startGame()`；拒绝 → 通知发起方 |
-| `leave` | 直接 `ws.close()`，走断线清理 |
+| `wait_new_opponent` | 仅主机、且存在客方宽限计时时有效：取消宽限 + `dropGuestSeat`（重置 waiting + `state` + `opponent_left`） |
+| `leave` | 标记 `conn.leaving` 后 `ws.close()`：按「主动离开」立即清理，不走宽限 |
 | `ping` | 回 `pong { t }` |
 | 其他 | `error: 未知消息类型` |
 
@@ -103,7 +108,8 @@ MIME 白名单覆盖 html/js/mjs/css/json/map/svg/ico/png。
 
 ### 3.7 明确不做
 
-HTTPS/WSS、鉴权、房间号、多房间、断线重连、连接数限流、消息持久化。
+HTTPS/WSS、鉴权、房间号、多房间、断线自动重连（服务端只做宽限保留，重连由客户端手动发起）、
+连接数限流、消息持久化。
 
 ## 4. 代码入口
 
@@ -111,18 +117,19 @@ HTTPS/WSS、鉴权、房间号、多房间、断线重连、连接数限流、�
 |---|---|
 | MIME 表 / 虚拟网卡特征 | [host-server.ts](../../src/server/host-server.ts#L19-L32) |
 | `pickLanIp` / `getLanIp` | [host-server.ts](../../src/server/host-server.ts#L38-L62) |
-| `HostServer.listen()` / `close()` | [host-server.ts](../../src/server/host-server.ts#L98-L128) |
-| `setHosting()` | [host-server.ts](../../src/server/host-server.ts#L139-L150) |
-| HTTP 路由 `handleHttp()` | [host-server.ts](../../src/server/host-server.ts#L154-L184) |
-| 静态服务 `serveStatic()` | [host-server.ts](../../src/server/host-server.ts#L198-L229) |
-| WS 连接/消息处理 | [host-server.ts](../../src/server/host-server.ts#L233-L342) |
-| 加入/开局 `handleJoin` / `maybeStart` / `startGame` | [host-server.ts](../../src/server/host-server.ts#L344-L400) |
-| 断线清理 `handleClose()` | [host-server.ts](../../src/server/host-server.ts#L402-L415) |
+| `HostServer.listen()` / `close()` | [host-server.ts](../../src/server/host-server.ts#L106-L140) |
+| `setHosting()` | [host-server.ts](../../src/server/host-server.ts#L149-L160) |
+| HTTP 路由 `handleHttp()` | [host-server.ts](../../src/server/host-server.ts#L164-L195) |
+| 静态服务 `serveStatic()` / `isInsideRoot()` | [host-server.ts](../../src/server/host-server.ts#L208-L240)、[host-server.ts](../../src/server/host-server.ts#L544-L548) |
+| WS 连接/消息处理 | [host-server.ts](../../src/server/host-server.ts#L243-L365) |
+| 加入/开局 `handleJoin` / `maybeStart` / `startGame` | [host-server.ts](../../src/server/host-server.ts#L367-L436) |
+| 断线清理与宽限 `handleClose` / `startGuestGrace` / `dropGuestSeat` | [host-server.ts](../../src/server/host-server.ts#L438-L525) |
 
 ## 5. 验收标准
 
 - [server.test.ts](../../tests/server.test.ts)：未创建对局时 guest 被拒；创建后双方加入自动开局；
-  走子广播双方；非法走子被拒；认输/和棋/重开/离开消息流正确；一方断开另一方收到 `opponent_left`。
+  走子广播双方；非法走子被拒；认输/和棋/重开/离开消息流正确；断线宽限（`opponent_away`）、
+  宽限内重连恢复、宽限超时回到 waiting、`wait_new_opponent` 放弃等待、主动 leave 立即清理。
 - [lan-ip.test.ts](../../tests/lan-ip.test.ts)：无网卡返回 `null`；192.168 优先；跳过虚拟网卡；忽略 IPv6。
-- 静态服务对路径穿越请求返回 404；`/` 正确返回页面。
+- 静态服务对路径穿越请求（含 `root-evil` 类同前缀兄弟目录）返回 404；`/` 正确返回页面。
 - 任意非法消息不会导致服务崩溃。

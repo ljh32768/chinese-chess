@@ -63,7 +63,7 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 | 2 | `side === turn` | `还没轮到你走棋` |
 | 3 | `validateMove(board, from, to, side)` | 规则引擎给出的中文原因（见 ADR-0002 §3.5） |
 | 4 | 执行 `makeMove`，`lastMove` 更新，`moveSeq += 1`，`turn` 切换 | — |
-| 5 | `check = isInCheck(新 turn)`；`judgeAfterMove(新 turn)` | 终局则 `over` + `winner` + `reason` |
+| 5 | `check = isInCheck(新 turn)`；`judgeAfterMove(新 turn)` | 终局则 `over` + `winner` + `reason`，并清空 `pendingDraw` / `pendingRestart` |
 
 注意：第 4 步之后必然成功；失败均发生在第 1~3 步，因此**被拒绝的走子不会改变任何状态**（含 `moveSeq`）。
 
@@ -78,22 +78,22 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 
 ### 3.5 明确不做
 
-悔棋、计时读秒、长将/长捉/重复局面判定、断线判负（断线由服务层回退到 waiting/idle，不判负）、
-观战者状态。这些能力扩展时需保持「所有修改经由 `Game` 方法」这一约束。
+悔棋、计时读秒、长将/长捉/重复局面判定、断线判负（意外断线由服务层进入宽限期保留对局，
+超时后回退 waiting/idle，不判负）、观战者状态。这些能力扩展时需保持「所有修改经由 `Game` 方法」这一约束。
 
 ## 4. 代码入口
 
 | 内容 | 位置 |
 |---|---|
 | `Game` 类与字段 | [game.ts](../../src/server/game.ts#L14-L27) |
-| 重置 `reset()` | [game.ts](../../src/server/game.ts#L29-L40) |
+| 重置 `reset()` | [game.ts](../../src/server/game.ts#L29-L41) |
 | 快照 `snapshot()` | [game.ts](../../src/server/game.ts#L43-L54) |
-| 走子 `applyMove()` | [game.ts](../../src/server/game.ts#L60-L82) |
-| 认输 `resign()` | [game.ts](../../src/server/game.ts#L85-L92) |
-| 和棋 `acceptDraw()` | [game.ts](../../src/server/game.ts#L95-L102) |
-| 可重开判定 `canRestart()` | [game.ts](../../src/server/game.ts#L105-L107) |
+| 走子 `applyMove()` | [game.ts](../../src/server/game.ts#L60-L85) |
+| 认输 `resign()` | [game.ts](../../src/server/game.ts#L88-L95) |
+| 和棋 `acceptDraw()` | [game.ts](../../src/server/game.ts#L98-L105) |
+| 可重开判定 `canRestart()` | [game.ts](../../src/server/game.ts#L108-L110) |
 
-调用方：[host-server.ts `handleMessage()`](../../src/server/host-server.ts#L250-L342)、
+调用方：[host-server.ts `handleMessage()`](../../src/server/host-server.ts#L260-L365)、
 测试 [game.test.ts](../../tests/game.test.ts)。
 
 ## 5. 验收标准
@@ -101,5 +101,5 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 - `reset` 后 `playing`、红方先行、`moveSeq=0`、标准开局（[game.test.ts](../../tests/game.test.ts)）。
 - 合法走子：回合切换、`moveSeq+1`、`lastMove` 更新、棋盘变化正确。
 - 非本方回合 / 非法走法：返回对应原因，棋盘与 `moveSeq` 保持不变。
-- 吃子后棋盘更新；将死局面自动置 `over` 且 `reason='将死'`。
+- 吃子后棋盘更新；将死局面自动置 `over` 且 `reason='将死'`，并清空待处理请求。
 - 认输、同意和棋分别以 `认输`、`同意和棋` 结束；`canRestart` 仅在 `over` 时为真。

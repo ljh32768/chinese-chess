@@ -1,7 +1,7 @@
 # 局域网象棋 MVP 优化建议（Roadmap）
 
-- 版本：v1.1
-- 状态：A 档（A1–A7）已完成并验证（见第 3 节）；B/C/D 档待排期
+- 版本：v1.2
+- 状态：A、B 档已完成并验证（见第 3 节）；C/D 档待排期
 - 日期：2026-10-03
 - 关联文档：[README.md](./README.md)（模块化与功能入口）、[adr/](./adr/)（现状规格）、[Product-plan.md](./Product-plan.md)（产品规划）
 
@@ -24,22 +24,7 @@ A1–A7 已全部完成并验证（commit `d3065ad`），明细见第 3 节。
 
 ### B 稳健性
 
-**B1 断线重连（限时恢复）**
-- 现状：协议中 `state` 全量同步消息已定义（[protocol.ts](../src/shared/protocol.ts#L55)）但服务端从未发送；断线后对局回退到 waiting，重连等于重开。
-- 方案：加入连接宽限期（如 30s）：同阵营重新 `join` 时用 `state` 恢复原棋盘与回合，超时才清理；主机侧弹层顺带提供"继续等待新对手"（现有流程只能返回首页重开）。
-- 备注：需扩展协议（如 `rejoin` / 会话标识），并同步 [ADR-0003](./adr/0003-wire-protocol.md)。
-
-**B2 终局清理 pending 请求**
-- 现状：[applyMove](../src/server/game.ts#L60-L82) 走子致将死/困毙时未清 `pendingDraw` / `pendingRestart`（`resign` / `acceptDraw` / `reset` 已清）。
-- 方案：终局分支补清理，保持状态一致性。
-
-**B3 静态服务路径前缀加固**
-- 现状：[serveStatic](../src/server/host-server.ts#L198-L229) 用 `startsWith(root)` 判断前缀，`dist-evil` 类兄弟目录会误判通过。
-- 方案：改用 `path.relative(root, p)` 判断（不得以 `..` 开头）。
-
-**B4 协议实现与清理**
-- 现状：`move.seq` 客户端从不发送、服务端不使用（[protocol.ts](../src/shared/protocol.ts#L16)）；`state` 服务端从不发送；`move` 坐标未校验为整数。
-- 方案：二选一——实现（B1 重连恢复 / 乱序丢弃）或移除字段并同步 ADR-0003；坐标补整数校验。
+B1–B4 已全部完成并验证（commit `2f1b609`），明细见第 3 节。
 
 ### C 工程化
 
@@ -76,6 +61,10 @@ A1–A7 已全部完成并验证（commit `d3065ad`），明细见第 3 节。
 
 | 项 | 说明 | 记录 |
 |---|---|---|
+| B1 断线重连宽限 | 意外断线进入宽限期（默认 30s，`graceMs` 可配）：同阵营重新 join 用 `state` 恢复原棋盘与回合；超时清空席位回到等待新对手；主机可 `wait_new_opponent` 放弃等待；主动 leave 不走宽限 | commit `2f1b609` |
+| B2 终局清理 pending | 走子致将死/困毙时清空 `pendingDraw` / `pendingRestart`，与认输/和棋/重置保持一致 | commit `2f1b609` |
+| B3 静态路径加固 | `serveStatic` 改用 `path.relative` 判断目录归属，修复「dist-evil」同前缀兄弟目录误判放行 | commit `2f1b609` |
+| B4 协议清理 | 移除无人使用的 `move.seq`；走子坐标补整数校验（非整数回「坐标非法」）；`state` 消息在重连场景正式启用 | commit `2f1b609` |
 | A1 错误提示 | 客户端补齐 `error` 分支，服务端错误消息以 toast 呈现，不再静默丢弃 | commit `d3065ad` |
 | A2 地址复制 | 等待页地址大字显示 + 一键复制；http 非安全上下文降级「选中文本 + `execCommand('copy')`」 | commit `d3065ad` |
 | A3 弹层与等待态 | 弹层支持 ESC / 点击遮罩关闭；和棋/重开请求发出后侧栏显示等待状态并防重复发送 | commit `d3065ad` |

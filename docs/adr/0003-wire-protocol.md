@@ -2,7 +2,7 @@
 
 - 状态：已接受（记录现状实现）
 - 日期：2026-10-03
-- 关联入口：加入对局、开局、走子同步、认输/和棋/重开/离开、心跳
+- 关联入口：加入对局、开局、走子同步、认输/和棋/重开/离开、断线重连宽限、心跳
 - 关联文档：[ADR-0004 对局状态机](./0004-game-state-machine.md)、[ADR-0005 主机服务](./0005-host-server.md)
 
 ---
@@ -28,36 +28,38 @@ MVP 不做房间系统与二进制优化，优先保证「创建、加入、走�
 
 | type | 字段 | 语义 | 服务端处理 |
 |---|---|---|---|
-| `join` | `role: 'host' \| 'guest'` | 加入对局并声明角色 | 分配阵营（host=r，guest=b），回 `welcome`；错误回 `error` |
-| `move` | `from: [r,c]`、`to: [r,c]`、`seq?` | 走子意图 | 经 `Game.applyMove` 校验；广播 `move_applied` 或单播 `move_rejected` |
+| `join` | `role: 'host' \| 'guest'` | 加入对局并声明角色；宽限期内同阵营重新 join 即恢复原对局 | 分配阵营（host=r，guest=b），回 `welcome`（携带当前快照）；错误回 `error` |
+| `move` | `from: [r,c]`、`to: [r,c]` | 走子意图（坐标必须是整数对，否则回 `坐标非法`） | 经 `Game.applyMove` 校验；广播 `move_applied` 或单播 `move_rejected` |
 | `resign` | — | 认输 | 状态置 over，广播 `game_over`（reason=`认输`） |
 | `draw_request` | — | 发起和棋 | 记录发起方，转发 `draw_request` 给对手 |
 | `draw_response` | `accept: boolean` | 回应和棋 | 同意→结算`同意和棋`并广播；拒绝→通知发起方 |
 | `restart_request` | — | 发起重开 | 仅在对局结束后有效；转发 `restart_request` 给对手 |
 | `restart_response` | `accept: boolean` | 回应重开 | 同意→`startGame()` 广播 `start`；拒绝→通知发起方 |
-| `leave` | — | 离开对局 | 直接关闭连接，走断线清理逻辑 |
+| `wait_new_opponent` | — | 主机放弃等待断线对手 | 取消宽限、清空客席位并重置为 waiting，回 `state` + `opponent_left` |
+| `leave` | — | 主动离开对局 | 关闭连接；不走宽限期，立即按「离开」清理 |
 | `ping` | `t: number` | 心跳 | 回 `pong { t }` |
 
 ### 3.2 服务端 → 客户端（ServerMessage）
 
 | type | 关键字段 | 语义 |
 |---|---|---|
-| `welcome` | `side`、`hostIp`、`port`、`state` | 加入成功，返回分配阵营与当前快照 |
+| `welcome` | `side`、`hostIp`、`port`、`state` | 加入成功，返回分配阵营与当前快照（宽限期内重连时 `state.status='playing'`） |
 | `start` | `state` | 对局开始（双方到齐），客户端进入对局页 |
 | `move_applied` | `seq`、`from`、`to`、`board`、`turn`、`check`、`status`、`winner`、`reason`、`lastMove` | 走子成功广播（全量棋盘） |
 | `move_rejected` | `from`、`to`、`reason` | 走子被拒绝（单播给发起方） |
-| `state` | `state: GameSnapshot` | 全量状态同步（加入后/重开/重连场景） |
+| `state` | `state: GameSnapshot` | 全量状态同步：断线重连恢复、宽限结束/放弃等待回到 waiting 等 |
 | `draw_request` / `draw_response` | `accept?` | 和棋请求与结果 |
 | `restart_request` / `restart_response` | `accept?` | 重开请求与结果 |
 | `game_over` | `winner`、`reason`、`state` | 终局广播（将死/困毙/认输/同意和棋） |
-| `opponent_joined` | — | 通知主机：对手已加入 |
-| `opponent_left` | `reason` | 对手离开/断线（`主机已离开` / `对手已离开`） |
+| `opponent_joined` | — | 通知主机：对手已加入 / 已重连 |
+| `opponent_away` | `reason`、`graceMs` | 对手意外断线，进入宽限期等待重连（主机侧弹层提示） |
+| `opponent_left` | `reason` | 对手离开/宽限超时（`主机已离开` / `对手已离开` / `已放弃等待对方重连`） |
 | `error` | `message` | 协议或状态错误（如未加入就发 move、对局已满） |
 | `pong` | `t` | 心跳回应 |
 
 ### 3.3 关键字段约束
 
-- `Pos = [row, col]`：`row ∈ 0..9`，`col ∈ 0..8`；服务端对非数组坐标回 `move_rejected`（`坐标非法`）。
+- `Pos = [row, col]`：`row ∈ 0..9`，`col ∈ 0..8`；非整数对回 `move_rejected`（`坐标非法`），整数越界由规则引擎回 `越界`。
 - `GameSnapshot` 字段：`board`、`turn`、`moveSeq`、`status`、`winner`、`reason`、`lastMove`、`check`。
 - `status ∈ {idle, waiting, playing, over}`；`winner ∈ {'r','b',null}`。
 - `seq` 与 `moveSeq` 同源，每次成功走子 +1；未成功（被拒绝）不递增。
@@ -83,33 +85,41 @@ B ── draw_response{accept:true} ─►  双方 ◄── draw_response + gam
 【重开】
 A ── restart_request ─►  B ◄── restart_request
 B ── restart_response{accept:true} ─►  双方 ◄── restart_response + start(state)
+
+【意外断线 → 宽限期内重连（以 guest 为例，host 同理）】
+guest 断连（非 leave） ─►  对局保持 playing，host ◄── opponent_away{graceMs}
+  ├─ 宽限内 guest 重新 join ─► guest ◄── welcome(state=playing)
+  │                            host  ◄── opponent_joined + state（双方以快照对齐）
+  └─ 宽限超时 / host ── wait_new_opponent ─►  Game.reset(waiting)
+                              host ◄── state(waiting) + opponent_left{reason}
 ```
 
 ### 3.5 错误与容错
 
-- `decode` 失败 → 服务端回 `error: 无法解析的消息`（[host-server.ts](../../src/server/host-server.ts#L236-L244)）。
+- `decode` 失败 → 服务端回 `error: 无法解析的消息`（[host-server.ts](../../src/server/host-server.ts#L243-L258)）。
 - 未 `join` 就发送 `move` → `error: 尚未加入对局`。
 - guest 在主机未创建对局时加入 → `error: 主机尚未创建对局`；重复占用角色 → `error: 主机端已存在` / `对局已满，无法加入`。
 - 未知消息类型 → `error: 未知消息类型`。
 
 ### 3.6 明确不做
 
-房间号/密码、断线重连、消息压缩、二进制协议、版本协商、消息鉴权。协议扩展时新增 `type` 即可，
-不破坏现有字段语义。
+房间号/密码、断线自动重连（宽限期内需手动重新加入；不做客户端自动重试）、消息压缩、
+二进制协议、版本协商、消息鉴权。协议扩展时新增 `type` 即可，不破坏现有字段语义。
 
 ## 4. 代码入口
 
 | 内容 | 位置 |
 |---|---|
-| ClientMessage / ServerMessage 联合类型 | [protocol.ts](../../src/shared/protocol.ts#L12-L73) |
-| encode / decode | [protocol.ts](../../src/shared/protocol.ts#L75-L88) |
-| 消息路由实现 | [host-server.ts `handleMessage()`](../../src/server/host-server.ts#L250-L342) |
-| 客户端消息分发 | [app.ts `handleMessage()`](../../src/renderer/app.ts#L173-L245) |
+| ClientMessage / ServerMessage 联合类型 | [protocol.ts](../../src/shared/protocol.ts#L12-L77) |
+| 坐标校验 `isValidPos` | [protocol.ts](../../src/shared/protocol.ts#L94-L97) |
+| encode / decode | [protocol.ts](../../src/shared/protocol.ts#L79-L92) |
+| 消息路由实现 | [host-server.ts `handleMessage()`](../../src/server/host-server.ts#L260-L365) |
+| 客户端消息分发 | [app.ts `handleMessage()`](../../src/renderer/app.ts#L178-L281) |
 | 客户端发送封装 | [net.ts `send()`](../../src/renderer/net.ts#L105-L107) |
 
 ## 5. 验收标准
 
 - [server.test.ts](../../tests/server.test.ts) 覆盖：未创建对局时 guest 被拒、创建后双方加入自动开局、走子广播、
-  非法走子被拒、认输/和棋/重开/离开、断线通知。
+  非法走子被拒、非整数坐标被拒、认输/和棋/重开/离开、断线宽限与重连恢复、宽限超时、主机放弃等待。
 - [fullgame.test.ts](../../tests/fullgame.test.ts) 验证 `seq` 全程单调递增 +1，且双方收到的 `board` 与主机权威一致。
 - 任何非法/异常输入都不会导致主机进程崩溃（统一走 `error` 回复）。

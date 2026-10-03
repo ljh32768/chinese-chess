@@ -2,7 +2,7 @@
 
 - 状态：已接受（记录现状实现）
 - 日期：2026-10-03
-- 关联入口：首页、主机等待页（含地址复制）、加入页、对局页、结束结果卡、断线提示、视角翻转、悬停反馈、快捷键、心跳
+- 关联入口：首页、主机等待页（含地址复制）、加入页、对局页、结束结果卡、断线提示与宽限重连、视角翻转、悬停反馈、快捷键、心跳
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0005 主机服务](./0005-host-server.md)
 
 ---
@@ -48,6 +48,7 @@
 | `selected` / `moves` | 当前选中的棋子与本地计算的合法落点（仅提示用） |
 | `lastMove` | 上一步高亮 |
 | `pending` | 已发出、等待对方回应的请求（`'draw'` / `'restart'` / null），驱动 `req-hint` 等待提示 |
+| `oppAway` | 对手意外断线、宽限等待重连中：状态框显示等待文案，棋盘冻结不可交互；收到快照或对手回来时清除 |
 
 ### 3.3 页面流转
 
@@ -64,17 +65,18 @@
 | `start` | 应用快照 → 进入对局页 → toast「对局开始，红方先行」 |
 | `move_applied` | 更新镜像并重绘；`status='over'` 时侧栏切换为结果卡与「再来一局/返回首页」 |
 | `move_rejected` | toast「走子无效：<原因>」 |
-| `state` | 应用快照 |
+| `state` | 应用快照；主机收到 `waiting` 时关闭弹层并切回等待页（宽限超时/放弃等待），`idle` 时回首页 |
 | `game_over` | 应用快照（结果卡由 `updatePanel` 呈现，不遮挡棋盘） |
 | `draw_request` | 弹层「对方请求和棋」→ 同意/拒绝发送 `draw_response` |
 | `draw_response` | 清空 `pending`；拒绝时 toast 提示 |
 | `restart_request` | 弹层「对方请求重开」→ 同意/拒绝发送 `restart_response` |
 | `restart_response` | 清空 `pending`；拒绝时 toast 提示 |
-| `opponent_joined` | 等待页文案更新为「对手已加入，正在开局…」 |
+| `opponent_joined` | 关闭弹层；对局中 → toast「对手已重新连接」；等待中 → 更新等待页文案 |
+| `opponent_away` | 置 `oppAway`：状态框显示「对手已断开，等待重连…」，棋盘冻结；弹层「对手已断开」，主机可选「等待新对手」（发 `wait_new_opponent`） |
 | `opponent_left` | 对局中：弹「对手已离开」；否则 toast |
 | `error` | toast 服务端错误消息（如「尚未加入对局」），不再静默丢弃 |
 
-`applySnapshot` 会同时清空 `selected` / `moves` / `pending`，保证任何全量同步后回到干净状态。
+`applySnapshot` 会同时清空 `selected` / `moves` / `pending` / `oppAway`，保证任何全量同步后回到干净状态。
 
 ### 3.5 棋盘渲染规格（board.ts）
 
@@ -121,6 +123,7 @@
 | 右键 | 棋盘 `contextmenu` 阻止默认菜单并取消选中 |
 | 遮罩点击 | 点击 `modal` 遮罩空白处关闭弹层（等效「取消」） |
 | 请求等待态 | `offerDraw` / `requestRestart` 发出后置 `pending` 并在 `req-hint` 显示等待文案，已有 `pending` 时防重复发送；收到响应或快照同步时清空 |
+| 断线冻结 | 对手宽限等待重连期间（`oppAway`）棋盘与落点不显示交互态，点击提示「对手已断开，等待重连」 |
 
 ### 3.8 连接与心跳（net.ts）
 
@@ -133,20 +136,21 @@
 
 ### 3.9 明确不做
 
-动画/音效/皮肤、移动端专门适配（仅基础 viewport）、断线自动重连、聊天、悔棋、计时显示。
+动画/音效/皮肤、移动端专门适配（仅基础 viewport）、断线自动重连（宽限期内手动重新加入即可恢复原局）、
+聊天、悔棋、计时显示。
 
 ## 4. 代码入口
 
 | 内容 | 位置 |
 |---|---|
 | 页面结构 / 控件 id | [index.html](../../src/renderer/index.html) |
-| 镜像状态 `S` | [app.ts](../../src/renderer/app.ts#L18-L33) |
-| 页面切换/弹层/toast | [app.ts](../../src/renderer/app.ts#L43-L85) |
-| 消息处理 | [app.ts `handleMessage()`](../../src/renderer/app.ts#L173-L245) |
-| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts#L107-L148) |
-| 创建/取消/复制地址/加入/离开 | [app.ts](../../src/renderer/app.ts#L309-L407) |
-| 走子交互 | [app.ts `onCell()`](../../src/renderer/app.ts#L449-L481) |
-| 取消选中与快捷键 | [app.ts `clearSelection()`](../../src/renderer/app.ts#L440-L445)、[app.ts `bindEvents()`](../../src/renderer/app.ts#L483-L526) |
+| 镜像状态 `S` | [app.ts](../../src/renderer/app.ts#L18-L35) |
+| 页面切换/弹层/toast | [app.ts](../../src/renderer/app.ts#L45-L85) |
+| 消息处理（含断线重连分支） | [app.ts `handleMessage()`](../../src/renderer/app.ts#L178-L281) |
+| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts#L109-L152) |
+| 创建/取消/复制地址/加入/离开 | [app.ts](../../src/renderer/app.ts#L347-L443) |
+| 走子交互 | [app.ts `onCell()`](../../src/renderer/app.ts#L487-L517) |
+| 取消选中与快捷键 | [app.ts `clearSelection()`](../../src/renderer/app.ts#L478-L483)、[app.ts `bindEvents()`](../../src/renderer/app.ts#L521-L565) |
 | 棋盘标记生成 | [board.ts `boardMarkup()`](../../src/renderer/board.ts#L72-L154) |
 | 棋盘挂载 / 坐标与点击 | [board.ts `renderBoard()`](../../src/renderer/board.ts#L157-L159)、[board.ts](../../src/renderer/board.ts#L23-L62) |
 | WebSocket 客户端 | [net.ts](../../src/renderer/net.ts#L38-L103) |
@@ -158,6 +162,8 @@
 - 加入者执黑时棋盘自动上下翻转，点击命中与显示一致。
 - 主机广播的任何快照都能正确渲染（包括 `check` 提示与终局状态）。
 - 对方断线/主机断线均有明确弹层提示，不白屏、不崩溃。
+- 对手意外断线：状态框显示等待重连、棋盘冻结；宽限内重连后弹层自动关闭并恢复对局；
+  宽限超时自动回到等待页（弹层不残留）。
 - 等待页地址可一键复制（非安全上下文降级为选中文本 + `execCommand`）。
 - 悬停己方棋子/合法落点有预高亮且光标为手型；ESC / 右键可取消选中，ESC / 遮罩可关闭弹层。
 - 请求发出后侧栏显示等待状态；矮窗口下内容不被裁剪、可滚动。
