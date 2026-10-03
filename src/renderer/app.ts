@@ -3,7 +3,7 @@
  * 客户端只发送「走子意图」，一切以主机广播为准。
  */
 
-import { initBoard, legalMoves } from '../shared/rules.js';
+import { findKing, initBoard, legalMoves } from '../shared/rules.js';
 import { ServerMessage } from '../shared/protocol.js';
 import { Board, GameSnapshot, Move, Pos, Side } from '../shared/types.js';
 import { pickCell, renderBoard, svgPoint } from './board.js';
@@ -89,6 +89,7 @@ function render(): void {
     moves: S.moves,
     lastMove: S.lastMove,
     flip: flip(),
+    checkKing: S.check ? findKing(S.board, S.turn) : null,
   });
   updatePanel();
 }
@@ -109,6 +110,10 @@ function updatePanel(): void {
   $('p-bottom-name').textContent = `${sideName(S.side)} · 你`;
 
   const active = S.status === 'playing';
+  const over = S.status === 'over';
+  // 结束态切换操作组：对局中（认输/和棋/离开）↔ 已结束（再来一局/返回首页）
+  $('actions-play').hidden = over;
+  $('actions-over').hidden = !over;
   rowTop.classList.toggle('active', active && S.turn === opp);
   rowBottom.classList.toggle('active', active && S.turn === S.side);
   $('p-top-tag').textContent = active && S.turn === opp ? '走棋中' : '';
@@ -116,6 +121,10 @@ function updatePanel(): void {
 
   const st = $('status-box');
   st.classList.toggle('check', active && S.check);
+  st.classList.toggle('over', over);
+  st.classList.toggle('win-red', over && S.winner === 'r');
+  st.classList.toggle('win-black', over && S.winner === 'b');
+  st.classList.toggle('draw', over && S.winner === null);
   if (S.status === 'over') {
     st.textContent = `${resultText()} · ${S.reason}`;
   } else if (active && S.check) {
@@ -149,17 +158,6 @@ function enterGame(): void {
 
 // -------------------------------------------------------------- 消息处理
 
-function showGameOver(): void {
-  showModal({
-    title: resultText(),
-    sub: S.reason,
-    buttons: [
-      { label: '再来一局', primary: true, onClick: requestRestart },
-      { label: '返回首页', onClick: leaveToHome },
-    ],
-  });
-}
-
 function handleMessage(msg: ServerMessage): void {
   switch (msg.type) {
     case 'start':
@@ -179,7 +177,6 @@ function handleMessage(msg: ServerMessage): void {
       S.selected = null;
       S.moves = [];
       render();
-      if (msg.status === 'over') showGameOver();
       break;
     case 'move_rejected':
       toast(`走子无效：${msg.reason}`);
@@ -189,7 +186,6 @@ function handleMessage(msg: ServerMessage): void {
       break;
     case 'game_over':
       applySnapshot(msg.state);
-      showGameOver();
       break;
     case 'draw_request':
       showModal({
@@ -375,7 +371,7 @@ function offerDraw(): void {
 }
 
 function requestRestart(): void {
-  if (S.status === 'idle' || S.status === 'waiting') return toast('对局尚未开始');
+  if (S.status !== 'over') return toast('对局结束后才能重开');
   net?.send({ type: 'restart_request' });
   toast('已发送重开请求…');
 }
@@ -424,7 +420,8 @@ function bindEvents(): void {
   $('btn-join-back').addEventListener('click', () => show('screen-home'));
   $('btn-resign').addEventListener('click', resign);
   $('btn-draw').addEventListener('click', offerDraw);
-  $('btn-restart').addEventListener('click', requestRestart);
+  $('btn-play-again').addEventListener('click', requestRestart);
+  $('btn-home').addEventListener('click', leaveToHome);
   $('btn-leave').addEventListener('click', leaveToHome);
 
   boardEl.addEventListener('click', (e) => {

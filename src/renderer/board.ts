@@ -35,6 +35,8 @@ export interface BoardView {
   moves: Pos[];
   lastMove: { from: Pos; to: Pos } | null;
   flip: boolean;
+  /** 被将军（含将死）一方的将/帅位置，用于警示高亮 */
+  checkKing?: Pos | null;
 }
 
 /** 把点击位置（SVG 内部坐标）映射为逻辑棋盘坐标；不在有效落点返回 null */
@@ -59,7 +61,10 @@ export function svgPoint(svg: SVGSVGElement, clientX: number, clientY: number): 
   };
 }
 
-export function renderBoard(svg: SVGSVGElement, v: BoardView): void {
+/**
+ * 生成棋盘 SVG 标记（纯字符串，与 DOM 解耦，便于单元测试）。
+ */
+export function boardMarkup(v: BoardView): string {
   let h = '';
   h += `<rect x="0" y="0" width="${VBW}" height="${VBH}" fill="#e9cb8d" rx="6"/>`;
   h += `<rect x="4" y="4" width="${VBW - 8}" height="${VBH - 8}" fill="none" stroke="#c9a768" stroke-width="1" rx="5" opacity=".6"/>`;
@@ -92,6 +97,12 @@ export function renderBoard(svg: SVGSVGElement, v: BoardView): void {
       const [vr, vc] = toView(pos, v.flip);
       h += `<circle cx="${X(vc)}" cy="${Y(vr)}" r="${R + 5}" fill="none" stroke="#d4a017" stroke-width="2.5" opacity=".65"/>`;
     }
+  }
+
+  // 被将军 / 将死的将帅警示高亮
+  if (v.checkKing) {
+    const [vr, vc] = toView(v.checkKing, v.flip);
+    h += `<circle class="check-king" cx="${X(vc)}" cy="${Y(vr)}" r="${R + 7}" fill="none" stroke="#d94f3d" stroke-width="3.5"/>`;
   }
 
   // 合法落点
@@ -132,5 +143,10 @@ export function renderBoard(svg: SVGSVGElement, v: BoardView): void {
     h += `<circle cx="${X(vc)}" cy="${Y(vr)}" r="${R + 4}" fill="none" stroke="#f0b429" stroke-width="3.5"/>`;
   }
 
-  svg.innerHTML = h;
+  return h;
+}
+
+/** 渲染棋盘到给定的 SVG 元素 */
+export function renderBoard(svg: SVGSVGElement, v: BoardView): void {
+  svg.innerHTML = boardMarkup(v);
 }

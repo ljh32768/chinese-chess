@@ -111,20 +111,21 @@ main / cli（进程入口，装配 server 与页面）
 
 | 功能 | UI 触发点 | 实现入口（代码） | 详细 spec |
 |---|---|---|---|
-| 创建对局 | 首页「创建对局」按钮 | [app.ts `createGame()`](../src/renderer/app.ts#L287-L300) → `POST /api/host/start` → [host-server.ts `setHosting()`](../src/server/host-server.ts#L139-L150) | [ADR-0005](./adr/0005-host-server.md) |
-| 显示本机地址 | 主机等待页 | [app.ts `init()`](../src/renderer/app.ts#L444-L458) → `GET /api/host-info` → [host-server.ts `pickLanIp()`](../src/server/host-server.ts#L38-L57) | [ADR-0005](./adr/0005-host-server.md) |
-| 加入对局 | 「加入对局」→ 输入 IP:端口 →「连接」 | [app.ts `doJoin()`](../src/renderer/app.ts#L321-L341) → WS `join(guest)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts#L344-L387) | [ADR-0005](./adr/0005-host-server.md) |
+| 创建对局 | 首页「创建对局」按钮 | [app.ts `createGame()`](../src/renderer/app.ts#L283-L296) → `POST /api/host/start` → [host-server.ts `setHosting()`](../src/server/host-server.ts#L139-L150) | [ADR-0005](./adr/0005-host-server.md) |
+| 显示本机地址 | 主机等待页 | [app.ts `init()`](../src/renderer/app.ts#L441-L455) → `GET /api/host-info` → [host-server.ts `pickLanIp()`](../src/server/host-server.ts#L38-L57) | [ADR-0005](./adr/0005-host-server.md) |
+| 加入对局 | 「加入对局」→ 输入 IP:端口 →「连接」 | [app.ts `doJoin()`](../src/renderer/app.ts#L317-L337) → WS `join(guest)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts#L344-L387) | [ADR-0005](./adr/0005-host-server.md) |
 | 自动开局 | 双方加入后由主机触发 | [host-server.ts `maybeStart()` / `startGame()`](../src/server/host-server.ts#L389-L400) → 广播 `start` | [ADR-0003](./adr/0003-wire-protocol.md) |
-| 走子（选子/落点/发送） | 点击棋盘 | [app.ts `onCell()`](../src/renderer/app.ts#L385-L415) → `move` → [game.ts `applyMove()`](../src/server/game.ts#L60-L82) → 广播 `move_applied` | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
+| 走子（选子/落点/发送） | 点击棋盘 | [app.ts `onCell()`](../src/renderer/app.ts#L381-L411) → `move` → [game.ts `applyMove()`](../src/server/game.ts#L60-L82) → 广播 `move_applied` | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
 | 规则裁判（将军/将死/困毙） | 走子后自动判定 | [rules.ts `judgeAfterMove()`](../src/shared/rules.ts#L299-L307)、[`validateMove()`](../src/shared/rules.ts#L313-L330) | [ADR-0002](./adr/0002-rules-engine.md) |
-| 认输 | 对局页「认输」 | [app.ts `resign()`](../src/renderer/app.ts#L359-L369) → `resign` → [game.ts `resign()`](../src/server/game.ts#L85-L92) → 广播 `game_over` | [ADR-0004](./adr/0004-game-state-machine.md) |
-| 和棋（申请/同意） | 对局页「和棋」 | [app.ts `offerDraw()`](../src/renderer/app.ts#L371-L375) → `draw_request` / `draw_response` → [host-server.ts 路由](../src/server/host-server.ts#L292-L311) | [ADR-0003](./adr/0003-wire-protocol.md) |
-| 重开（申请/同意） | 「重开」或结束弹层「再来一局」 | [app.ts `requestRestart()`](../src/renderer/app.ts#L377-L381) → `restart_request` / `restart_response` → [host-server.ts 路由](../src/server/host-server.ts#L313-L331) | [ADR-0003](./adr/0003-wire-protocol.md) |
-| 离开对局 | 对局页「离开」/ 弹层「返回首页」 | [app.ts `leaveToHome()`](../src/renderer/app.ts#L343-L355) → `leave` → [host-server.ts `handleClose()`](../src/server/host-server.ts#L402-L415) | [ADR-0005](./adr/0005-host-server.md) |
-| 断线提示 | 对方断开 / 连接中断时自动弹出 | [net.ts `onclose`](../src/renderer/net.ts#L86-L94)、[app.ts `handleClosed()`](../src/renderer/app.ts#L256-L268) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 将军/将死高亮 | 走子后自动 | [board.ts `boardMarkup()`](../src/renderer/board.ts#L64-L147)（被将军一方的将/帅红色脉冲警示环） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 认输 | 对局页「认输」 | [app.ts `resign()`](../src/renderer/app.ts#L355-L365) → `resign` → [game.ts `resign()`](../src/server/game.ts#L85-L92) → 广播 `game_over` | [ADR-0004](./adr/0004-game-state-machine.md) |
+| 和棋（申请/同意） | 对局页「和棋」 | [app.ts `offerDraw()`](../src/renderer/app.ts#L367-L371) → `draw_request` / `draw_response` → [host-server.ts 路由](../src/server/host-server.ts#L292-L311) | [ADR-0003](./adr/0003-wire-protocol.md) |
+| 再来一局（申请/同意） | 对局结束后结果卡「再来一局」 | [app.ts `requestRestart()`](../src/renderer/app.ts#L373-L377) → `restart_request` / `restart_response` → [host-server.ts 路由](../src/server/host-server.ts#L313-L331) | [ADR-0003](./adr/0003-wire-protocol.md) |
+| 离开对局 | 对局页「离开」/ 结果卡「返回首页」 | [app.ts `leaveToHome()`](../src/renderer/app.ts#L339-L351) → `leave` → [host-server.ts `handleClose()`](../src/server/host-server.ts#L402-L415) | [ADR-0005](./adr/0005-host-server.md) |
+| 断线提示 | 对方断开 / 连接中断时自动弹出 | [net.ts `onclose`](../src/renderer/net.ts#L86-L94)、[app.ts `handleClosed()`](../src/renderer/app.ts#L252-L264) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 心跳保活 | 后台自动运行（5s 间隔） | [net.ts `startPing()`](../src/renderer/net.ts#L120-L133) → `ping` / `pong` | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 视角翻转（黑方） | 加入者执黑时自动翻转 | [board.ts `toView()` / `pickCell()`](../src/renderer/board.ts#L23-L47) | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 结束弹层 | 对局结束自动弹出 | [app.ts `showGameOver()`](../src/renderer/app.ts#L152-L161) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 视角翻转（黑方） | 加入者执黑时自动翻转 | [board.ts `toView()` / `pickCell()`](../src/renderer/board.ts#L23-L49) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 结束结果卡 | 对局结束时侧栏显示结果与结束操作（不遮挡棋盘） | [app.ts `updatePanel()`](../src/renderer/app.ts#L103-L137) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | Electron 桌面启动 | `npm start` | [main.ts `createWindow()`](../src/main/main.ts#L28-L41) | [ADR-0006](./adr/0006-process-entries.md) |
 | 无界面主机启动 | `npm run host` | [cli.ts](../src/server/cli.ts) | [ADR-0006](./adr/0006-process-entries.md) |
 
