@@ -45,6 +45,7 @@
 | 复盘 | `screen-replay` | 复盘棋盘 `replay-board`、步进按钮 `btn-replay-first/prev/next/last`、返回列表 `btn-replay-back`、对局信息 `replay-info`、当前步 `replay-step`、AI 推荐 `replay-hint` |
 | 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；用于和棋/重开/悔棋请求、认输确认、猜先应答、对手离开与断线提示，**不用于对局结束** |
 | 轻提示 | `toast` | 1.8s 自动消失（席位结果 / 猜先结果也用它提示） |
+| 音效元素 | `click-audio` / `select-audio` | 常驻 `<audio preload="auto">`（与参考项目一致），由 `sound.ts` 直接 `play()` |
 
 ### 3.2 客户端镜像状态 `S`（app.ts）
 
@@ -138,7 +139,7 @@
 |---|---|
 | 皮肤切换 | 首页「更换皮肤」→ `nextSkin` 循环 `stype1 → stype2 → stype3`；切换时套用页面背景 `bg.jpg`、按需加载该皮肤素材并重绘；对局进行中禁止切换（toast 提示）；偏好写入 `localStorage` |
 | 素材加载 | `loadSkinImages(skin)` 预加载 `bg / dot / box / 14 枚棋子`，按皮肤缓存（同一皮肤只加载一次）；加载完成补一次重绘，缺图静默跳过 |
-| 音效 | `sound.ts`：选子 `select.wav`、走子（收到 `move_applied`）`click.wav`；播放失败静默忽略（自动播放策略） |
+| 音效 | `sound.ts`：选子 `select.wav`、走子（收到 `move_applied`）`click.wav`；**播放方式与参考项目一致**——`index.html` 常驻 `<audio preload="auto">`（`click-audio` / `select-audio`），只调 `play()`，**不重置 `currentTime`**（重置会在声音未播完时强行 seek，产生原版没有的截断杂音）；播放失败静默忽略（自动播放策略） |
 | 服务器 | 静态资源需按 MIME 下发：`.png / .jpg / .wav` 已加入主机服务 MIME 白名单 |
 
 ### 3.5.2 对局回顾与复盘（review.ts，v1.5）

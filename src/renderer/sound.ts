@@ -1,27 +1,24 @@
 /**
  * 音效模块（素材与参考项目一致：click.wav / select.wav）。
- * 浏览器要求播放前有用户手势，走子/选中都发生在点击里，播放失败静默忽略。
+ *
+ * 播放方式与参考项目保持一致：使用 index.html 中常驻的 <audio preload="auto"> 元素，
+ * 直接 play()，**不重置 currentTime**。
+ * 重置进度会在声音尚未播完时强行 seek，产生截断杂音（原版没有这个问题）。
  */
 
-const SRC = {
-  click: './assets/audio/click.wav',
-  select: './assets/audio/select.wav',
+const AUDIO_ID = {
+  click: 'click-audio',
+  select: 'select-audio',
 } as const;
 
-type SoundKey = keyof typeof SRC;
-
-const cache = new Map<SoundKey, HTMLAudioElement>();
+type SoundKey = keyof typeof AUDIO_ID;
 
 function play(key: SoundKey): void {
   try {
-    let audio = cache.get(key);
-    if (!audio) {
-      audio = new Audio(SRC[key]);
-      audio.preload = 'auto';
-      cache.set(key, audio);
-    }
-    audio.currentTime = 0;
-    void audio.play().catch(() => undefined);
+    const el = document.getElementById(AUDIO_ID[key]) as HTMLAudioElement | null;
+    if (!el) return;
+    // 播完后再触发时浏览器会自动从头播放；播放中重复调用为无操作（与原版一致）
+    void el.play().catch(() => undefined);
   } catch {
     /* 忽略：音效不可用不影响对局 */
   }
