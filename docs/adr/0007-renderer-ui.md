@@ -37,12 +37,14 @@
 
 | 屏 | id | 元素与入口 |
 |---|---|---|
-| 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「更换皮肤」`btn-skin`；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`）；本机地址提示 `home-hint` |
-| 主机等待 | `screen-host` | 地址大字显示 `host-ip`、复制地址 `btn-copy-ip`（非安全上下文降级）、等待文案 `host-wait`、取消 `btn-cancel-host`（素材返回箭头） |
+| 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「对局回顾」`btn-history`、「更换皮肤」`btn-skin`（5 个入口铺满挂板按钮区）；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`）；本机地址提示 `home-hint` |
+| 主机等待 | `screen-host` | 放大版块 `menu_info wide`：地址大字显示 `host-ip`、复制地址 `btn-copy-ip`（非安全上下文降级）、先手（红方）方式 `side-opts`（随机黑红 / 猜先 / 黑 / 红，选中态 `.active`）+ 说明 `side-hint`、等待文案 `host-wait`（猜先阶段显示进度）、取消 `btn-cancel-host`（素材返回箭头） |
 | 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`、返回 `btn-join-back`、提示 `join-msg` |
-| 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、棋谱 `move-list`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint` |
-| 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；仅用于和棋/重开请求、认输确认、对手离开与断线提示，**不用于对局结束** |
-| 轻提示 | `toast` | 1.8s 自动消失 |
+| 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint`（**棋谱面板已移除，改由「对局回顾」复盘**） |
+| 对局回顾 | `screen-history` | 列表 `history-list`（每行：红黑方 / 取先方式 / 时间 / 胜负，点击进入复盘）、返回 `btn-history-back`、刷新 `btn-history-refresh` |
+| 复盘 | `screen-replay` | 复盘棋盘 `replay-board`、步进按钮 `btn-replay-first/prev/next/last`、返回列表 `btn-replay-back`、对局信息 `replay-info`、当前步 `replay-step`、AI 推荐 `replay-hint` |
+| 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；用于和棋/重开/悔棋请求、认输确认、猜先应答、对手离开与断线提示，**不用于对局结束** |
+| 轻提示 | `toast` | 1.8s 自动消失（席位结果 / 猜先结果也用它提示） |
 
 ### 3.2 客户端镜像状态 `S`（app.ts）
 
@@ -62,6 +64,10 @@
 | `aiMode` | 本机创建的人机对战（AI 执黑）：角色提示显示「人机对战 · AI 执黑」 |
 | `skin` | 当前皮肤（`stype1/2/3`），来自 `localStorage`（键 `lanschess-skin`），不可用时回退 `stype2` |
 | `hover` | 鼠标悬停的交叉点（仅用于预高亮，非规则判定；快照同步与离开棋盘时清空） |
+| `firstMode` | 主机在等待页选择的先手（红方）方式（`r` / `b` / `random` / `guess`），来自 `welcome.firstMode` 或本地选择 |
+
+> `welcome.side` 在 `random` / `guess` 下是**临时占位**（开局前才会最终确定）；
+> 最终阵营以 `start.side` 为准（观战者为 null，保持红方视角）。
 
 ### 3.3 页面流转
 
@@ -90,6 +96,8 @@
 | `opponent_away` | 置 `oppAway`：状态框显示「对手已断开，等待重连…」，棋盘冻结；弹层「对手已断开」，主机可选「等待新对手」（发 `wait_new_opponent`） |
 | `opponent_left` | 对局中：弹「对手已离开」；否则 toast |
 | `error` | toast 服务端错误消息（如「尚未加入对局」），不再静默丢弃 |
+| `guess_request` | 客方：弹层「猜先」提供「猜单 / 猜双」（回 `guess`）；主机：等待文案改为「进入猜先：等待加入者猜单双…」 |
+| `first_result` | 关闭猜先弹层；`random` / `guess` 用 toast 提示席位结果（含猜先选择、实际结果与归属） |
 
 `applySnapshot` 会同时清空 `selected` / `moves` / `pending` / `oppAway`，保证任何全量同步后回到干净状态。
 
@@ -115,6 +123,7 @@
 | 5 | 棋子 | `${红/黑}_${车马相仕帅炮兵→c m x s j p z}` 贴图，坐标为 `space*坐标 + pointStart` |
 | 6 | 将军警示 | 被将军一方将帅加红色脉冲环（半径 `disc/2 + 6`，透明度随时间正弦变化，100ms 重绘一帧） |
 | 7 | 悬停预高亮 | 本方可操作时，己方棋子 / 合法落点画金色环（半径 `disc/2 + 3` / 13） |
+| 8 | AI 推荐（复盘） | `hint`：起点细金环（宽 2.5 / alpha 0.7）、终点粗金环（宽 3.5 / alpha 0.95）；落点为空时叠加素材提示点，吃子时不叠加 |
 
 坐标换算：
 - 视觉中心 `cellCenter` = 贴图起点 + 素材圆盘偏移；
@@ -130,6 +139,21 @@
 | 素材加载 | `loadSkinImages(skin)` 预加载 `bg / dot / box / 14 枚棋子`，按皮肤缓存（同一皮肤只加载一次）；加载完成补一次重绘，缺图静默跳过 |
 | 音效 | `sound.ts`：选子 `select.wav`、走子（收到 `move_applied`）`click.wav`；播放失败静默忽略（自动播放策略） |
 | 服务器 | 静态资源需按 MIME 下发：`.png / .jpg / .wav` 已加入主机服务 MIME 白名单 |
+
+### 3.5.2 对局回顾与复盘（review.ts，v1.5）
+
+| 项 | 规格 |
+|---|---|
+| 入口 | 首页「对局回顾」`btn-history` → `screen-history`（列表） |
+| 列表数据 | `GET /api/history`（主机内存中的最近 50 局，最近在前）；每行四列：**红黑方**（席位 + 红/黑）、**取先方式**、**时间**（MM-DD HH:mm）、**胜负**（红胜/黑胜/和棋 + 原因） |
+| 空列表 | 显示「暂无对局记录，先下完一盘棋吧」 |
+| 进入复盘 | 点击某行 → `GET /api/history/:id`（含着法）→ `screen-replay`；`reloadImages()` 后再绘制 |
+| 复盘棋盘 | 复用 `renderBoard`：`replayBoard(moves, index)` 逐步还原局面、`lastMove` 为当前步、`checkKing` 按行棋方是否被将军、`hint` 为 AI 推荐 |
+| 步进 | 「◀ 上一步」「下一步 ▶」一次一步；「开局 ⏮」「末步 ⏭」直接跳转；到边界时按钮 `disabled`；← / → 方向键等效（仅复盘页激活时生效） |
+| 当前局面 | 「第 n / 总步数 步 · 本步：<中文记谱>」（`describeMove` 按走子前局面生成），第 0 步显示「开局局面」 |
+| AI 推荐 | 每步变化后用 `GET /api/ai/hint?id&index` 请求（120ms 防抖 + 序号防乱序）；文案「红方/黑方推荐：<记谱>」，无着法时显示「已终局或无需走子」 |
+| 皮肤联动 | 切换皮肤后 `redraw()` 重绘复盘棋盘 |
+| 返回 | 「返回列表」`btn-replay-back`；ESC 依次从复盘 → 列表 → 首页 |
 
 ### 3.6 走子交互（app.ts `onCell`）
 
@@ -149,7 +173,8 @@
 |---|---|
 | 悬停预高亮 | `render()` 在「对局中且轮到自己」时传入 `interactiveSide`；`mousemove` 命中交叉点后写入 `S.hover` 并重绘，绘制计划对己方棋子 / 合法落点追加金色环 |
 | 光标 | 悬停在可选中棋子或合法落点上时 `canvas.style.cursor = 'pointer'`，其余为默认；`mouseleave` 清空悬停；触摸设备不触发 mousemove，不受影响 |
-| ESC | 有弹层时关闭弹层；否则调用 `clearSelection()` 取消棋盘选中 |
+| ESC | 有弹层时关闭弹层；复盘页 → 回顾列表；回顾列表 → 首页；否则调用 `clearSelection()` 取消棋盘选中 |
+| 方向键 | 复盘页激活时 ← / → 等效「上一步 / 下一步」（一次一步） |
 | 右键 | 棋盘 `contextmenu` 阻止默认菜单并取消选中 |
 | 遮罩点击 | 点击 `modal` 遮罩空白处关闭弹层（等效「取消」） |
 | 请求等待态 | `offerDraw` / `requestRestart` 发出后置 `pending` 并在 `req-hint` 显示等待文案，已有 `pending` 时防重复发送；收到响应或快照同步时清空 |
@@ -186,6 +211,8 @@
 | 皮肤定义与素材路径 | [board.ts `SKINS` / `assetUrl()` / `loadSkinImages()`](../../src/renderer/board.ts) |
 | 坐标与点击命中 | [board.ts `cellCenter()` / `pickCell()` / `canvasPoint()` / `toView()`](../../src/renderer/board.ts) |
 | 音效 | [sound.ts](../../src/renderer/sound.ts) |
+| 对局回顾与复盘 | [review.ts](../../src/renderer/review.ts)（列表行渲染 / 复盘步进 / AI 推荐请求） |
+| 先手方式选择 | [app.ts `renderSidePick()` / `chooseFirst()`](../../src/renderer/app.ts) |
 | 素材与许可 | [assets/](../../src/renderer/assets/)（含 `LICENSE-ReferenceChess.txt`） |
 | 局域网主机发现 | [discover.ts](../../src/renderer/discover.ts) |
 | WebSocket 客户端 / 心跳 | [net.ts](../../src/renderer/net.ts) |
@@ -205,4 +232,8 @@
 - 等待页地址可一键复制（非安全上下文降级为选中文本 + `execCommand`）。
 - 悬停己方棋子/合法落点有预高亮且光标为手型；ESC / 右键可取消选中，ESC / 遮罩可关闭弹层。
 - 选子/走子有音效；素材（png/jpg/wav）经主机服务按正确 MIME 下发，无 404。
+- 主机等待页可切换先手方式（红 / 黑 / 随机黑红 / 猜先），猜先时客方弹层应答且双方都能看到结果；
+  主机执黑时其棋盘自动翻转、红方（客方）先行。
+- 对局回顾列表按「红黑方 / 取先方式 / 时间 / 胜负」展示已结束对局；点击进入复盘后
+  右箭头（或 → 键）一次一步，棋盘与中文记谱同步，AI 推荐随步数刷新并高亮在棋盘上。
 - 请求发出后侧栏显示等待状态；矮窗口下棋盘按高度等比缩小、内容不被裁剪。

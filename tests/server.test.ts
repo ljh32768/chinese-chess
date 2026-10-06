@@ -4,7 +4,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { HostServer, listenWithFallback } from '../src/server/host-server.js';
-import { Board } from '../src/shared/types.js';
+import { initBoard, validateMove } from '../src/shared/rules.js';
+import { Board, Pos } from '../src/shared/types.js';
 import { TestClient } from './ws-client.js';
 
 let server: HostServer | null = null;
@@ -536,6 +537,180 @@ describe('主机服务 · 断线重连（宽限期）', () => {
     guest.send({ type: 'move', from: [3, 0], to: [4, 0] });
     const applied = await host2.waitType('move_applied');
     expect(applied.seq).toBe(2);
+  });
+});
+
+describe('主机服务 · 先手方式（红黑 / 随机 / 猜先）', () => {
+  /** 创建等待中的主机（可选先手方式） */
+  async function setupWaiting(mode?: 'r' | 'b' | 'random' | 'guess') {
+    const s = await startServer();
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    const welcome = await host.waitType('welcome');
+    if (mode) host.send({ type: 'choose_first', mode });
+    return { s, host, welcome };
+  }
+
+  it('默认主机执红；选择「黑」后主机执黑、加入者执红先行', async () => {
+    const { host, welcome } = await setupWaiting('b');
+    expect(welcome.firstMode).toBe('r');
+
+    const guest = await connect(server!.address.port, 'guest');
+    expect((await guest.waitType('welcome')).side).toBe('r');
+    expect((await host.waitType('start')).side).toBe('b');
+    expect((await guest.waitType('start')).side).toBe('r');
+
+    // 未轮到黑方（主机）时抢先走子被拒
+    host.send({ type: 'move', from: [3, 0], to: [4, 0] });
+    await host.waitType('move_rejected');
+
+    // 红方（加入者）先行，随后轮到黑方（主机）
+    guest.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await guest.waitType('move_applied')).turn).toBe('b');
+    host.send({ type: 'move', from: [3, 0], to: [4, 0] });
+    const applied = await host.wait((m) => m.type === 'move_applied' && m.turn === 'r');
+    expect(applied.type).toBe('move_applied');
+  });
+
+  it('随机黑红：开赛前广播席位结果，双方各按结果执子', async () => {
+    const { host } = await setupWaiting('random');
+    const guest = await connect(server!.address.port, 'guest');
+    await guest.waitType('welcome');
+
+    const result = await host.waitType('first_result');
+    expect(result.mode).toBe('random');
+    expect(['r', 'b']).toContain(result.hostSide);
+    expect(result.guess).toBeNull();
+    await guest.waitType('first_result');
+
+    const redConn = result.hostSide === 'r' ? host : guest;
+    const blackConn = result.hostSide === 'r' ? guest : host;
+    expect((await redConn.waitType('start')).side).toBe('r');
+    expect((await blackConn.waitType('start')).side).toBe('b');
+
+    redConn.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await redConn.waitType('move_applied')).turn).toBe('b');
+  });
+
+  it('猜先：客方猜单双，猜中者执红，并要求双方阵营与结果一致', async () => {
+    const { host } = await setupWaiting('guess');
+    const guest = await connect(server!.address.port, 'guest');
+    await guest.waitType('welcome');
+    await guest.waitType('guess_request'); // 加入后即进入猜先阶段
+
+    // 主机不能替客方猜先
+    host.send({ type: 'guess', choice: 'odd' });
+    expect((await host.waitType('error')).message).toBe('只有加入者可以猜先');
+
+    // 非主机不能选择先手方式
+    guest.send({ type: 'choose_first', mode: 'r' });
+    expect((await guest.waitType('error')).message).toBe('只有主机可以选择先手方式');
+
+    guest.send({ type: 'guess', choice: 'odd' });
+
+    const result = await guest.waitType('first_result');
+    expect(result.mode).toBe('guess');
+    expect(result.guess?.choice).toBe('odd');
+    expect(result.guess?.guestWon).toBe(result.guess?.actual === 'odd');
+    expect(result.hostSide).toBe(result.guess?.guestWon ? 'b' : 'r');
+
+    const guestSide = (await guest.waitType('start')).side;
+    const hostSide = (await host.waitType('start')).side;
+    expect(guestSide).toBe(result.hostSide === 'r' ? 'b' : 'r');
+    expect(hostSide).toBe(result.hostSide);
+    // 猜中者执红：红方先行
+    const redConn = result.hostSide === 'r' ? host : guest;
+    redConn.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await redConn.waitType('move_applied')).turn).toBe('b');
+  });
+
+  it('对局进行中不允许更改先手方式', async () => {
+    const { s, host } = await setupWaiting();
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+
+    host.send({ type: 'choose_first', mode: 'guess' });
+    expect((await host.waitType('error')).message).toBe('对局进行中，无法更改先手方式');
+  });
+});
+
+describe('主机服务 · 对局回顾与 AI 推荐', () => {
+  /** 打一局并结束（默认主机执红，走一步后红方认输） */
+  async function playAndFinish() {
+    const s = await startServer();
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+    return { s, base: `http://127.0.0.1:${s.address.port}` };
+  }
+
+  it('终局后写入记录：席位、取先方式、时间、胜负与着法数', async () => {
+    const { base } = await playAndFinish();
+    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: Record<string, unknown>[] };
+    expect(list.games).toHaveLength(1);
+    const g = list.games[0];
+    expect(g.red).toBe('host');
+    expect(g.black).toBe('guest');
+    expect(g.firstMode).toBe('r');
+    expect(g.guess).toBeNull();
+    expect(g.winner).toBe('b');
+    expect(g.reason).toBe('认输');
+    expect(g.moveCount).toBe(1);
+    expect(g.startedAt).toBeLessThanOrEqual(g.endedAt as number);
+  });
+
+  it('记录明细含着法序列，未知 id 返回 404', async () => {
+    const { base } = await playAndFinish();
+    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: { id: string }[] };
+    const detail = (await (await fetch(`${base}/api/history/${list.games[0].id}`)).json()) as {
+      moves: { from: Pos; to: Pos }[];
+    };
+    expect(detail.moves).toEqual([{ from: [9, 0], to: [8, 0] }]);
+    expect((await fetch(`${base}/api/history/999`)).status).toBe(404);
+  });
+
+  it('AI 推荐：按步数复原局面并返回该行棋方的合法着法', async () => {
+    const { base } = await playAndFinish();
+    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: { id: string }[] };
+    const id = list.games[0].id;
+
+    const hint = (await (await fetch(`${base}/api/ai/hint?id=${id}&index=0`)).json()) as {
+      side: string;
+      from: Pos;
+      to: Pos;
+      text: string;
+    };
+    expect(hint.side).toBe('r'); // 第 0 步（开局）红方行棋
+    expect(validateMove(initBoard(), hint.from, hint.to, 'r')).toBeNull();
+    expect(hint.text.length).toBeGreaterThan(0);
+
+    const hint2 = (await (await fetch(`${base}/api/ai/hint?id=${id}&index=1`)).json()) as { side: string };
+    expect(hint2.side).toBe('b'); // 走完一步后轮到黑方
+
+    expect((await fetch(`${base}/api/ai/hint?id=999&index=0`)).status).toBe(404);
+  });
+
+  it('对局未结束时不写入记录', async () => {
+    const s = await startServer();
+    s.setHosting(true);
+    const host = await connect(s.address.port, 'host');
+    await host.waitType('welcome');
+    const guest = await connect(s.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('start');
+
+    const list = (await (await fetch(`http://127.0.0.1:${s.address.port}/api/history`)).json()) as {
+      games: unknown[];
+    };
+    expect(list.games).toHaveLength(0);
   });
 });
 

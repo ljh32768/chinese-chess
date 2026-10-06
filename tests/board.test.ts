@@ -232,4 +232,21 @@ describe('绘制计划 computeDrawList', () => {
     expect(rings(computeDrawList(view({ hover: [9, 0], interactiveSide: null }), skin2))).toHaveLength(0);
     expect(rings(computeDrawList(view({ hover: [0, 0], interactiveSide: 'r' }), skin2))).toHaveLength(0);
   });
+
+  it('AI 推荐（复盘）：起点细金环、终点粗金环，落点为空时叠加提示点', () => {
+    const ops = computeDrawList(view({ hint: { from: [9, 0], to: [7, 0] } }), skin2);
+    const gold = rings(ops).filter((r) => r.color === '#f0b429');
+    expect(gold).toHaveLength(2);
+    // 起点 [9,0]：cx=30.5, cy=542；终点 [7,0]：cy=57*7+5+24=428
+    expect(gold[0]).toMatchObject({ cx: 30.5, cy: 542, width: 2.5 });
+    expect(gold[1]).toMatchObject({ cx: 30.5, cy: 428, width: 3.5 });
+    // 落点为空 → 提示点（3+10 / 57*7+5+10）
+    expect(findImage(ops, 'dot')).toEqual([{ img: 'dot', x: 13, y: 414, alpha: 0.9 }]);
+  });
+
+  it('AI 推荐为吃子时不叠加提示点（避免提示点被棋子遮住）', () => {
+    const ops = computeDrawList(view({ hint: { from: [9, 0], to: [3, 0] } }), skin2);
+    expect(findImage(ops, 'dot')).toHaveLength(0);
+    expect(rings(ops).filter((r) => r.color === '#f0b429')).toHaveLength(2);
+  });
 });

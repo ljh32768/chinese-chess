@@ -30,7 +30,9 @@ MVP 不做房间系统与二进制优化，优先保证「创建、加入、走�
 
 | type | 字段 | 语义 | 服务端处理 |
 |---|---|---|---|
-| `join` | `role: 'host' \| 'guest'` | 加入对局并声明角色；宽限期内同阵营重新 join 即恢复原对局 | 分配阵营（host=r，guest=b），回 `welcome`（携带当前快照）；错误回 `error` |
+| `join` | `role: 'host' \| 'guest' \| 'spectator'` | 加入对局并声明角色；宽限期内同阵营重新 join 即恢复原对局 | 分配阵营（默认 host=r、guest=b，可被先手方式改写），回 `welcome`（携带当前快照与先手方式）；错误回 `error` |
+| `choose_first` | `mode: 'r' \| 'b' \| 'random' \| 'guess'` | 主机在等待页选择先手（红方）方式 | 仅主机、非 `playing` 时有效；记录方式并在双方到齐后确定席位（`random` 随机、`guess` 进入猜先） |
+| `guess` | `choice: 'odd' \| 'even'` | 客方猜先应答（猜单 / 猜双） | 仅客方且处于猜先阶段有效；猜中者执红，广播 `first_result` 并开局 |
 | `move` | `from: [r,c]`、`to: [r,c]` | 走子意图（坐标必须是整数对，否则回 `坐标非法`） | 经 `Game.applyMove` 校验；广播 `move_applied` 或单播 `move_rejected` |
 | `resign` | — | 认输 | 状态置 over，广播 `game_over`（reason=`认输`） |
 | `draw_request` | — | 发起和棋 | 记录发起方，转发 `draw_request` 给对手 |
@@ -45,8 +47,10 @@ MVP 不做房间系统与二进制优化，优先保证「创建、加入、走�
 
 | type | 关键字段 | 语义 |
 |---|---|---|
-| `welcome` | `side`、`hostIp`、`port`、`state` | 加入成功，返回分配阵营与当前快照（宽限期内重连时 `state.status='playing'`） |
-| `start` | `state` | 对局开始（双方到齐），客户端进入对局页 |
+| `welcome` | `side`、`hostIp`、`port`、`state`、`firstMode` | 加入成功，返回分配阵营与当前快照（宽限期内重连时 `state.status='playing'`）；`firstMode` 为当前先手方式 |
+| `start` | `state`、`side` | 对局开始（双方到齐）：逐连接下发，`side` 为本连接最终阵营（观战者为 null） |
+| `guess_request` | — | 猜先开始：主机已「抓子」，客方弹层猜单双（主机据此更新等待提示） |
+| `first_result` | `mode`、`hostSide`、`guess` | 席位与先手结果（`random` / `guess` 确定席位后广播）；`guess` 含客方选择、实际结果与是否猜中 |
 | `move_applied` | `seq`、`from`、`to`、`board`、`turn`、`check`、`status`、`winner`、`reason`、`lastMove` | 走子成功广播（全量棋盘） |
 | `move_rejected` | `from`、`to`、`reason` | 走子被拒绝（单播给发起方） |
 | `state` | `state: GameSnapshot` | 全量状态同步：断线重连恢复、宽限结束/放弃等待回到 waiting 等 |
@@ -87,6 +91,16 @@ B ── draw_response{accept:true} ─►  双方 ◄── draw_response + gam
 【重开】
 A ── restart_request ─►  B ◄── restart_request
 B ── restart_response{accept:true} ─►  双方 ◄── restart_response + start(state)
+
+【席位与先手（v1.5：红 / 黑 / 随机 / 猜先）】
+host ── choose_first{mode} ─►   记录方式（等待阶段可改；对局中拒绝）
+双方到齐后按方式确定席位：
+  · r / b      → 直接 `first_result{mode, hostSide}` + 逐连接 start(state, side)
+  · random     → 服务端随机 hostSide，同上
+  · guess      → 双方 ◄── guess_request（客方弹层猜单双）
+                 guest ── guess{choice} ─►
+                 双方 ◄── first_result{mode:'guess', hostSide, guess{choice,actual,guestWon}} + start
+                 （猜中者执红；主机方也收到 guess_request 以便展示「等待对方猜先」）
 
 【意外断线 → 宽限期内重连（以 guest 为例，host 同理）】
 guest 断连（非 leave） ─►  对局保持 playing，host ◄── opponent_away{graceMs}

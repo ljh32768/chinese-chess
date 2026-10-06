@@ -149,6 +149,8 @@ export interface BoardView {
   interactiveSide?: Side | null;
   /** 鼠标悬停的交叉点（用于预高亮，非规则判定） */
   hover?: Pos | null;
+  /** AI 推荐着法（复盘用）：起点细金环 + 终点粗金环 */
+  hint?: { from: Pos; to: Pos } | null;
 }
 
 /** 交叉点视觉中心（视图坐标）：贴图起点 + 素材内圆盘偏移 */
@@ -295,6 +297,34 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
         width: 3,
         alpha: 0.85,
       });
+    }
+  }
+
+  // AI 推荐（复盘）：起点细金环、终点粗金环；落点为空时叠加素材提示点
+  if (v.hint) {
+    const origin = center(v.hint.from);
+    ops.push({
+      ring: true,
+      cx: origin.x,
+      cy: origin.y,
+      radius: skin.disc / 2 + 3,
+      color: '#f0b429',
+      width: 2.5,
+      alpha: 0.7,
+    });
+    const dest = center(v.hint.to);
+    ops.push({
+      ring: true,
+      cx: dest.x,
+      cy: dest.y,
+      radius: skin.disc / 2 + 3,
+      color: '#f0b429',
+      width: 3.5,
+      alpha: 0.95,
+    });
+    if (!v.board[v.hint.to[0]][v.hint.to[1]]) {
+      const d = at(v.hint.to, DOT_OFFSET);
+      ops.push({ img: 'dot', x: d.x, y: d.y, alpha: 0.9 });
     }
   }
 

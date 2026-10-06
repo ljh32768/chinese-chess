@@ -13,12 +13,46 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { ClientMessage, Role, ServerMessage, decode, encode, isValidPos } from '../shared/protocol.js';
-import { Pos, Side } from '../shared/types.js';
+import {
+  AiHint,
+  FIRST_MODE_LABEL,
+  FirstMode,
+  GameRecord,
+  GameRecordSummary,
+  GuessChoice,
+  GuessResult,
+  Pos,
+  Side,
+} from '../shared/types.js';
+import { describeMove } from '../shared/notation.js';
+import { initBoard, makeMove } from '../shared/rules.js';
 import { Game, MoveResult } from './game.js';
 import { logDebug, logInfo } from './log.js';
 import { pickMove } from './ai.js';
 
 const sideLabel = (s: Side): string => (s === 'r' ? '红方' : '黑方');
+const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
+
+/** 先手（红方）归属方式白名单 */
+const FIRST_MODES: readonly FirstMode[] = ['r', 'b', 'random', 'guess'];
+const isFirstMode = (x: unknown): x is FirstMode => FIRST_MODES.includes(x as FirstMode);
+const isGuessChoice = (x: unknown): x is GuessChoice => x === 'odd' || x === 'even';
+
+/** 对局记录摘要（剔除着法明细） */
+function toSummary(r: GameRecord): GameRecordSummary {
+  return {
+    id: r.id,
+    startedAt: r.startedAt,
+    endedAt: r.endedAt,
+    red: r.red,
+    black: r.black,
+    firstMode: r.firstMode,
+    guess: r.guess,
+    winner: r.winner,
+    reason: r.reason,
+    moveCount: r.moveCount,
+  };
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -112,6 +146,25 @@ export class HostServer {
   private aiTimer: ReturnType<typeof setTimeout> | null = null;
   /** 计时读秒：本回合超时判负定时器 */
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 主机选择的先手（红方）归属方式；等待阶段可改，开赛时生效 */
+  private firstMode: FirstMode = 'r';
+  /** 主机席位阵营（随机 / 猜先时开赛前才确定） */
+  private hostSide: Side = 'r';
+  /** 猜先进行中：主机「抓子」的隐藏结果 */
+  private pendingGuess: GuessChoice | null = null;
+  /** 本局猜先明细（写入对局记录） */
+  private lastGuess: GuessResult | null = null;
+  /** 对局记录（对局回顾，仅保留最近 maxRecords 局，进程内） */
+  private readonly records: GameRecord[] = [];
+  private recordSeq = 1;
+  private readonly maxRecords = 50;
+  /** 当前进行中的对局信息（终局时写入记录） */
+  private currentRecord: {
+    startedAt: number;
+    firstMode: FirstMode;
+    guess: GuessResult | null;
+    ai: boolean;
+  } | null = null;
   private readonly opts: Required<HostServerOptions>;
 
   constructor(opts: HostServerOptions = {}) {
@@ -192,6 +245,7 @@ export class HostServer {
       this.aiEnabled = false;
       this.clearAiTimer();
       this.clearTurnTimer();
+      this.abandonGame();
     }
   }
 
@@ -209,10 +263,15 @@ export class HostServer {
           hosting: this.hosting,
           hasHost: !!this.hostConn,
           hasGuest: !!this.guestConn,
+          firstMode: this.firstMode,
           state: this.game.snapshot(),
         });
       }
       if (pathname === '/api/host/start') {
+        // 新建等待：先手方式回到默认（主机执红），由主机在等待页再选择
+        this.firstMode = 'r';
+        this.hostSide = 'r';
+        this.abandonGame();
         this.setHosting(true);
         return this.sendJson(res, 200, { ip: getLanIp(), port: this.port });
       }
@@ -229,6 +288,26 @@ export class HostServer {
       if (pathname === '/api/host/stop') {
         this.setHosting(false);
         return this.sendJson(res, 200, { ok: true });
+      }
+      // 对局回顾：列表（最近在前）与单局明细（含着法，供复盘逐步回放）
+      if (pathname === '/api/history') {
+        return this.sendJson(res, 200, { games: [...this.records].reverse().map(toSummary) });
+      }
+      if (pathname.startsWith('/api/history/')) {
+        const id = pathname.slice('/api/history/'.length);
+        const record = this.records.find((r) => r.id === id);
+        if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
+        return this.sendJson(res, 200, record);
+      }
+      // AI 推荐：按记录 + 步数复原局面，返回该局面行棋方的推荐着法
+      if (pathname === '/api/ai/hint') {
+        const id = url.searchParams.get('id') ?? '';
+        const record = this.records.find((r) => r.id === id);
+        if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
+        const index = Number(url.searchParams.get('index') ?? '0');
+        const depth = Number(url.searchParams.get('depth') ?? '2');
+        const hint = this.hintFor(record, index, depth);
+        return this.sendJson(res, 200, hint ?? { none: true });
       }
       if (pathname.startsWith('/api/')) {
         return this.sendJson(res, 404, { error: 'not found' });
@@ -437,6 +516,42 @@ export class HostServer {
         }
         return;
       }
+      case 'choose_first': {
+        // 主机在等待页选择先手（红方）归属方式：红 / 黑 / 随机黑红 / 猜先
+        if (conn.role !== 'host') {
+          return this.send(conn.ws, { type: 'error', message: '只有主机可以选择先手方式' });
+        }
+        if (this.aiEnabled) return;
+        if (this.game.status === 'playing') {
+          return this.send(conn.ws, { type: 'error', message: '对局进行中，无法更改先手方式' });
+        }
+        if (!isFirstMode(msg.mode)) {
+          return this.send(conn.ws, { type: 'error', message: '先手方式非法' });
+        }
+        this.firstMode = msg.mode;
+        if (msg.mode === 'r' || msg.mode === 'b') this.hostSide = msg.mode;
+        this.pendingGuess = null; // 更换方式时取消进行中的猜先
+        logInfo(`主机选择先手方式：${FIRST_MODE_LABEL[msg.mode]}`);
+        this.maybeStart();
+        return;
+      }
+      case 'guess': {
+        // 客方猜先应答：猜中者执红
+        if (conn.role !== 'guest') {
+          return this.send(conn.ws, { type: 'error', message: '只有加入者可以猜先' });
+        }
+        if (this.pendingGuess === null || this.game.status === 'playing') {
+          return this.send(conn.ws, { type: 'error', message: '当前不在猜先阶段' });
+        }
+        if (!isGuessChoice(msg.choice)) {
+          return this.send(conn.ws, { type: 'error', message: '猜先选择非法' });
+        }
+        const actual = this.pendingGuess;
+        const guestWon = msg.choice === actual;
+        logInfo(`猜先：加入者猜${msg.choice === 'odd' ? '单' : '双'}，实际${actual === 'odd' ? '单' : '双'}`);
+        this.beginFirst('guess', guestWon ? 'b' : 'r', { choice: msg.choice, actual, guestWon });
+        return;
+      }
       case 'wait_new_opponent': {
         // 仅主机可用：放弃等待断线对手，立即清空席位并回到「等待新对手」
         if (conn.role !== 'host') return;
@@ -491,20 +606,61 @@ export class HostServer {
     return result;
   }
 
-  /** 广播终局并打点（将死 / 困毙 / 认输 / 同意和棋 / 超时判负） */
+  /** 广播终局并打点（将死 / 困毙 / 认输 / 同意和棋 / 超时判负），同时写入对局回顾记录 */
   private broadcastGameOver(): void {
     const s = this.game.snapshot();
     this.broadcast({ type: 'game_over', winner: s.winner, reason: s.reason, state: s });
+    this.saveRecord();
     logInfo(`对局结束：${s.winner === null ? '和棋' : `${sideLabel(s.winner)}胜`}（${s.reason}）`);
+  }
+
+  // ---------------------------------------------------- 对局回顾与 AI 推荐
+
+  /** 终局落库：写入内存中的对局记录（同一局只写一次，仅保留最近 maxRecords 局） */
+  private saveRecord(): void {
+    const cur = this.currentRecord;
+    this.currentRecord = null;
+    if (!cur) return;
+    const s = this.game.snapshot();
+    const record: GameRecord = {
+      id: String(this.recordSeq++),
+      startedAt: cur.startedAt,
+      endedAt: Date.now(),
+      red: cur.ai ? 'host' : this.hostSide === 'r' ? 'host' : 'guest',
+      black: cur.ai ? 'ai' : this.hostSide === 'r' ? 'guest' : 'host',
+      firstMode: cur.firstMode,
+      guess: cur.guess,
+      winner: s.winner,
+      reason: s.reason,
+      moveCount: s.history.length,
+      moves: [...s.history],
+    };
+    this.records.push(record);
+    if (this.records.length > this.maxRecords) this.records.shift();
+    logInfo(`对局记录 #${record.id} 已保存（${record.moveCount} 步，${record.reason}）`);
+  }
+
+  /** 复原记录中的第 index 步局面，返回该局面行棋方的 AI 推荐着法 */
+  private hintFor(record: GameRecord, index: number, depth: number): AiHint | null {
+    const n = Math.max(0, Math.min(Number.isFinite(index) ? Math.floor(index) : 0, record.moves.length));
+    const board = initBoard();
+    for (let i = 0; i < n; i++) makeMove(board, record.moves[i].from, record.moves[i].to);
+    const side: Side = n % 2 === 0 ? 'r' : 'b';
+    const level = Number.isFinite(depth) ? Math.min(4, Math.max(1, Math.floor(depth))) : 2;
+    const move = pickMove(board, side, { depth: level, timeLimitMs: 1200 });
+    if (!move) return null;
+    return { side, from: move.from, to: move.to, text: describeMove(board, move.from, move.to) };
   }
 
   // ---------------------------------------------------- 人机对战与计时
 
   /** 开始人机对战：AI 占黑方席位，对局立即开始（红方为人类主机） */
   private startAiGame(): void {
+    this.hostSide = 'r';
     this.game.reset('playing');
     this.afterMoveApplied();
-    this.broadcast({ type: 'start', state: this.game.snapshot() });
+    this.dispatchStart();
+    this.currentRecord = { startedAt: Date.now(), firstMode: 'r', guess: null, ai: true };
     logInfo('人机对战开始（AI 执黑）');
   }
 
@@ -579,6 +735,7 @@ export class HostServer {
         hostIp: getLanIp(),
         port: this.port,
         state: this.game.snapshot(),
+        firstMode: this.firstMode,
       });
       logInfo(`观战者加入（当前 ${this.spectators.size} 人）`);
       return;
@@ -591,20 +748,21 @@ export class HostServer {
       const rejoining = this.game.status === 'playing';
       this.cancelHostGrace();
       conn.role = 'host';
-      conn.side = 'r';
+      conn.side = this.hostSide;
       this.hostConn = conn;
       if (!rejoining) this.game.status = this.hosting ? 'waiting' : 'idle';
       this.send(conn.ws, {
         type: 'welcome',
-        side: 'r',
+        side: conn.side,
         hostIp: getLanIp(),
         port: this.port,
         state: this.game.snapshot(),
+        firstMode: this.firstMode,
       });
-      logInfo(`主机连接（红方${rejoining ? ' · 重连恢复对局' : ''}）`);
+      logInfo(`主机连接（${sideLabel(conn.side)}${rejoining ? ' · 重连恢复对局' : ''}）`);
       if (rejoining) {
         // 通知加入者主机已回来，并同步最新快照
-        this.sendTo('b', { type: 'opponent_joined' });
+        this.sendToOpponent(conn, { type: 'opponent_joined' });
         this.broadcast({ type: 'state', state: this.game.snapshot() });
       } else if (this.hosting && this.guestConn) {
         this.send(conn.ws, { type: 'opponent_joined' });
@@ -627,33 +785,81 @@ export class HostServer {
     const rejoining = this.game.status === 'playing';
     this.cancelGuestGrace();
     conn.role = 'guest';
-    conn.side = 'b';
+    conn.side = other(this.hostSide);
     this.guestConn = conn;
     this.send(conn.ws, {
       type: 'welcome',
-      side: 'b',
+      side: conn.side,
       hostIp: getLanIp(),
       port: this.port,
       state: this.game.snapshot(),
+      firstMode: this.firstMode,
     });
-    logInfo(`加入者连接（黑方${rejoining ? ' · 重连恢复对局' : ''}）`);
-    this.sendTo('r', { type: 'opponent_joined' });
+    logInfo(`加入者连接（${sideLabel(conn.side)}${rejoining ? ' · 重连恢复对局' : ''}）`);
+    this.sendToOpponent(conn, { type: 'opponent_joined' });
     if (rejoining) this.broadcast({ type: 'state', state: this.game.snapshot() });
     this.maybeStart();
   }
 
   private maybeStart(): void {
-    if (!this.hosting) return;
+    if (!this.hosting || this.aiEnabled) return;
     if (!this.hostConn || !this.guestConn) return;
     if (this.game.status !== 'idle' && this.game.status !== 'waiting') return;
+    switch (this.firstMode) {
+      case 'random': {
+        // 随机黑红：开赛时随机决定主机阵营
+        const hostSide: Side = Math.random() < 0.5 ? 'r' : 'b';
+        this.beginFirst('random', hostSide, null);
+        return;
+      }
+      case 'guess': {
+        if (this.pendingGuess) return; // 已发出猜先请求，等待客方应答
+        this.pendingGuess = Math.random() < 0.5 ? 'odd' : 'even';
+        logInfo('猜先开始：等待加入者猜单双');
+        // 双方都收到：客方弹层应答，主机在等待页看到进度
+        this.sendToSeats({ type: 'guess_request' });
+        return;
+      }
+      default: {
+        this.beginFirst(this.firstMode, this.firstMode, null);
+        return;
+      }
+    }
+  }
+
+  /** 席位确定（红 / 黑 / 随机 / 猜先）：分配阵营、广播结果并开局 */
+  private beginFirst(mode: FirstMode, hostSide: Side, guess: GuessResult | null): void {
+    this.firstMode = mode;
+    this.hostSide = hostSide;
+    this.pendingGuess = null;
+    this.lastGuess = guess;
+    if (this.hostConn) this.hostConn.side = hostSide;
+    if (this.guestConn) this.guestConn.side = other(hostSide);
+    this.broadcast({ type: 'first_result', mode, hostSide, guess });
+    logInfo(`席位确定：主机执${hostSide === 'r' ? '红' : '黑'}（${FIRST_MODE_LABEL[mode]}）`);
     this.startGame();
   }
 
+  /** 开局：重置对局并向各连接下发各自阵营 + 记录本局信息 */
   private startGame(): void {
     this.game.reset('playing');
     this.afterMoveApplied(); // 开局即开始回合计时（若启用）
-    const s = this.game.snapshot();
-    this.broadcast({ type: 'start', state: s });
+    this.dispatchStart();
+    this.currentRecord = {
+      startedAt: Date.now(),
+      firstMode: this.firstMode,
+      guess: this.lastGuess,
+      ai: false,
+    };
+    this.lastGuess = null;
+  }
+
+  /** 逐连接下发 start（红黑阵营随席位变化，观战者为 null） */
+  private dispatchStart(): void {
+    const state = this.game.snapshot();
+    if (this.hostConn) this.send(this.hostConn.ws, { type: 'start', state, side: this.hostSide });
+    if (this.guestConn) this.send(this.guestConn.ws, { type: 'start', state, side: other(this.hostSide) });
+    for (const c of this.spectators) this.send(c.ws, { type: 'start', state, side: null });
   }
 
   private handleClose(conn: Conn): void {
@@ -663,31 +869,48 @@ export class HostServer {
         // 主动离开或未在局中：立即清理（原语义）
         this.cancelGuestGrace();
         logInfo('主机离开，释放席位');
-        this.sendTo('b', { type: 'opponent_left', reason: '主机已离开' });
+        this.sendToOpponent(conn, { type: 'opponent_left', reason: '主机已离开' });
+        this.abandonGame();
         this.hosting = false;
         if (this.game.status === 'playing') this.game.status = 'idle';
       } else {
         // 意外断线：保留对局与主机席位，宽限期内可重连
         this.startHostGrace();
-        this.sendTo('b', { type: 'opponent_away', reason: '主机已断开', graceMs: this.opts.graceMs });
+        this.sendToOpponent(conn, {
+          type: 'opponent_away',
+          reason: '主机已断开',
+          graceMs: this.opts.graceMs,
+        });
       }
     } else if (conn.role === 'guest' && this.guestConn === conn) {
       this.guestConn = null;
       if (conn.leaving || this.game.status !== 'playing') {
         logInfo('加入者离开，清空席位');
-        this.sendTo('r', { type: 'opponent_left', reason: '对手已离开' });
+        this.sendToOpponent(conn, { type: 'opponent_left', reason: '对手已离开' });
+        this.abandonGame();
         if (this.game.status === 'playing') {
           this.game.status = this.hosting ? 'waiting' : 'idle';
         }
       } else {
         // 意外断线：保留对局与客方席位，宽限期内可重连
         this.startGuestGrace();
-        this.sendTo('r', { type: 'opponent_away', reason: '对手已断开', graceMs: this.opts.graceMs });
+        this.sendToOpponent(conn, {
+          type: 'opponent_away',
+          reason: '对手已断开',
+          graceMs: this.opts.graceMs,
+        });
       }
     } else if (conn.role === 'spectator') {
       this.spectators.delete(conn);
       logInfo(`观战者离开（剩余 ${this.spectators.size} 人）`);
     }
+  }
+
+  /** 放弃一局（离开 / 宽限超时）：清空进行中记录与猜先状态，避免串到下一局 */
+  private abandonGame(): void {
+    this.currentRecord = null;
+    this.pendingGuess = null;
+    this.lastGuess = null;
   }
 
   // ------------------------------------------------------- 断线重连宽限
@@ -716,8 +939,9 @@ export class HostServer {
     if (this.hostConn) return; // 宽限期内已重连
     logInfo('主机宽限超时，释放席位');
     this.hosting = false;
+    this.abandonGame();
     this.game.reset('idle');
-    this.sendTo('b', { type: 'opponent_left', reason: '主机已离开' });
+    if (this.guestConn) this.send(this.guestConn.ws, { type: 'opponent_left', reason: '主机已离开' });
   }
 
   /** 加入者意外断线：启动宽限计时，超时前可重连恢复原局 */
@@ -749,9 +973,10 @@ export class HostServer {
   private dropGuestSeat(reason: string): void {
     logInfo(`清空加入者席位：${reason}`);
     this.guestConn = null;
+    this.abandonGame();
     this.game.reset(this.hosting ? 'waiting' : 'idle');
-    this.sendTo('r', { type: 'state', state: this.game.snapshot() });
-    this.sendTo('r', { type: 'opponent_left', reason });
+    if (this.hostConn) this.send(this.hostConn.ws, { type: 'state', state: this.game.snapshot() });
+    if (this.hostConn) this.send(this.hostConn.ws, { type: 'opponent_left', reason });
   }
 
   // ------------------------------------------------------------ 发送工具
@@ -760,14 +985,32 @@ export class HostServer {
     if (ws.readyState === WebSocket.OPEN) ws.send(encode(msg));
   }
 
+  /** 按阵营取连接（席位由 firstMode 决定，主机不一定执红） */
+  private connOf(side: Side): Conn | null {
+    if (this.hostConn?.side === side) return this.hostConn;
+    if (this.guestConn?.side === side) return this.guestConn;
+    return null;
+  }
+
   private sendTo(side: Side, msg: ServerMessage): void {
-    const conn = side === 'r' ? this.hostConn : this.guestConn;
+    const conn = this.connOf(side);
     if (conn) this.send(conn.ws, msg);
   }
 
+  /** 发给某个席位的对手（不含观战者）；连接可能已从席位上摘除，故按角色判断 */
+  private sendToOpponent(conn: Conn, msg: ServerMessage): void {
+    const target = conn.role === 'host' ? this.guestConn : this.hostConn;
+    if (target) this.send(target.ws, msg);
+  }
+
+  /** 发给两个对战席位（不含观战者） */
+  private sendToSeats(msg: ServerMessage): void {
+    if (this.hostConn) this.send(this.hostConn.ws, msg);
+    if (this.guestConn) this.send(this.guestConn.ws, msg);
+  }
+
   private broadcast(msg: ServerMessage): void {
-    this.sendTo('r', msg);
-    this.sendTo('b', msg);
+    this.sendToSeats(msg);
     for (const c of this.spectators) this.send(c.ws, msg);
   }
 }

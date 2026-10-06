@@ -3,7 +3,7 @@
  */
 
 import { ClientMessage, Role, ServerMessage, decode, encode } from '../shared/protocol.js';
-import { GameSnapshot, Side } from '../shared/types.js';
+import { FirstMode, GameSnapshot, Side } from '../shared/types.js';
 
 export interface WelcomeInfo {
   /** 分配阵营；观战者为 null */
@@ -11,6 +11,8 @@ export interface WelcomeInfo {
   hostIp: string;
   port: number;
   state: GameSnapshot;
+  /** 主机选择的先手（红方）方式（随机 / 猜先时开赛前才最终确定席位） */
+  firstMode: FirstMode;
 }
 
 export interface NetHandlers {
@@ -67,6 +69,7 @@ export class Net {
             hostIp: msg.hostIp,
             port: msg.port,
             state: msg.state,
+            firstMode: msg.firstMode,
           });
           resolve();
           return;

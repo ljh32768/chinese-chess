@@ -17,6 +17,7 @@
           <a id="btn-create">创建对局</a>
           <a id="btn-show-join">加入对局</a>
           <a id="btn-create-ai">人机对弈</a>
+          <a id="btn-history">对局回顾</a>
           <a id="btn-skin">更换皮肤</a>
         </div>
         <div class="menu_dy" id="menu-ai" hidden>
@@ -33,10 +34,10 @@
     </div>
   </section>
 
-  <!-- ========== 主机等待 ========== -->
+  <!-- ========== 主机等待（放大版块 + 先手方式选择） ========== -->
   <section id="screen-host" class="screen">
-    <div class="menu_box">
-      <div class="menu_info">
+    <div class="menu_box host_box">
+      <div class="menu_info wide">
         <div class="menu_fh" id="btn-cancel-host" title="取消"></div>
         <p class="info-title">等待对手加入</p>
         <div class="ip-box">
@@ -44,8 +45,18 @@
           <div class="ip-value" id="host-ip">—</div>
         </div>
         <button class="btn small" id="btn-copy-ip">复制地址</button>
-        <p class="hint" id="host-wait">请让对方在「加入对局」中输入上方地址</p>
+        <div class="side_pick">
+          <div class="side_title">先手（红方）</div>
+          <div class="side_opts" id="side-opts">
+            <button type="button" class="side_opt" data-mode="random">随机黑红</button>
+            <button type="button" class="side_opt" data-mode="guess">猜先</button>
+            <button type="button" class="side_opt" data-mode="b">黑</button>
+            <button type="button" class="side_opt" data-mode="r">红</button>
+          </div>
+          <p class="side_hint" id="side-hint">主机执红先行</p>
+        </div>
         <div class="spinner"></div>
+        <p class="hint" id="host-wait">请让对方在「加入对局」中输入上方地址</p>
       </div>
     </div>
   </section>
@@ -105,14 +116,60 @@
         <div class="status-box" id="status-box">准备开始</div>
         <div class="req-hint" id="req-hint" hidden></div>
         <div class="panel-box">
-          <div class="box-title">棋谱</div>
-          <div class="move-list" id="move-list">尚未走子</div>
-        </div>
-        <div class="panel-box">
           <div class="cap-row"><span class="cap-label">红方吃子</span><span class="cap-list" id="cap-red-list">—</span></div>
           <div class="cap-row"><span class="cap-label">黑方吃子</span><span class="cap-list" id="cap-black-list">—</span></div>
         </div>
         <div class="role-hint" id="role-hint"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ========== 对局回顾（列表） ========== -->
+  <section id="screen-history" class="screen">
+    <div class="review_box">
+      <div class="review_head">
+        <span class="menu_fh" id="btn-history-back" title="返回"></span>
+        <span class="review_title">对局回顾</span>
+        <button type="button" class="btn small review_refresh" id="btn-history-refresh">刷新</button>
+      </div>
+      <div class="review_cols">
+        <span class="rv-vs">红黑方</span>
+        <span class="rv-first">取先方式</span>
+        <span class="rv-time">时间</span>
+        <span class="rv-result">胜负</span>
+      </div>
+      <div class="review_list" id="history-list"></div>
+    </div>
+  </section>
+
+  <!-- ========== 复盘（右箭头逐步 + AI 推荐） ========== -->
+  <section id="screen-replay" class="screen">
+    <div class="game-layout">
+      <div class="chess-box">
+        <canvas id="replay-board" width="523" height="580"></canvas>
+        <div class="bn_box">
+          <input type="button" id="btn-replay-first" value="开局 ⏮">
+          <input type="button" id="btn-replay-prev" value="◀ 上一步">
+          <input type="button" id="btn-replay-next" value="下一步 ▶">
+          <input type="button" id="btn-replay-last" value="末步 ⏭">
+        </div>
+        <div class="bn_box">
+          <input type="button" id="btn-replay-back" value="返回列表">
+        </div>
+      </div>
+      <aside class="panel">
+        <div class="panel-box">
+          <div class="box-title">对局信息</div>
+          <div class="replay-info" id="replay-info"></div>
+        </div>
+        <div class="panel-box">
+          <div class="box-title">当前局面</div>
+          <div class="replay-step" id="replay-step">第 0 / 0 步</div>
+        </div>
+        <div class="panel-box">
+          <div class="box-title">AI 推荐</div>
+          <div class="replay-hint" id="replay-hint">—</div>
+        </div>
       </aside>
     </div>
   </section>

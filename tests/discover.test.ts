@@ -66,7 +66,8 @@ class FakeSocket implements DiscoverSocketLike {
 describe('局域网主机发现', () => {
   it('probeHost 命中真实主机，返回其自我声明的地址', async () => {
     const s = await startServer();
-    const hit = await probeHost('127.0.0.1', s.address.port, { createSocket: wsFactory });
+    // 放宽单地址超时：探测真实 WebSocket 的握手 + pong 往返，并行跑测试时墙钟可能抖动
+    const hit = await probeHost('127.0.0.1', s.address.port, { createSocket: wsFactory, timeoutMs: 2000 });
     expect(hit).not.toBeNull();
     expect(hit?.port).toBe(s.address.port);
     expect(hit?.ip).toBeTruthy();

@@ -67,15 +67,19 @@ describe('AI 无着法', () => {
 });
 
 describe('AI 开局合法性', () => {
-  it('返回的着法必须合法，且 depth=2 耗时 < 1500ms', () => {
+  it('返回的着法必须合法，且 depth=2 的 CPU 耗时 < 1500ms', () => {
     const board = initBoard();
+    // 用 CPU 时间而非墙钟时间：vitest 并行跑多个测试文件，墙钟时间会受其他文件干扰
+    const cpu0 = process.cpuUsage();
     const start = Date.now();
     const move = pickMove(board, 'r', { depth: 2 });
     const elapsed = Date.now() - start;
-    console.log('OPENING_DEPTH2_MS:', elapsed);
+    const cpu = process.cpuUsage(cpu0);
+    const cpuMs = (cpu.user + cpu.system) / 1000;
+    console.log(`OPENING_DEPTH2_MS: ${elapsed} (cpu ${Math.round(cpuMs)}ms)`);
     expect(move).not.toBeNull();
     const legal = legalMoves(board, move!.from[0], move!.from[1]);
     expect(legal.some(([r, c]) => r === move!.to[0] && c === move!.to[1])).toBe(true);
-    expect(elapsed).toBeLessThan(1500);
+    expect(cpuMs).toBeLessThan(1500);
   });
 });

@@ -5,8 +5,8 @@
 
 import { findKing, initBoard, legalMoves } from '../shared/rules.js';
 import { ServerMessage } from '../shared/protocol.js';
-import { Board, GameSnapshot, Move, PieceType, Pos, Side } from '../shared/types.js';
-import { capturedPieces, describeHistory } from '../shared/notation.js';
+import { Board, FirstMode, GameSnapshot, GuessChoice, Move, PieceType, Pos, Side } from '../shared/types.js';
+import { capturedPieces } from '../shared/notation.js';
 import { DiscoveredHost, discoverSubnet, probeHost } from './discover.js';
 import {
   BoardView,
@@ -21,6 +21,7 @@ import {
   pickCell,
   renderBoard,
 } from './board.js';
+import { initReview, ReviewController } from './review.js';
 import { playClick, playSelect } from './sound.js';
 import { Net, WelcomeInfo } from './net.js';
 
@@ -67,6 +68,8 @@ const S = {
   skin: DEFAULT_SKIN as SkinId,
   /** 鼠标悬停的交叉点（仅用于预高亮） */
   hover: null as Pos | null,
+  /** 主机在等待页选择的先手（红方）方式 */
+  firstMode: 'r' as FirstMode,
 };
 
 let net: Net | null = null;
@@ -155,14 +158,23 @@ function applyTheme(): void {
   document.body.style.background = `#2b2016 url(${boardBgUrl(skin())}) repeat`;
 }
 
-/** 按需加载当前皮肤素材，加载完成后补一次重绘 */
-function ensureSkinImages(): void {
-  if (loadedImages[S.skin]) return;
-  void loadSkinImages(skin()).then((imgs) => {
-    loadedImages[S.skin] = imgs;
+/** 确保当前皮肤素材已加载（复盘页需要等待素材就绪后再绘制） */
+function ensureSkinImagesLoaded(): Promise<void> {
+  const skinId = S.skin;
+  if (loadedImages[skinId]) return Promise.resolve();
+  return loadSkinImages(skin()).then((imgs) => {
+    loadedImages[skinId] = imgs;
     paint();
   });
 }
+
+/** 按需加载当前皮肤素材（不阻塞界面） */
+function ensureSkinImages(): void {
+  void ensureSkinImagesLoaded();
+}
+
+/** 对局回顾（列表 + 复盘）；在 init() 中装配 */
+let review: ReviewController | null = null;
 
 /** 将军警示环的脉冲动画：仅在需要时运行定时重绘 */
 let pulseTimer = 0;
@@ -271,21 +283,11 @@ function updatePanel(): void {
           : '已发送重开请求，等待对方回应…';
   }
 
-  renderNotation();
+  renderCaptured();
 }
 
-/** 渲染棋谱与吃子面板（由着法序列推导，纯展示） */
-function renderNotation(): void {
-  const names = describeHistory(S.history);
-  const rows: string[] = [];
-  for (let i = 0; i < names.length; i += 2) {
-    const black = names[i + 1] ? `  ${names[i + 1]}` : '';
-    rows.push(`${i / 2 + 1}. ${names[i]}${black}`);
-  }
-  const list = $('move-list');
-  list.textContent = rows.length ? rows.join('\n') : '尚未走子';
-  list.scrollTop = list.scrollHeight;
-
+/** 渲染吃子面板（由着法序列推导，纯展示） */
+function renderCaptured(): void {
   const cap = capturedPieces(S.history);
   $('cap-red-list').textContent = cap.byRed.map((t) => PIECE_NAME.b[t]).join(' ') || '—';
   $('cap-black-list').textContent = cap.byBlack.map((t) => PIECE_NAME.r[t]).join(' ') || '—';
@@ -321,10 +323,45 @@ function enterGame(): void {
 function handleMessage(msg: ServerMessage): void {
   switch (msg.type) {
     case 'start':
+      closeModal(); // 猜先弹层（若在等待应答时开局）
+      if (msg.side !== null) S.side = msg.side;
       applySnapshot(msg.state);
       enterGame();
       toast('对局开始，红方先行');
       break;
+    case 'guess_request':
+      // 猜先：客方弹层应答，主机在等待页看到进度
+      if (S.role === 'host') {
+        $('host-wait').textContent = '进入猜先：等待加入者猜单双…';
+      } else {
+        showModal({
+          title: '猜 先',
+          sub: '主机已抓子，请猜单双 —— 猜中者执红',
+          buttons: [
+            {
+              label: '猜 单',
+              primary: true,
+              onClick: () => net?.send({ type: 'guess', choice: 'odd' as GuessChoice }),
+            },
+            { label: '猜 双', onClick: () => net?.send({ type: 'guess', choice: 'even' as GuessChoice }) },
+          ],
+        });
+      }
+      break;
+    case 'first_result': {
+      const hostRed = msg.hostSide === 'r';
+      if (msg.mode === 'guess' && msg.guess) {
+        const cn = (c: GuessChoice) => (c === 'odd' ? '单' : '双');
+        toast(
+          `猜先：${S.role === 'guest' ? '你' : '对方'}猜「${cn(msg.guess.choice)}」实际「${cn(msg.guess.actual)}」→ 主机执${
+            hostRed ? '红' : '黑'
+          }`,
+        );
+      } else if (msg.mode === 'random') {
+        toast(`随机黑红：主机执${hostRed ? '红' : '黑'}，加入者执${hostRed ? '黑' : '红'}`);
+      }
+      break;
+    }
     case 'move_applied':
       S.board = msg.board;
       S.turn = msg.turn;
@@ -508,6 +545,8 @@ async function openNet(url: string, role: 'host' | 'guest' | 'spectator'): Promi
       S.side = info.side ?? 'r'; // 观战者 side 为 null，统一按红方视角渲染
       S.spectator = info.side === null;
       S.role = role === 'host' ? 'host' : 'guest';
+      S.firstMode = info.firstMode;
+      renderSidePick();
       applySnapshot(info.state);
       if (S.spectator) {
         enterGame();
@@ -529,13 +568,39 @@ async function createGame(): Promise<void> {
     const info = (await res.json()) as { ip: string; port: number };
     S.role = 'host';
     S.aiMode = false;
+    S.firstMode = 'r'; // 主机服务在新建等待时也会重置为默认
     $('host-ip').textContent = `${info.ip}:${info.port}`;
     $('host-wait').textContent = '请让对方在「加入对局」中输入上方地址';
+    renderSidePick();
     show('screen-host');
     await openNet(`ws://${location.host}/ws`, 'host');
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
   }
+}
+
+const FIRST_HINT: Record<FirstMode, string> = {
+  r: '主机执红先行',
+  b: '主机执黑，加入者执红先行',
+  random: '开局时随机分配红黑',
+  guess: '加入者猜单双，猜中者执红',
+};
+
+/** 等待页：渲染先手（红方）方式的选择状态 */
+function renderSidePick(): void {
+  document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === S.firstMode);
+  });
+  $('side-hint').textContent = FIRST_HINT[S.firstMode];
+}
+
+/** 等待页：选择先手方式（仅等待阶段有效，开赛后主机服务会拒绝） */
+function chooseFirst(mode: FirstMode): void {
+  if (S.firstMode === mode) return;
+  S.firstMode = mode;
+  renderSidePick();
+  $('host-wait').textContent = '请让对方在「加入对局」中输入上方地址';
+  net?.send({ type: 'choose_first', mode });
 }
 
 /** 首页「人机对弈」子菜单：与参考项目一致，先选难度再开始 */
@@ -594,6 +659,7 @@ function switchSkin(): void {
   applyTheme();
   ensureSkinImages();
   paint();
+  review?.redraw(); // 复盘棋盘跟随皮肤
   toast(`已更换皮肤：${SKINS[S.skin].label}`);
 }
 
@@ -844,6 +910,10 @@ function bindEvents(): void {
   $('btn-ai-back').addEventListener('click', backToIndex);
   $('btn-ai-start').addEventListener('click', () => void createAiGame());
   $('btn-skin').addEventListener('click', switchSkin);
+  $('btn-history').addEventListener('click', () => void review?.open());
+  document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
+    btn.addEventListener('click', () => chooseFirst(btn.dataset.mode as FirstMode));
+  });
   $('btn-cancel-host').addEventListener('click', () => void cancelHost());
   $('btn-copy-ip').addEventListener('click', () => void copyHostAddr());
   $('btn-connect').addEventListener('click', () => void doJoin());
@@ -905,10 +975,12 @@ function bindEvents(): void {
     if (e.target === $('modal')) closeModal();
   });
 
-  // ESC：优先关闭弹层，否则取消棋盘选中
+  // ESC：优先关闭弹层，其次复盘/回顾返回，否则取消棋盘选中
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if ($('modal').classList.contains('show')) return closeModal();
+    if ($('screen-replay').classList.contains('active')) return show('screen-history');
+    if ($('screen-history').classList.contains('active')) return show('screen-home');
     clearSelection();
   });
 
@@ -922,7 +994,15 @@ async function init(): Promise<void> {
   S.skin = loadSkinPreference();
   applyTheme();
   ensureSkinImages();
+  renderSidePick();
   bindEvents();
+  review = initReview({
+    skin,
+    images: () => loadedImages[S.skin] ?? {},
+    loadImages: ensureSkinImagesLoaded,
+    show,
+    toast,
+  });
   render();
   // 计时读秒（D4）：定时刷新剩余时间显示（未启用计时时几乎零开销）
   window.setInterval(() => {

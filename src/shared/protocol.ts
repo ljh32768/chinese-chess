@@ -3,7 +3,7 @@
  * 主机权威：客户端只发送「意图」，主机校验后广播。
  */
 
-import { GameSnapshot, Move, Pos, Side } from './types.js';
+import { FirstMode, GameSnapshot, GuessChoice, GuessResult, Move, Pos, Side } from './types.js';
 
 /** 玩家角色：主机（默认红方）/ 加入者（默认黑方）/ 观战者（只读，不占席位） */
 export type Role = 'host' | 'guest' | 'spectator';
@@ -30,6 +30,10 @@ export type ClientMessage =
   | { type: 'undo_response'; accept: boolean }
   /** 主机放弃等待断线对手，立即转为等待新对手 */
   | { type: 'wait_new_opponent' }
+  /** 主机选择先手（红方）归属方式；仅等待阶段有效 */
+  | { type: 'choose_first'; mode: FirstMode }
+  /** 客方猜先应答（猜单 / 猜双） */
+  | { type: 'guess'; choice: GuessChoice }
   /** 离开对局 */
   | { type: 'leave' }
   /** 心跳 */
@@ -38,9 +42,21 @@ export type ClientMessage =
 /** 服务端 → 客户端 */
 export type ServerMessage =
   /** 加入成功，返回自己被分配的阵营与当前状态（观战者 side 为 null） */
-  | { type: 'welcome'; side: Side | null; hostIp: string; port: number; state: GameSnapshot }
-  /** 对手已加入，对局开始 */
-  | { type: 'start'; state: GameSnapshot }
+  | {
+      type: 'welcome';
+      side: Side | null;
+      hostIp: string;
+      port: number;
+      state: GameSnapshot;
+      /** 主机在等待页选择的先手方式（随机 / 猜先时开赛前才最终确定席位） */
+      firstMode: FirstMode;
+    }
+  /** 对手已加入，对局开始（side 为本连接最终阵营，观战者为 null） */
+  | { type: 'start'; state: GameSnapshot; side: Side | null }
+  /** 猜先开始：主机已「抓子」，请客方猜单双 */
+  | { type: 'guess_request' }
+  /** 席位与先手结果（随机 / 猜先开赛前广播） */
+  | { type: 'first_result'; mode: FirstMode; hostSide: Side; guess: GuessResult | null }
   /** 走子成功并广播（携带完整棋盘，seq 防乱序） */
   | {
       type: 'move_applied';

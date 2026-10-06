@@ -31,12 +31,13 @@ MVP 的交付底线是「能完整、正确地下一盘棋」。
 |---|---|---|
 | [rules.test.ts](../../tests/rules.test.ts) | 单元 | 开局 32 子；将帅九宫；各棋子走法（车/马蹩腿/炮架/象塞眼/士/将/过河卒）；照面；将军；将死/困毙；`validateMove` 各拒绝原因 |
 | [game.test.ts](../../tests/game.test.ts) | 单元 | `reset` 初始态；合法走子切换回合/`seq+1`/`lastMove`；非本方回合拒绝；非法走子棋盘不变；吃子；认输/和棋/重开；终局清理 pending；悔棋回退；history 快照 |
-| [board.test.ts](../../tests/board.test.ts) | 单元 | 三套皮肤几何参数与素材路径；坐标换算与点击命中（含响应式缩放）；绘制计划：棋子贴图/上一步落点框/选中压暗/合法落点提示点与可吃子环/将军脉冲环/悬停预高亮；视角翻转 |
+| [board.test.ts](../../tests/board.test.ts) | 单元 | 三套皮肤几何参数与素材路径；坐标换算与点击命中（含响应式缩放）；绘制计划：棋子贴图/上一步落点框/选中压暗/合法落点提示点与可吃子环/将军脉冲环/悬停预高亮/AI 推荐高亮；视角翻转 |
 | [notation.test.ts](../../tests/notation.test.ts) | 单元 | 传统中文记谱（炮二平五/马八进七/卒3进1/前后消歧/斜走目标列）；describeHistory 回放；capturedPieces 吃子统计 |
 | [ai.test.ts](../../tests/ai.test.ts) | 单元 | 一步杀、白吃子、无着法返回 null、开局着法合法且 depth=2 耗时 < 1500ms |
 | [net.test.ts](../../tests/net.test.ts) | 单元 | 连接握手（join/welcome/error）；心跳 5s 与 16s 无 pong 判离线（假定时器 + 假 WebSocket）；主动关闭不提示 |
 | [fullgame.test.ts](../../tests/fullgame.test.ts) | 端到端 | 35 步将杀线回放：双方每步棋盘一致且与主机权威一致；`seq` 单调 +1；终局 `game_over` 原因=`将死`；history 与着法线一致；结束后可重开回到初始局面 |
-| [server.test.ts](../../tests/server.test.ts) | 集成 | 加入/开局/走子广播/拒绝；非整数坐标；认输/和棋/重开（含拒绝分支）/悔棋/离开；断线宽限与重连恢复；宽限超时；观战只读；人机对战（AI 自动应招/自动同意悔棋/拒绝和棋/`depth` 难度参数）；计时超时判负；日志打点与端口回退；静态资源 MIME（含 png/jpg/wav）与路径穿越 |
+| [server.test.ts](../../tests/server.test.ts) | 集成 | 加入/开局/走子广播/拒绝；非整数坐标；认输/和棋/重开（含拒绝分支）/悔棋/离开；断线宽限与重连恢复；宽限超时；观战只读；人机对战（AI 自动应招/自动同意悔棋/拒绝和棋/`depth` 难度参数）；**先手方式（主机执黑、随机黑红、猜先猜中归属、对局中禁止改）与对局回顾（记录字段/明细/404/AI 推荐合法性）**；计时超时判负；日志打点与端口回退；静态资源 MIME（含 png/jpg/wav）与路径穿越 |
+| [review.test.ts](../../tests/review.test.ts) | 单元 | 复盘局面还原（逐步 / 越界收敛 / 行棋方交替）；列表文案（红黑方 / 取先方式 / 时间 / 胜负 / 席位与四种方式的文案） |
 | [discover.test.ts](../../tests/discover.test.ts) | 单元/集成 | 真实主机探测；无服务端口返回 null；网段扫描聚合、按声明地址去重与进度回调 |
 | [lan-ip.test.ts](../../tests/lan-ip.test.ts) | 单元 | 无候选返回 null；192.168 优先；虚拟网卡降权；忽略 IPv6 |
 

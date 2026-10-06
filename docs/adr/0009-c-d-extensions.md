@@ -1,8 +1,8 @@
-# ADR-0009：C/D 档扩展模块规格（日志 / 记谱 / AI / 自动发现）
+# ADR-0009：C/D 档与 v1.5 扩展模块规格（日志 / 记谱 / AI / 自动发现 / 先手方式 / 对局回顾）
 
-- 状态：已接受（记录现状实现）
-- 日期：2026-10-03
-- 关联入口：主机日志、棋谱与吃子、悔棋、观战、人机对战、计时读秒、局域网主机搜索
+- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐）
+- 日期：2026-10-03（v1.5 追加：2026-10-06）
+- 关联入口：主机日志、棋谱与吃子、悔棋、观战、人机对战、计时读秒、局域网主机搜索、先手方式与猜先、对局回顾与 AI 推荐
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0004 状态机](./0004-game-state-machine.md)、[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0007 渲染层](./0007-renderer-ui.md)
 
 ---
@@ -98,6 +98,29 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 主机行为 | 每次走子/悔棋/开局后 `armTurnTimer()` 重设截止时间；超时 `Game.timeout(行棋方)` → `over`，`reason='超时判负'` |
 | 客户端 | 状态框追加「（剩余 xx s）」，每 500ms 刷新；终局/未启用时不显示 |
 
+### 3.9 先手方式与猜先（v1.5）
+
+| 项 | 规格 |
+|---|---|
+| 选择入口 | 主机等待页 `side-opts`：「随机黑红」`random`、「猜先」`guess`、「黑」`b`、「红」`r`；仅等待阶段可改（对局中回 `error: 对局进行中，无法更改先手方式`） |
+| 席位确定 | 双方到齐后由 `beginFirst()` 统一分配：`r`/`b` 固定；`random` 服务端随机；`guess` 由客方猜单双决定 |
+| 猜先规则 | 服务端随机「抓子」（单 / 双）→ 双方收到 `guess_request` → 客方回 `guess{choice}` → **猜中者执红**；结果由 `first_result{guess{choice,actual,guestWon}}` 广播 |
+| 开放出错 | 非主机 `choose_first` → `只有主机可以选择先手方式`；非客方 `guess` → `只有加入者可以猜先`；非猜先阶段 `guess` → `当前不在猜先阶段` |
+| 阵营下发 | `start` 逐连接携带 `side`（观战者 null）；`welcome.side` 在 `random`/`guess` 下是临时占位 |
+| 路由 | `connOf(side)` 按阵营找连接（主机不一定执红），`sendTo` / `broadcast` / `sendToOpponent` 均与席位无关 |
+| 客户端提示 | 猜先弹层（猜单 / 猜双）；结果用 toast 提示（如「猜先：你猜「单」实际「双」→ 主机执红」） |
+
+### 3.10 对局回顾与 AI 推荐（v1.5）
+
+| 项 | 规格 |
+|---|---|
+| 记录时机 | 终局（`broadcastGameOver`）时 `saveRecord()` 写入：席位（主机/加入者/AI）、取先方式、猜先明细、起止时间、胜负与原因、着法序列；同一局只写一次，仅保留最近 50 局（进程内存，重启清空） |
+| 放弃开局 | 离开 / 宽限超时 / 停止托管时 `abandonGame()` 清空进行中记录，避免串到下一局 |
+| 列表 | `GET /api/history` → `{ games: GameRecordSummary[] }`（最近在前） |
+| 明细 | `GET /api/history/:id` → `GameRecord`（含 `moves`）；未知 id → 404 |
+| AI 推荐 | `GET /api/ai/hint?id=&index=&depth=`：按 `moves` 前 `index` 步用 `makeMove` 复原局面，行棋方 = `index % 2 === 0 ? 'r' : 'b'`，`pickMove`（depth 默认 2，上限 4，时限 1.2s）返回推荐着法 + `describeMove` 中文记谱；无着法回 `{ none: true }` |
+| 客户端 | `review.ts`：列表 → 复盘；复盘棋盘复用 `renderBoard`（`hint` 高亮起点/终点），步进一次一步，AI 推荐 120ms 防抖 + 序号防乱序 |
+
 ## 4. 代码入口
 
 | 内容 | 位置 |
@@ -107,8 +130,11 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | AI 引擎 | [ai.ts](../../src/server/ai.ts)、[pickMove 调用](../../src/server/host-server.ts) |
 | 自动发现 | [discover.ts](../../src/renderer/discover.ts) |
 | 观战/悔棋/人机/计时服务端 | [host-server.ts](../../src/server/host-server.ts)（`handleJoin` / `undo_*` / `startAiGame` / `armTurnTimer`） |
+| 先手方式 / 猜先 / 席位分配 | [host-server.ts `maybeStart()` / `beginFirst()` / `dispatchStart()`](../../src/server/host-server.ts)、[app.ts `chooseFirst()`](../../src/renderer/app.ts) |
+| 对局记录 / AI 推荐服务端 | [host-server.ts `saveRecord()` / `hintFor()`](../../src/server/host-server.ts) |
+| 对局回顾 / 复盘客户端 | [review.ts](../../src/renderer/review.ts) |
 | 状态机扩展 | [game.ts](../../src/server/game.ts)（`history` / `undo` / `timeout` / `deadline`） |
-| 渲染层扩展 | [app.ts](../../src/renderer/app.ts)（棋谱面板 / 悔棋 / 观战 / 倒计时 / 搜索） |
+| 渲染层扩展 | [app.ts](../../src/renderer/app.ts)（吃子面板 / 悔棋 / 观战 / 倒计时 / 搜索 / 先手方式）、[review.ts](../../src/renderer/review.ts)（对局回顾 / 复盘 / AI 推荐） |
 | 工程化配置 | [package.json](../../package.json)（dev/lint/format/dist）、[.github/workflows/ci.yml](../../.github/workflows/ci.yml) |
 
 ## 5. 验收标准

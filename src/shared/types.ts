@@ -55,3 +55,69 @@ export const COLS = 9;
 
 /** 对局结束原因 */
 export type GameOverReason = '将死' | '困毙' | '认输' | '同意和棋' | '超时判负';
+
+/**
+ * 先手（红方）归属方式：主机在等待页选择。
+ * - `r`      主机执红（默认）
+ * - `b`      主机执黑
+ * - `random` 随机黑红（开赛时随机决定）
+ * - `guess`  猜先（客方猜单双，猜中者执红）
+ */
+export type FirstMode = 'r' | 'b' | 'random' | 'guess';
+
+/** 猜先选择：单 / 双 */
+export type GuessChoice = 'odd' | 'even';
+
+/** 先手方式的中文名（主机日志、列表「取先方式」列共用） */
+export const FIRST_MODE_LABEL: Record<FirstMode, string> = {
+  r: '主机执红',
+  b: '主机执黑',
+  random: '随机黑红',
+  guess: '猜先',
+};
+
+/** 席位归属（对局记录用） */
+export type Seat = 'host' | 'guest' | 'ai';
+
+/** 猜先结果明细 */
+export interface GuessResult {
+  /** 客方猜的选择 */
+  choice: GuessChoice;
+  /** 主机「抓子」的随机结果 */
+  actual: GuessChoice;
+  /** 客方是否猜中（猜中则客方执红） */
+  guestWon: boolean;
+}
+
+/** 对局记录摘要（对局回顾列表） */
+export interface GameRecordSummary {
+  id: string;
+  /** 开局时间（epoch ms） */
+  startedAt: number;
+  /** 结束时间（epoch ms） */
+  endedAt: number;
+  red: Seat;
+  black: Seat;
+  firstMode: FirstMode;
+  /** 猜先模式下的猜先明细 */
+  guess: GuessResult | null;
+  /** 胜方；null 表示和棋 */
+  winner: Side | null;
+  reason: string;
+  moveCount: number;
+}
+
+/** 完整对局记录（复盘用，含逐步着法） */
+export interface GameRecord extends GameRecordSummary {
+  moves: Move[];
+}
+
+/** AI 推荐走子（复盘用） */
+export interface AiHint {
+  /** 该局面的行棋方 */
+  side: Side;
+  from: Pos;
+  to: Pos;
+  /** 中文记谱，如「炮二平五」 */
+  text: string;
+}
