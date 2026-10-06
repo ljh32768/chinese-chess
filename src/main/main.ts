@@ -26,7 +26,7 @@ async function createWindow(): Promise<void> {
     height: 840,
     minWidth: 720,
     minHeight: 640,
-    backgroundColor: '#14110e',
+    backgroundColor: '#2b2016',
     title: '局域网象棋',
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },

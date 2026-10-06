@@ -30,6 +30,9 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.wav': 'audio/wav',
 };
 
 /** 虚拟网卡名字特征（WSL / Hyper-V / VirtualBox / VMware / Docker 等） */
@@ -215,10 +218,13 @@ export class HostServer {
       }
       if (pathname === '/api/host/start-ai') {
         // 人机对战：AI 占黑方席位，对局立即开始
+        // 可选 depth 参数指定搜索深度（1-4），对应前端「菜鸟 / 中级 / 高手」
+        const depth = Number(url.searchParams.get('depth'));
+        if (Number.isInteger(depth) && depth >= 1 && depth <= 4) this.opts.aiDepth = depth;
         this.setHosting(true);
         this.aiEnabled = true;
         this.startAiGame();
-        return this.sendJson(res, 200, { ip: getLanIp(), port: this.port });
+        return this.sendJson(res, 200, { ip: getLanIp(), port: this.port, depth: this.opts.aiDepth });
       }
       if (pathname === '/api/host/stop') {
         this.setHosting(false);

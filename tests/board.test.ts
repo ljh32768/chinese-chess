@@ -1,12 +1,32 @@
 /**
- * 棋盘渲染标记测试（boardMarkup 为纯字符串生成，与 DOM 解耦）。
- * 覆盖：棋子渲染、将帅警示高亮、视角翻转、上一步高亮、合法落点标记。
+ * 棋盘渲染测试（Canvas 绘制计划为纯数据，与 DOM 解耦）。
+ * 覆盖：皮肤几何参数、素材路径、坐标换算与命中、棋子/落点/上一步/将军/悬停绘制计划、视角翻转。
  */
 
 import { describe, expect, it } from 'vitest';
-import { boardMarkup, BoardView } from '../src/renderer/board.js';
+import {
+  DEFAULT_SKIN,
+  IMAGE_KEYS,
+  SKINS,
+  SKIN_IDS,
+  assetUrl,
+  boardBgUrl,
+  canvasPoint,
+  cellCenter,
+  computeDrawList,
+  DrawOp,
+  isSkinId,
+  nextSkin,
+  pickCell,
+  RingOp,
+  toLogic,
+  toView,
+} from '../src/renderer/board.js';
+import { BoardView } from '../src/renderer/board.js';
 import { initBoard } from '../src/shared/rules.js';
 import { Board } from '../src/shared/types.js';
+
+const skin2 = SKINS.stype2;
 
 /** 空棋盘 */
 const emptyBoard = (): Board => Array.from({ length: 10 }, () => Array(9).fill(null));
@@ -21,44 +41,149 @@ const view = (over: Partial<BoardView> = {}): BoardView => ({
   ...over,
 });
 
-describe('棋盘渲染标记 boardMarkup', () => {
-  it('渲染开局双方棋子与楚河汉界', () => {
-    const h = boardMarkup(view());
-    expect(h).toContain('帅');
-    expect(h).toContain('将');
-    expect(h).toContain('楚河');
-    expect(h).toContain('汉界');
+const draws = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is DrawOp => !('ring' in o));
+const rings = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is RingOp => 'ring' in o);
+const findImage = (ops: ReturnType<typeof computeDrawList>, img: string) =>
+  draws(ops).filter((o) => o.img === img);
+
+describe('皮肤定义（对齐参考项目几何参数）', () => {
+  it('三套皮肤的画布尺寸与格距与参考项目一致', () => {
+    expect(SKIN_IDS).toEqual(['stype1', 'stype2', 'stype3']);
+    expect(SKINS.stype1).toMatchObject({
+      width: 325,
+      height: 403,
+      spaceX: 35,
+      spaceY: 36,
+      pointStartX: 5,
+      pointStartY: 19,
+      page: 'stype_1',
+    });
+    expect(SKINS.stype2).toMatchObject({
+      width: 523,
+      height: 580,
+      spaceX: 57,
+      spaceY: 57,
+      pointStartX: 3,
+      pointStartY: 5,
+      page: 'stype_2',
+    });
+    expect(SKINS.stype3).toMatchObject({
+      width: 530,
+      height: 567,
+      spaceX: 57,
+      spaceY: 57,
+      pointStartX: -2,
+      pointStartY: 0,
+      page: 'stype_3',
+    });
   });
 
-  it('无将军时不存在警示环', () => {
-    expect(boardMarkup(view())).not.toContain('check-king');
+  it('更换皮肤按 stype1 → stype2 → stype3 → stype1 循环', () => {
+    expect(nextSkin('stype1')).toBe('stype2');
+    expect(nextSkin('stype2')).toBe('stype3');
+    expect(nextSkin('stype3')).toBe('stype1');
+    expect(isSkinId(DEFAULT_SKIN)).toBe(true);
+    expect(isSkinId('stype9')).toBe(false);
+    expect(isSkinId(null)).toBe(false);
   });
 
-  it('红方被将军时在 [9,4] 的帅上绘制警示环', () => {
-    const h = boardMarkup(view({ checkKing: [9, 4] }));
-    expect(h).toContain('check-king');
-    // 视图坐标 (9,4) → x=34+4*56=258，y=34+9*56=538
-    expect(h).toContain('cx="258"');
-    expect(h).toContain('cy="538"');
+  it('素材路径指向皮肤目录，加载清单含棋盘/提示点/落点框与两方十四枚棋子', () => {
+    expect(assetUrl(skin2, 'bg')).toBe('./assets/img/stype_2/bg.png');
+    expect(assetUrl(skin2, 'r_c')).toBe('./assets/img/stype_2/r_c.png');
+    expect(boardBgUrl(SKINS.stype3)).toBe('./assets/img/stype_3/bg.jpg');
+    expect(IMAGE_KEYS).toHaveLength(3 + 14);
+    expect(IMAGE_KEYS).toContain('dot');
+    expect(IMAGE_KEYS).toContain('b_z');
+  });
+});
+
+describe('坐标换算与命中 pickCell', () => {
+  it('视角翻转：逻辑坐标与视图坐标互转', () => {
+    expect(toView([0, 0], false)).toEqual([0, 0]);
+    expect(toView([0, 0], true)).toEqual([9, 8]);
+    expect(toLogic(toView([6, 3], true), true)).toEqual([6, 3]);
   });
 
-  it('黑方视角翻转后警示环坐标随之翻转', () => {
-    const h = boardMarkup(view({ checkKing: [0, 3], flip: true }));
-    // 逻辑 [0,3] 翻转后视图为 [9,5] → x=34+5*56=314，y=538
-    expect(h).toContain('cx="314"');
-    expect(h).toContain('cy="538"');
+  it('交叉点视觉中心 = 贴图起点 + 素材圆盘偏移', () => {
+    expect(cellCenter([0, 0], skin2)).toEqual({ x: 30.5, y: 29 });
+    expect(cellCenter([9, 4], skin2)).toEqual({ x: 258.5, y: 542 });
   });
 
-  it('上一步走子显示金色高亮环', () => {
-    const h = boardMarkup(view({ lastMove: { from: [6, 0], to: [5, 0] } }));
-    expect(h).toContain('#d4a017');
+  it('点击交叉点中心命中对应格子', () => {
+    const { x, y } = cellCenter([0, 0], skin2);
+    expect(pickCell(x, y, skin2, false)).toEqual([0, 0]);
+    const p = cellCenter([7, 3], skin2);
+    expect(pickCell(p.x, p.y, skin2, false)).toEqual([7, 3]);
   });
 
-  it('合法落点区分空位小圆点与可吃子环', () => {
+  it('黑方视角下同一画布位置映射到翻转后的逻辑坐标', () => {
+    const { x, y } = cellCenter([0, 0], skin2);
+    expect(pickCell(x, y, skin2, true)).toEqual([9, 8]);
+  });
+
+  it('棋盘范围外的点击返回 null', () => {
+    expect(pickCell(-100, -100, skin2, false)).toBeNull();
+    expect(pickCell(skin2.width + 200, skin2.height + 200, skin2, false)).toBeNull();
+    // 右下角越界（超过第 9 行 / 第 8 列）
+    const { x, y } = cellCenter([9, 8], skin2);
+    expect(pickCell(x, y, skin2, false)).toEqual([9, 8]);
+    expect(pickCell(x + skin2.spaceX * 1.2, y, skin2, false)).toBeNull();
+  });
+
+  it('canvasPoint 按画布显示尺寸等比换算（响应式缩放后点击仍准确）', () => {
+    const fake = {
+      getBoundingClientRect: () => ({ left: 10, top: 20, width: skin2.width / 2, height: skin2.height / 2 }),
+    } as unknown as HTMLCanvasElement;
+    expect(canvasPoint(fake, 10 + 50, 20 + 60, skin2)).toEqual({ x: 100, y: 120 });
+  });
+});
+
+describe('绘制计划 computeDrawList', () => {
+  it('第一层永远是棋盘底图', () => {
+    const ops = computeDrawList(view(), skin2);
+    expect(ops[0]).toEqual({ img: 'bg', x: 0, y: 0 });
+  });
+
+  it('开局渲染红黑各十六枚棋子（帅仕相马车炮兵 / 将士象马车炮卒）', () => {
+    const ops = computeDrawList(view(), skin2);
+    expect(findImage(ops, 'r_j')).toHaveLength(1);
+    expect(findImage(ops, 'b_j')).toHaveLength(1);
+    expect(draws(ops).filter((o) => o.img.startsWith('r_'))).toHaveLength(16);
+    expect(draws(ops).filter((o) => o.img.startsWith('b_'))).toHaveLength(16);
+  });
+
+  it('棋子按参考项目公式贴图（space*坐标 + pointStart）', () => {
+    const ops = computeDrawList(view(), skin2);
+    // 开局红车位于逻辑 [9,0] → 视图 [9,0] → x=3, y=57*9+5=518
+    expect(findImage(ops, 'r_c')).toContainEqual({ img: 'r_c', x: 3, y: 518, alpha: 1 });
+  });
+
+  it('视角翻转后棋子贴图坐标随之翻转', () => {
+    const ops = computeDrawList(view({ flip: true }), skin2);
+    // 逻辑 [9,0] 翻转后为视图 [0,8] → x=57*8+3=459, y=5
+    expect(findImage(ops, 'r_c')).toContainEqual({ img: 'r_c', x: 459, y: 5, alpha: 1 });
+  });
+
+  it('上一步走子在起点与终点绘制落点框', () => {
+    const ops = computeDrawList(view({ lastMove: { from: [6, 0], to: [5, 0] } }), skin2);
+    expect(findImage(ops, 'box')).toEqual([
+      { img: 'box', x: 3, y: 347 },
+      { img: 'box', x: 3, y: 290 },
+    ]);
+  });
+
+  it('选中棋子：落点框 + 棋子压暗一档', () => {
+    const ops = computeDrawList(view({ selected: [6, 0] }), skin2);
+    expect(findImage(ops, 'box')).toEqual([{ img: 'box', x: 3, y: 347 }]);
+    // [6,0] 是红兵 → 素材 r_z，坐标 3 / 347，被选中压暗到 0.75
+    expect(findImage(ops, 'r_z')).toContainEqual({ img: 'r_z', x: 3, y: 347, alpha: 0.75 });
+  });
+
+  it('合法落点：空位画提示点（叠加固定偏移），可吃子改画空心环', () => {
     const b = emptyBoard();
     b[5][0] = { t: 'R', s: 'r' };
     b[4][4] = { t: 'P', s: 'b' };
-    const h = boardMarkup(
+    const ops = computeDrawList(
       view({
         board: b,
         moves: [
@@ -66,28 +191,45 @@ describe('棋盘渲染标记 boardMarkup', () => {
           [4, 4],
         ],
       }),
+      skin2,
     );
-    expect(h).toContain('r="7"'); // 空位落点小圆点
-    expect(h).toContain('stroke-width="3.2"'); // 可吃子空心环
-    expect(h).toContain('class="mv mv-dot"'); // 悬停 / 光标样式标记
-    expect(h).toContain('class="mv mv-cap"');
+    // 空位 [4,0]：x=3+10=13, y=57*4+5+10=243
+    expect(findImage(ops, 'dot')).toEqual([{ img: 'dot', x: 13, y: 243 }]);
+    // 可吃子 [4,4]：画在棋子之上的空心环
+    const cap = rings(ops).find((r) => !r.pulse && r.color === '#c0392b');
+    expect(cap).toMatchObject({ cx: 258.5, cy: 257, radius: skin2.disc / 2 + 2 });
   });
 
-  it('选中棋子显示金色选中环', () => {
-    const h = boardMarkup(view({ selected: [6, 0] }));
-    expect(h).toContain('#f0b429');
+  it('将军：将帅位置绘制红色脉冲警示环', () => {
+    const ops = computeDrawList(view({ checkKing: [9, 4] }), skin2);
+    expect(rings(ops)).toContainEqual({
+      ring: true,
+      cx: 258.5,
+      cy: 542,
+      radius: skin2.disc / 2 + 6,
+      color: '#e23b2e',
+      width: 3.5,
+      alpha: 0.85,
+      pulse: true,
+    });
   });
 
-  it('可交互一方棋子带 hoverable 类（含悬停预高亮环），对方不带', () => {
-    const h = boardMarkup(view({ interactiveSide: 'r' }));
-    // 红方 16 枚棋子可悬停，黑方 16 枚不可
-    expect(h.match(/class="piece hoverable"/g)).toHaveLength(16);
-    expect(h.match(/class="piece"/g)).toHaveLength(16);
-    expect(h).toContain('class="ring"');
+  it('黑方视角翻转后警示环坐标随之翻转', () => {
+    const ops = computeDrawList(view({ checkKing: [0, 3], flip: true }), skin2);
+    // 逻辑 [0,3] 翻转后视图为 [9,5] → cx=57*5+3+27.5=315.5, cy=542
+    expect(rings(ops).find((r) => r.pulse)).toMatchObject({ cx: 315.5, cy: 542 });
   });
 
-  it('不可交互（非自己回合 / 未开局）时不生成任何可悬停棋子', () => {
-    expect(boardMarkup(view({ interactiveSide: null }))).not.toContain('piece hoverable');
-    expect(boardMarkup(view())).not.toContain('piece hoverable');
+  it('悬停预高亮：本方可操作时给己方棋子 / 合法落点画金色环', () => {
+    const own = computeDrawList(view({ hover: [9, 0], interactiveSide: 'r' }), skin2);
+    expect(rings(own).some((r) => !r.pulse && r.color === '#f0b429')).toBe(true);
+
+    const move = computeDrawList(view({ hover: [4, 0], moves: [[4, 0]], interactiveSide: 'r' }), skin2);
+    expect(rings(move).some((r) => !r.pulse && r.color === '#f0b429')).toBe(true);
+  });
+
+  it('不可操作 / 悬停对方棋子时不画悬停环', () => {
+    expect(rings(computeDrawList(view({ hover: [9, 0], interactiveSide: null }), skin2))).toHaveLength(0);
+    expect(rings(computeDrawList(view({ hover: [0, 0], interactiveSide: 'r' }), skin2))).toHaveLength(0);
   });
 });

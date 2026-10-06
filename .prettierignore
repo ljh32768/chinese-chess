@@ -1,6 +1,8 @@
 node_modules/
 dist/
 release/
+Reference/
+src/renderer/assets/
 docs/
 AGENTS.md
 *.html

@@ -579,6 +579,9 @@ describe('主机服务 · 静态资源', () => {
     fs.writeFileSync(path.join(dir, 'renderer', 'styles.css'), 'body{}');
     fs.writeFileSync(path.join(dir, 'renderer', 'data.json'), '{"ok":true}');
     fs.writeFileSync(path.join(dir, 'renderer', 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    fs.writeFileSync(path.join(dir, 'renderer', 'piece.png'), 'png-bytes');
+    fs.writeFileSync(path.join(dir, 'renderer', 'board.jpg'), 'jpg-bytes');
+    fs.writeFileSync(path.join(dir, 'renderer', 'click.wav'), 'wav-bytes');
     fs.writeFileSync(path.join(dir, 'renderer', 'blob.bin'), 'binary');
     fs.writeFileSync(path.join(dir, 'shared', 'rules.js'), 'export const rules = 1;');
     // 静态根目录之外的敏感文件不应能被访问
@@ -645,6 +648,20 @@ describe('主机服务 · 静态资源', () => {
     const bin = await fetch(`http://127.0.0.1:${server!.address.port}/blob.bin`);
     expect(bin.status).toBe(200);
     expect(bin.headers.get('content-type')).toContain('application/octet-stream');
+  });
+
+  it('棋盘图片与音效素材按正确 MIME 返回（浏览器可渲染 / 播放）', async () => {
+    const png = await fetch(`http://127.0.0.1:${server!.address.port}/piece.png`);
+    expect(png.status).toBe(200);
+    expect(png.headers.get('content-type')).toContain('image/png');
+
+    const jpg = await fetch(`http://127.0.0.1:${server!.address.port}/board.jpg`);
+    expect(jpg.status).toBe(200);
+    expect(jpg.headers.get('content-type')).toContain('image/jpeg');
+
+    const wav = await fetch(`http://127.0.0.1:${server!.address.port}/click.wav`);
+    expect(wav.status).toBe(200);
+    expect(wav.headers.get('content-type')).toContain('audio/wav');
   });
 
   it('不存在的文件返回 404', async () => {
@@ -731,6 +748,20 @@ describe('主机服务 · 人机对战与计时读秒', () => {
     expect(restarted.state.moveSeq).toBe(0);
     expect(restarted.state.status).toBe('playing');
   }, 10000);
+
+  it('人机对战难度：start-ai 支持 depth 参数（1-4），非法值忽略', async () => {
+    const s = await startServer({ aiDelayMs: 1000 });
+    const res = await fetch(`http://127.0.0.1:${s.address.port}/api/host/start-ai?depth=4`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { depth: number }).depth).toBe(4);
+
+    const bad = await fetch(`http://127.0.0.1:${s.address.port}/api/host/start-ai?depth=99`, {
+      method: 'POST',
+    });
+    expect(((await bad.json()) as { depth: number }).depth).toBe(4); // 非法值沿用上一次深度
+  });
 
   it('计时读秒：本回合超时判负并清空 deadline', async () => {
     const s = await startServer({ turnMs: 150 });

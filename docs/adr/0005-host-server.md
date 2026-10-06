@@ -49,7 +49,7 @@
 |---|---|---|---|
 | `GET /api/host-info` | — | `{ ip, port, hosting, hasHost, hasGuest, state }` | 页面初始化：展示本机地址、预填加入表单 |
 | `POST /api/host/start` | — | `{ ip, port }` | 创建对局（进入 waiting） |
-| `POST /api/host/start-ai` | — | `{ ip, port }` | 创建人机对战（AI 占黑方席位，立即开局） |
+| `POST /api/host/start-ai` | 可选 `?depth=1..4` | `{ ip, port, depth }` | 创建人机对战（AI 占黑方席位，立即开局）；`depth` 指定搜索深度，缺省/非法沿用当前值 |
 | `POST /api/host/stop` | — | `{ ok: true }` | 取消等待（同时结束人机对战） |
 | `GET /api/*`（其他） | — | 404 `{ error: 'not found' }` | 未定义接口 |
 | `GET 其他路径` | — | 静态文件 | `/` → `renderer/index.html`；其余按 `dist/` 解析，未命中回退 `dist/renderer/` |
@@ -57,7 +57,7 @@
 静态服务安全规则（[serveStatic](../../src/server/host-server.ts#L208-L240)）：
 解析后的绝对路径必须位于静态根内（`path.relative` 判断，不得以 `..` 开头），否则按 404 处理；
 `startsWith(root)` 会把 `dist-evil` 类同前缀兄弟目录误判放行，已弃用。所有响应带 `Cache-Control: no-store`。
-MIME 白名单覆盖 html/js/mjs/css/json/map/svg/ico/png。
+MIME 白名单覆盖 html/js/mjs/css/json/map/svg/ico/png/jpg/jpeg/wav。
 
 ### 3.3 局域网 IP 选择 `pickLanIp(ifaces)`
 
@@ -119,7 +119,7 @@ HTTPS/WSS、鉴权、房间号、多房间、断线自动重连（服务端只�
 
 | 内容 | 位置 |
 |---|---|
-| MIME 表 / 虚拟网卡特征 | [host-server.ts](../../src/server/host-server.ts#L19-L32) |
+| MIME 表 / 虚拟网卡特征 | [host-server.ts](../../src/server/host-server.ts#L23-L36) |
 | `pickLanIp` / `getLanIp` | [host-server.ts](../../src/server/host-server.ts#L38-L62) |
 | `HostServer.listen()` / `close()` | [host-server.ts](../../src/server/host-server.ts#L106-L140) |
 | `setHosting()` | [host-server.ts](../../src/server/host-server.ts#L149-L160) |

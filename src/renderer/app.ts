@@ -8,12 +8,28 @@ import { ServerMessage } from '../shared/protocol.js';
 import { Board, GameSnapshot, Move, PieceType, Pos, Side } from '../shared/types.js';
 import { capturedPieces, describeHistory } from '../shared/notation.js';
 import { DiscoveredHost, discoverSubnet, probeHost } from './discover.js';
-import { pickCell, renderBoard, svgPoint } from './board.js';
+import {
+  BoardView,
+  DEFAULT_SKIN,
+  SkinId,
+  SKINS,
+  boardBgUrl,
+  canvasPoint,
+  isSkinId,
+  loadSkinImages,
+  nextSkin,
+  pickCell,
+  renderBoard,
+} from './board.js';
+import { playClick, playSelect } from './sound.js';
 import { Net, WelcomeInfo } from './net.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 
-const boardEl = document.getElementById('board') as unknown as SVGSVGElement;
+const boardEl = document.getElementById('board') as HTMLCanvasElement;
+
+/** 皮肤偏好键（localStorage） */
+const SKIN_KEY = 'lanschess-skin';
 
 /** 棋子汉字（红黑两套用字，用于吃子展示） */
 const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
@@ -47,9 +63,17 @@ const S = {
   deadline: null as number | null,
   /** 人机对战（本机创建的对局，AI 执黑） */
   aiMode: false,
+  /** 当前皮肤（参考项目三套素材） */
+  skin: DEFAULT_SKIN as SkinId,
+  /** 鼠标悬停的交叉点（仅用于预高亮） */
+  hover: null as Pos | null,
 };
 
 let net: Net | null = null;
+
+/** 已加载的皮肤素材（按皮肤缓存） */
+const loadedImages: Partial<Record<SkinId, Record<string, HTMLImageElement>>> = {};
+const skin = (): (typeof SKINS)[SkinId] => SKINS[S.skin];
 
 const flip = () => S.side === 'b';
 const sideName = (s: Side) => (s === 'r' ? '红方' : '黑方');
@@ -101,18 +125,68 @@ function closeModal(): void {
 
 // -------------------------------------------------------------- 渲染
 
-function render(): void {
-  const canPlay = !S.spectator && S.status === 'playing' && S.turn === S.side && !S.oppAway;
-  renderBoard(boardEl, {
+/** 当前是否本方可以操作棋盘（观战 / 非本回合 / 断线等待时不可操作） */
+function canPlay(): boolean {
+  return !S.spectator && S.status === 'playing' && S.turn === S.side && !S.oppAway;
+}
+
+/** 组装棋盘渲染视图（纯展示，不含规则判定） */
+function boardView(): BoardView {
+  const playable = canPlay();
+  return {
     board: S.board,
     selected: S.selected,
     moves: S.moves,
     lastMove: S.lastMove,
     flip: flip(),
     checkKing: S.check ? findKing(S.board, S.turn) : null,
-    interactiveSide: canPlay ? S.side : null,
+    interactiveSide: playable ? S.side : null,
+    hover: playable ? S.hover : null,
+  };
+}
+
+/** 重绘棋盘（不做面板与状态同步，供悬停 / 脉冲帧调用） */
+function paint(): void {
+  renderBoard(boardEl, boardView(), skin(), loadedImages[S.skin] ?? {}, performance.now());
+}
+
+/** 按皮肤套用页面背景（木质底图，与参考项目一致） */
+function applyTheme(): void {
+  document.body.style.background = `#2b2016 url(${boardBgUrl(skin())}) repeat`;
+}
+
+/** 按需加载当前皮肤素材，加载完成后补一次重绘 */
+function ensureSkinImages(): void {
+  if (loadedImages[S.skin]) return;
+  void loadSkinImages(skin()).then((imgs) => {
+    loadedImages[S.skin] = imgs;
+    paint();
   });
+}
+
+/** 将军警示环的脉冲动画：仅在需要时运行定时重绘 */
+let pulseTimer = 0;
+function syncPulse(): void {
+  const need = S.check && S.status === 'playing' && $('screen-game').classList.contains('active');
+  if (need && !pulseTimer) {
+    pulseTimer = window.setInterval(() => {
+      if (!S.check || S.status !== 'playing') {
+        window.clearInterval(pulseTimer);
+        pulseTimer = 0;
+        return;
+      }
+      paint();
+    }, 100);
+  } else if (!need && pulseTimer) {
+    window.clearInterval(pulseTimer);
+    pulseTimer = 0;
+  }
+}
+
+function render(): void {
+  paint();
   updatePanel();
+  syncPulse();
 }
 
 function updateRoleHint(): void {
@@ -230,6 +304,7 @@ function applySnapshot(s: GameSnapshot): void {
   S.moves = [];
   S.pending = null;
   S.oppAway = false;
+  S.hover = null;
   S.history = s.history ?? [];
   S.deadline = s.deadline ?? null;
   updateRoleHint();
@@ -263,6 +338,7 @@ function handleMessage(msg: ServerMessage): void {
       S.moves = [];
       S.history = msg.history;
       S.deadline = msg.deadline;
+      playClick();
       render();
       break;
     case 'move_rejected':
@@ -462,10 +538,28 @@ async function createGame(): Promise<void> {
   }
 }
 
+/** 首页「人机对弈」子菜单：与参考项目一致，先选难度再开始 */
+function showAiMenu(): void {
+  $('menu-index').hidden = true;
+  $('menu-ai').hidden = false;
+}
+
+function backToIndex(): void {
+  $('menu-ai').hidden = true;
+  $('menu-index').hidden = false;
+}
+
+/** 读取人机对战难度（搜索深度，2/3/4 对应菜鸟/中级/高手） */
+function aiDepth(): number {
+  const el = document.querySelector<HTMLInputElement>('input[name="ai-depth"]:checked');
+  const depth = Number(el?.value ?? 3);
+  return Number.isInteger(depth) && depth >= 1 && depth <= 4 ? depth : 3;
+}
+
 /** 人机对战：AI 执黑，创建后直接进入对局 */
 async function createAiGame(): Promise<void> {
   try {
-    const res = await fetch('/api/host/start-ai', { method: 'POST' });
+    const res = await fetch(`/api/host/start-ai?depth=${aiDepth()}`, { method: 'POST' });
     if (!res.ok) throw new Error('当前页面无法创建对局，请通过主机端打开');
     S.role = 'host';
     S.aiMode = true;
@@ -474,6 +568,33 @@ async function createAiGame(): Promise<void> {
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
   }
+}
+
+/** 读取上次选择的皮肤（localStorage 不可用时回退默认皮肤） */
+function loadSkinPreference(): SkinId {
+  try {
+    const saved = window.localStorage.getItem(SKIN_KEY);
+    return isSkinId(saved) ? saved : DEFAULT_SKIN;
+  } catch {
+    return DEFAULT_SKIN;
+  }
+}
+
+/** 更换皮肤：按参考项目顺序循环三套素材，并记住选择 */
+function switchSkin(): void {
+  if ($('screen-game').classList.contains('active') && S.status === 'playing') {
+    return toast('对局中不能更换皮肤');
+  }
+  S.skin = nextSkin(S.skin);
+  try {
+    window.localStorage.setItem(SKIN_KEY, S.skin);
+  } catch {
+    /* 忽略：隐私模式下无法写入，仅本次会话生效 */
+  }
+  applyTheme();
+  ensureSkinImages();
+  paint();
+  toast(`已更换皮肤：${SKINS[S.skin].label}`);
 }
 
 async function cancelHost(): Promise<void> {
@@ -622,6 +743,8 @@ function leaveToHome(): void {
   S.moves = [];
   S.aiMode = false;
   S.deadline = null;
+  S.hover = null;
+  backToIndex();
   show('screen-home');
 }
 
@@ -680,6 +803,12 @@ function clearSelection(): void {
 
 function onCell([r, c]: Pos): void {
   const p = S.board[r][c];
+  const pick = (): void => {
+    S.selected = [r, c];
+    S.moves = legalMoves(S.board, r, c);
+    playSelect();
+    render();
+  };
 
   if (S.selected) {
     if (S.moves.some(([rr, cc]) => rr === r && cc === c)) {
@@ -690,9 +819,7 @@ function onCell([r, c]: Pos): void {
       return;
     }
     if (p && p.s === S.side) {
-      S.selected = [r, c];
-      S.moves = legalMoves(S.board, r, c);
-      render();
+      pick();
       return;
     }
     S.selected = null;
@@ -702,9 +829,7 @@ function onCell([r, c]: Pos): void {
   }
 
   if (p && p.s === S.side) {
-    S.selected = [r, c];
-    S.moves = legalMoves(S.board, r, c);
-    render();
+    pick();
   } else if (p) {
     toast('这是对方的棋子');
   }
@@ -714,8 +839,11 @@ function onCell([r, c]: Pos): void {
 
 function bindEvents(): void {
   $('btn-create').addEventListener('click', () => void createGame());
-  $('btn-create-ai').addEventListener('click', () => void createAiGame());
   $('btn-show-join').addEventListener('click', showJoin);
+  $('btn-create-ai').addEventListener('click', showAiMenu);
+  $('btn-ai-back').addEventListener('click', backToIndex);
+  $('btn-ai-start').addEventListener('click', () => void createAiGame());
+  $('btn-skin').addEventListener('click', switchSkin);
   $('btn-cancel-host').addEventListener('click', () => void cancelHost());
   $('btn-copy-ip').addEventListener('click', () => void copyHostAddr());
   $('btn-connect').addEventListener('click', () => void doJoin());
@@ -730,14 +858,40 @@ function bindEvents(): void {
   $('btn-home').addEventListener('click', leaveToHome);
   $('btn-leave').addEventListener('click', leaveToHome);
 
+  /** 点击 / 悬停位置 → 逻辑棋盘坐标 */
+  const cellAt = (clientX: number, clientY: number): Pos | null => {
+    const pt = canvasPoint(boardEl, clientX, clientY, skin());
+    return pickCell(pt.x, pt.y, skin(), flip());
+  };
+
   boardEl.addEventListener('click', (e) => {
     if (S.spectator) return toast('观战模式只读');
     if (S.status !== 'playing') return;
     if (S.oppAway) return toast('对手已断开，等待重连');
     if (S.turn !== S.side) return toast('还没轮到你走棋');
-    const pt = svgPoint(boardEl, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
-    const pos = pickCell(pt.x, pt.y, flip());
+    const pos = cellAt(e.clientX, e.clientY);
     if (pos) onCell(pos);
+  });
+
+  // 悬停预高亮 + 手型光标（触摸设备不触发，不影响交互）
+  boardEl.addEventListener('mousemove', (e) => {
+    const pos = cellAt(e.clientX, e.clientY);
+    const same =
+      (pos === null && S.hover === null) ||
+      (!!pos && !!S.hover && pos[0] === S.hover[0] && pos[1] === S.hover[1]);
+    if (same) return;
+    S.hover = pos;
+    const hit = pos ? S.board[pos[0]][pos[1]] : null;
+    const clickable =
+      canPlay() && (hit?.s === S.side || S.moves.some(([r, c]) => !!pos && r === pos[0] && c === pos[1]));
+    boardEl.style.cursor = clickable ? 'pointer' : 'default';
+    paint();
+  });
+  boardEl.addEventListener('mouseleave', () => {
+    if (!S.hover) return;
+    S.hover = null;
+    boardEl.style.cursor = 'default';
+    paint();
   });
 
   // 右键取消选中（与 ESC 等效）
@@ -765,6 +919,9 @@ function bindEvents(): void {
 }
 
 async function init(): Promise<void> {
+  S.skin = loadSkinPreference();
+  applyTheme();
+  ensureSkinImages();
   bindEvents();
   render();
   // 计时读秒（D4）：定时刷新剩余时间显示（未启用计时时几乎零开销）

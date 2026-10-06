@@ -5,9 +5,9 @@ Electron 桌面端与浏览器共用同一套渲染页面。
 
 > 一句话：局域网内两台设备连上后，能完整、正确地下一盘棋。
 
-- 版本：v1.3（v0.1.0 为 MVP 代码基线；v1.1–v1.3 为 A–D 四档优化迭代）
-- 状态：A、B、C、D 四档优化全部完成；135 项自动化测试通过，lint / format / build / CI 全绿
-- 更新日期：2026-10-03
+- 版本：v1.4（v0.1.0 为 MVP 代码基线；v1.1–v1.3 为 A–D 四档优化迭代；v1.4 为前端视觉改造）
+- 状态：A、B、C、D 四档优化全部完成；v1.4 前端改造完成（Canvas + 参考项目素材）；148 项自动化测试通过，lint / format / build / CI 全绿
+- 更新日期：2026-10-06
 
 版本里程碑：
 
@@ -17,6 +17,7 @@ Electron 桌面端与浏览器共用同一套渲染页面。
 | v1.1 | A 档 快速见效：错误提示、地址复制、弹层交互与等待态、大屏布局、悬停反馈、快捷键、矮窗口修复 | commit `d3065ad` |
 | v1.2 | B 档 稳健性：断线重连宽限、终局清理 pending、静态路径加固、协议清理 | commit `2f1b609` |
 | v1.3 | C 档 工程化 + D 档 功能扩展：CI/lint/format、dev 脚本、安装包打包、主机日志；局域网主机发现、棋谱/吃子/悔棋、观战、人机对战与计时读秒 | commit `e22f7b0` |
+| v1.4 | 前端视觉改造：对齐参考项目 Reference/Chess 的经典木质风格——Canvas + 图片棋子渲染、三套皮肤、音效、木质挂板菜单、人机难度子菜单 | 见 ADR-0007、ADR-0009 |
 
 ---
 
@@ -29,6 +30,9 @@ Electron 桌面端与浏览器共用同一套渲染页面。
 | [adr/](./adr/) | ADR 架构决策 + 模块详细规格（0001–0009） | **各功能入口的详细 spec，见第 5 节** |
 | [Optimization-plan.md](./Optimization-plan.md) | 优化路线图（v1.3） | A–D 四档全部完成；分档列出现状问题、方案、代码落点与完成记录 |
 | [Demo.html](./Demo.html) | 单文件界面原型 | 仅验证界面布局与操作流程，无真实网络 |
+
+> 视觉素材（棋盘、棋子、按钮、音效）来自参考项目 [Reference/Chess](../Reference/Chess)（MIT 协议，
+> 版权归原作者所有），许可随素材分发：[src/renderer/assets/LICENSE-ReferenceChess.txt](../src/renderer/assets/LICENSE-ReferenceChess.txt)。
 
 ---
 
@@ -51,7 +55,7 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
 1. 主机运行 `npm start`（或 `npm run build && npm run host`），在首页点击「创建对局」，页面显示本机地址，如 `192.168.1.42:7777`。
 2. 对手在同一局域网的浏览器中打开 `http://192.168.1.42:7777/`，点击「加入对局」，输入该地址连接（也可点「搜索局域网主机」自动发现）。
 3. 双方加入后自动开局：主机执红先行，加入者执黑。
-4. 单人可点首页「人机对战」直接与 AI（执黑）对弈；第三方观众可点「观战（只读）」旁观。
+4. 单人可点首页「人机对弈」选择难度（菜鸟/中级/高手）后与 AI（执黑）对弈；第三方观众可点「观战」旁观。
 
 环境变量：
 
@@ -90,6 +94,10 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
 > v1.3 新增模块：渲染层 [discover.ts](../src/renderer/discover.ts)（局域网主机发现）、
 > 服务端 [ai.ts](../src/server/ai.ts)（人机对战）与 [log.ts](../src/server/log.ts)（主机日志）、
 > 共享层 [notation.ts](../src/shared/notation.ts)（中文记谱）——详见 [ADR-0009](./adr/0009-c-d-extensions.md)。
+>
+> v1.4 前端视觉改造：渲染层棋盘改为 **Canvas + 图片素材**（[board.ts](../src/renderer/board.ts)），
+> 新增音效 [sound.ts](../src/renderer/sound.ts) 与素材目录 [assets/](../src/renderer/assets/)，
+> 页面改为参考项目的木质挂板风格——详见 [ADR-0007](./adr/0007-renderer-ui.md)。
 
 核心原则（详见 [ADR-0001](./adr/0001-host-authoritative-architecture.md)）：
 
@@ -121,7 +129,7 @@ main / cli（进程入口，装配 server 与页面）
 | 3 | 对局状态机 | 主机权威棋盘状态、走子校验链、认输/和棋/重开 | [game.ts](../src/server/game.ts) | [ADR-0004](./adr/0004-game-state-machine.md) |
 | 4 | 主机服务 | HTTP 静态服务 + 控制 API、WebSocket 路由、连接管理、局域网 IP 发现 | [host-server.ts](../src/server/host-server.ts) | [ADR-0005](./adr/0005-host-server.md) |
 | 5 | 进程入口 | Electron 主进程、Node CLI 主机端、构建脚本 | [main.ts](../src/main/main.ts)、[cli.ts](../src/server/cli.ts)、[copy-assets.mjs](../scripts/copy-assets.mjs) | [ADR-0006](./adr/0006-process-entries.md) |
-| 6 | 渲染层 | 页面流转、棋盘 SVG 渲染与交互、WebSocket 客户端、心跳、棋谱/悔棋/观战/倒计时/主机搜索 | [app.ts](../src/renderer/app.ts)、[board.ts](../src/renderer/board.ts)、[net.ts](../src/renderer/net.ts)、[discover.ts](../src/renderer/discover.ts)、[index.html](../src/renderer/index.html) | [ADR-0007](./adr/0007-renderer-ui.md)、[ADR-0009](./adr/0009-c-d-extensions.md) |
+| 6 | 渲染层 | 页面流转、棋盘 Canvas 渲染与交互、三套皮肤与音效、WebSocket 客户端、心跳、棋谱/悔棋/观战/倒计时/主机搜索 | [app.ts](../src/renderer/app.ts)、[board.ts](../src/renderer/board.ts)、[sound.ts](../src/renderer/sound.ts)、[net.ts](../src/renderer/net.ts)、[discover.ts](../src/renderer/discover.ts)、[index.html](../src/renderer/index.html) | [ADR-0007](./adr/0007-renderer-ui.md)、[ADR-0009](./adr/0009-c-d-extensions.md) |
 | 7 | 测试体系 | 单元测试、服务端集成测试、完整对局端到端回放 | [tests/](../tests/) | [ADR-0008](./adr/0008-testing-strategy.md) |
 | 8 | 记谱模块 | 传统中文记谱生成、着法回放、吃子统计（纯函数） | [notation.ts](../src/shared/notation.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 9 | AI 引擎 | negamax + α-β 搜索、局面评估、人机对战走子 | [ai.ts](../src/server/ai.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
@@ -137,32 +145,34 @@ main / cli（进程入口，装配 server 与页面）
 
 | 功能 | UI 触发点 | 实现入口（代码） | 详细 spec |
 |---|---|---|---|
-| 创建对局 | 首页「创建对局」按钮 | [app.ts `createGame()`](../src/renderer/app.ts#L449-L462) → `POST /api/host/start` → [host-server.ts `setHosting()`](../src/server/host-server.ts#L178-L193) | [ADR-0005](./adr/0005-host-server.md) |
-| 人机对战 | 首页「人机对战」按钮 | [app.ts `createAiGame()`](../src/renderer/app.ts#L465-L476) → `POST /api/host/start-ai` → [host-server.ts `startAiGame()` / `scheduleAiMove()`](../src/server/host-server.ts#L498-L559) → [ai.ts](../src/server/ai.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
-| 显示本机地址 | 主机等待页 | [app.ts `init()`](../src/renderer/app.ts#L767-L785) → `GET /api/host-info` → [host-server.ts `pickLanIp()`](../src/server/host-server.ts#L42-L66) | [ADR-0005](./adr/0005-host-server.md) |
-| 复制主机地址 | 主机等待页「复制地址」 | [app.ts `copyHostAddr()`](../src/renderer/app.ts#L496-L517)（非安全上下文降级 `execCommand`） | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 加入对局 | 「加入对局」→ 输入 IP:端口 →「连接」 | [app.ts `doJoin()`](../src/renderer/app.ts#L590-L610) → WS `join(guest)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts#L561-L637) | [ADR-0005](./adr/0005-host-server.md) |
-| 搜索局域网主机 | 加入页「搜索局域网主机」 | [app.ts `scanHosts()`](../src/renderer/app.ts#L551-L588) → [discover.ts](../src/renderer/discover.ts)（WS 探测 + 网段扫描） | [ADR-0009](./adr/0009-c-d-extensions.md) |
-| 观战（只读） | 加入页「观战（只读）」 | `join(spectator)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts#L561-L637)（spectator 分支）→ [app.ts `openNet()`](../src/renderer/app.ts#L428-L446) | [ADR-0009](./adr/0009-c-d-extensions.md) |
-| 自动开局 | 双方加入后由主机触发 | [host-server.ts `maybeStart()` / `startGame()`](../src/server/host-server.ts#L639-L651) → 广播 `start` | [ADR-0003](./adr/0003-wire-protocol.md) |
-| 走子（选子/落点/发送） | 点击棋盘 | [app.ts `onCell()`](../src/renderer/app.ts#L681-L713) → `move` → [game.ts `applyMove()`](../src/server/game.ts#L82-L119) → [host-server.ts `applyAndBroadcast()`](../src/server/host-server.ts#L459-L466) | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
+| 创建对局 | 首页「创建对局」按钮 | [app.ts `createGame()`](../src/renderer/app.ts) → `POST /api/host/start` → [host-server.ts `setHosting()`](../src/server/host-server.ts) | [ADR-0005](./adr/0005-host-server.md) |
+| 人机对战 | 首页「人机对弈」→ 选难度 →「开始对弈」 | [app.ts `createAiGame()`](../src/renderer/app.ts) → `POST /api/host/start-ai?depth=2|3|4` → [host-server.ts `startAiGame()` / `scheduleAiMove()`](../src/server/host-server.ts) → [ai.ts](../src/server/ai.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 更换皮肤 | 首页「更换皮肤」 | [app.ts `switchSkin()`](../src/renderer/app.ts) → [board.ts `nextSkin()` / `loadSkinImages()`](../src/renderer/board.ts)（页面背景同步换 `bg.jpg`，偏好存 `localStorage`） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 选子 / 走子音效 | 点击棋子 / 收到走子广播时自动 | [sound.ts](../src/renderer/sound.ts)（`select.wav` / `click.wav`） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 显示本机地址 | 主机等待页 | [app.ts `init()`](../src/renderer/app.ts) → `GET /api/host-info` → [host-server.ts `pickLanIp()`](../src/server/host-server.ts#L43-L62) | [ADR-0005](./adr/0005-host-server.md) |
+| 复制主机地址 | 主机等待页「复制地址」 | [app.ts `copyHostAddr()`](../src/renderer/app.ts)（非安全上下文降级 `execCommand`） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 加入对局 | 「加入对局」→ 输入 IP:端口 →「连接」 | [app.ts `doJoin()`](../src/renderer/app.ts) → WS `join(guest)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts) | [ADR-0005](./adr/0005-host-server.md) |
+| 搜索局域网主机 | 加入页「搜索主机」 | [app.ts `scanHosts()`](../src/renderer/app.ts) → [discover.ts](../src/renderer/discover.ts)（WS 探测 + 网段扫描） | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 观战（只读） | 加入页「观战」 | `join(spectator)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts)（spectator 分支）→ [app.ts `openNet()`](../src/renderer/app.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 自动开局 | 双方加入后由主机触发 | [host-server.ts `maybeStart()` / `startGame()`](../src/server/host-server.ts) → 广播 `start` | [ADR-0003](./adr/0003-wire-protocol.md) |
+| 走子（选子/落点/发送） | 点击棋盘 | [app.ts `onCell()`](../src/renderer/app.ts) → `move` → [game.ts `applyMove()`](../src/server/game.ts#L82-L119) → [host-server.ts `applyAndBroadcast()`](../src/server/host-server.ts) | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
 | 规则裁判（将军/将死/困毙） | 走子后自动判定 | [rules.ts `judgeAfterMove()`](../src/shared/rules.ts#L299-L307)、[`validateMove()`](../src/shared/rules.ts#L313-L330) | [ADR-0002](./adr/0002-rules-engine.md) |
-| 将军/将死高亮 | 走子后自动 | [board.ts `boardMarkup()`](../src/renderer/board.ts#L72-L154)（被将军一方的将/帅红色脉冲警示环） | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 悬停预高亮 | 鼠标悬停棋盘 | [board.ts `boardMarkup()`](../src/renderer/board.ts#L72-L154)（`hoverable` / `mv` 标记 + CSS hover） | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 棋谱与吃子 | 侧栏棋谱/吃子面板自动更新 | [app.ts `renderNotation()`](../src/renderer/app.ts#L204-L244) → [notation.ts `describeHistory()` / `capturedPieces()`](../src/shared/notation.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
-| 悔棋（申请/同意） | 对局页「悔棋」 | [app.ts `offerUndo()`](../src/renderer/app.ts#L661-L670) → `undo_request` / `undo_response` → [game.ts `undo()`](../src/server/game.ts#L121-L141) | [ADR-0009](./adr/0009-c-d-extensions.md) |
-| 计时读秒 | 状态框显示「剩余 xx s」 | [host-server.ts `armTurnTimer()`](../src/server/host-server.ts#L512-L537) → 快照 `deadline` → [app.ts `updatePanel()`](../src/renderer/app.ts#L139-L202) | [ADR-0009](./adr/0009-c-d-extensions.md) |
-| 取消选中（ESC/右键） | 对局中按 ESC 或右键棋盘 | [app.ts `clearSelection()`](../src/renderer/app.ts#L672-L677)、[`bindEvents()`](../src/renderer/app.ts#L715-L765) | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 断线重连（宽限恢复） | 对手意外断线时自动提示，重连后恢复原局 | [host-server.ts `handleClose()` / `startGuestGrace()`](../src/server/host-server.ts#L653-L752) → `opponent_away` → [app.ts `handleMessage()`](../src/renderer/app.ts#L246-L371) 显示等待；超时或「等待新对手」回 waiting | [ADR-0003](./adr/0003-wire-protocol.md)、[ADR-0005](./adr/0005-host-server.md) |
-| 服务端错误提示 | 收到 `error` 消息时自动 | [app.ts `handleMessage()`](../src/renderer/app.ts#L246-L371) | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 认输 | 对局页「认输」 | [app.ts `resign()`](../src/renderer/app.ts#L630-L640) → `resign` → [game.ts `resign()`](../src/server/game.ts#L143-L153) → 广播 `game_over` | [ADR-0004](./adr/0004-game-state-machine.md) |
-| 和棋（申请/同意） | 对局页「和棋」 | [app.ts `offerDraw()`](../src/renderer/app.ts#L642-L649) → `draw_request` / `draw_response` → [host-server.ts 路由](../src/server/host-server.ts#L340-L364) | [ADR-0003](./adr/0003-wire-protocol.md) |
-| 再来一局（申请/同意） | 对局结束后结果卡「再来一局」 | [app.ts `requestRestart()`](../src/renderer/app.ts#L651-L659) → `restart_request` / `restart_response` → [host-server.ts 路由](../src/server/host-server.ts#L365-L389) | [ADR-0003](./adr/0003-wire-protocol.md) |
-| 离开对局 | 对局页「离开」/ 结果卡「返回首页」/「离开观战」 | [app.ts `leaveToHome()`](../src/renderer/app.ts#L612-L628) → `leave` → [host-server.ts `handleClose()`](../src/server/host-server.ts#L653-L688) | [ADR-0005](./adr/0005-host-server.md) |
-| 断线提示 | 对方主动离开 / 本端连接中断时自动弹出 | [net.ts `onclose`](../src/renderer/net.ts#L90-L98)、[app.ts `handleClosed()`](../src/renderer/app.ts#L411-L426) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 将军/将死高亮 | 走子后自动 | [board.ts `computeDrawList()`](../src/renderer/board.ts)（被将军一方的将/帅红色脉冲警示环） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 悬停预高亮 | 鼠标悬停棋盘 | [app.ts `bindEvents()`](../src/renderer/app.ts) + [board.ts `computeDrawList()`](../src/renderer/board.ts)（己方棋子 / 合法落点金色环 + 手型光标） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 棋谱与吃子 | 侧栏棋谱/吃子面板自动更新 | [app.ts `renderNotation()`](../src/renderer/app.ts) → [notation.ts `describeHistory()` / `capturedPieces()`](../src/shared/notation.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 悔棋（申请/同意） | 对局页「悔棋」 | [app.ts `offerUndo()`](../src/renderer/app.ts) → `undo_request` / `undo_response` → [game.ts `undo()`](../src/server/game.ts#L121-L141) | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 计时读秒 | 状态框显示「剩余 xx s」 | [host-server.ts `armTurnTimer()`](../src/server/host-server.ts) → 快照 `deadline` → [app.ts `updatePanel()`](../src/renderer/app.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 取消选中（ESC/右键） | 对局中按 ESC 或右键棋盘 | [app.ts `clearSelection()`](../src/renderer/app.ts)、[`bindEvents()`](../src/renderer/app.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 断线重连（宽限恢复） | 对手意外断线时自动提示，重连后恢复原局 | [host-server.ts `handleClose()` / `startGuestGrace()`](../src/server/host-server.ts) → `opponent_away` → [app.ts `handleMessage()`](../src/renderer/app.ts) 显示等待；超时或「等待新对手」回 waiting | [ADR-0003](./adr/0003-wire-protocol.md)、[ADR-0005](./adr/0005-host-server.md) |
+| 服务端错误提示 | 收到 `error` 消息时自动 | [app.ts `handleMessage()`](../src/renderer/app.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 认输 | 对局页「认输」 | [app.ts `resign()`](../src/renderer/app.ts) → `resign` → [game.ts `resign()`](../src/server/game.ts#L143-L153) → 广播 `game_over` | [ADR-0004](./adr/0004-game-state-machine.md) |
+| 和棋（申请/同意） | 对局页「和棋」 | [app.ts `offerDraw()`](../src/renderer/app.ts) → `draw_request` / `draw_response` → [host-server.ts 路由](../src/server/host-server.ts) | [ADR-0003](./adr/0003-wire-protocol.md) |
+| 再来一局（申请/同意） | 对局结束后侧栏结果卡「再来一局」 | [app.ts `requestRestart()`](../src/renderer/app.ts) → `restart_request` / `restart_response` → [host-server.ts 路由](../src/server/host-server.ts) | [ADR-0003](./adr/0003-wire-protocol.md) |
+| 离开对局 | 棋盘下「离开」/ 结果卡「返回首页」/「离开观战」 | [app.ts `leaveToHome()`](../src/renderer/app.ts) → `leave` → [host-server.ts `handleClose()`](../src/server/host-server.ts) | [ADR-0005](./adr/0005-host-server.md) |
+| 断线提示 | 对方主动离开 / 本端连接中断时自动弹出 | [net.ts `onclose`](../src/renderer/net.ts#L90-L98)、[app.ts `handleClosed()`](../src/renderer/app.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 心跳保活 | 后台自动运行（5s 间隔） | [net.ts `startPing()`](../src/renderer/net.ts#L124-L137) → `ping` / `pong`（`pong` 携带主机声明地址） | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 视角翻转（黑方） | 加入者执黑时自动翻转 | [board.ts `toView()` / `pickCell()`](../src/renderer/board.ts#L23-L54) | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 结束结果卡 | 对局结束时侧栏显示结果与结束操作（不遮挡棋盘） | [app.ts `updatePanel()`](../src/renderer/app.ts#L139-L202) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 视角翻转（黑方） | 加入者执黑时自动翻转 | [board.ts `toView()` / `pickCell()`](../src/renderer/board.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 结束结果卡 | 对局结束时侧栏显示结果与结束操作（不遮挡棋盘） | [app.ts `updatePanel()`](../src/renderer/app.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | Electron 桌面启动 / 打包 | `npm start` / `npm run dist` | [main.ts `createWindow()`](../src/main/main.ts#L22-L33)、[package.json `build` 配置](../package.json) | [ADR-0006](./adr/0006-process-entries.md) |
 | 无界面主机启动 / 开发模式 | `npm run host` / `npm run dev` | [cli.ts](../src/server/cli.ts)、[dev.mjs](../scripts/dev.mjs) | [ADR-0006](./adr/0006-process-entries.md) |
 
@@ -187,15 +197,17 @@ Chinese_chess/
 │   ├── main/
 │   │   └── main.ts        #   Electron 主进程入口
 │   └── renderer/          # 渲染层（主机界面与加入者浏览器共用）
-│       ├── app.ts         #   页面流转 / 交互 / 消息处理 / 棋谱 / 观战 / 倒计时
-│       ├── board.ts       #   棋盘 SVG 渲染与坐标换算
+│       ├── app.ts         #   页面流转 / 交互 / 消息处理 / 棋谱 / 观战 / 倒计时 / 皮肤
+│       ├── board.ts       #   棋盘 Canvas 渲染（三套皮肤）、绘制计划与坐标换算
+│       ├── sound.ts       #   音效（选子 / 走子）
 │       ├── net.ts         #   WebSocket 客户端 + 心跳
 │       ├── discover.ts    #   局域网主机发现（WS 探测 + 网段扫描）
+│       ├── assets/        #   视觉素材：img/stype_1..3（棋盘/棋子/提示点）、菜单按钮、audio、参考项目许可
 │       ├── index.html     #   页面结构（首页/等待/加入/对局/弹层）
-│       └── styles.css     #   样式
+│       └── styles.css     #   样式（参考项目木质经典风格）
 ├── tests/                 # vitest 测试（单元 + 集成 + 端到端）
 ├── scripts/
-│   ├── copy-assets.mjs    # 构建后复制 HTML/CSS 到 dist
+│   ├── copy-assets.mjs    # 构建后复制 HTML/CSS 与素材到 dist
 │   └── dev.mjs            # 开发模式：tsc watch + 主机端自动重启
 ├── .github/workflows/     # CI：lint → format → build → test
 ├── docs/                  # 本文档中心（README + ADR + 产品/技术文档 + Demo）
@@ -227,19 +239,19 @@ Chinese_chess/
 ## 8. 测试与验收
 
 - 测试命令：`npm test`（vitest run，node 环境）；配套 `npm run lint` 与 `npm run format:check`。
-- 覆盖范围：规则引擎单测、状态机单测（含悔棋/终局清理）、棋盘渲染标记、中文记谱与吃子统计、
-  AI 引擎、WebSocket 客户端心跳、完整对局端到端回放、服务端连接/消息/宽限重连/观战/人机/计时/静态安全集成、局域网 IP 与主机发现。
+- 覆盖范围：规则引擎单测、状态机单测（含悔棋/终局清理）、棋盘 Canvas 渲染计划与点击命中、中文记谱与吃子统计、
+  AI 引擎、WebSocket 客户端心跳、完整对局端到端回放、服务端连接/消息/宽限重连/观战/人机（含难度）/计时/静态安全与素材 MIME 集成、局域网 IP 与主机发现。
 
 | 测试文件 | 覆盖 |
 |---|---|
 | [rules.test.ts](../tests/rules.test.ts) | 开局棋盘、各棋子走法、将军/照面、将死/困毙、validateMove |
 | [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照 |
-| [board.test.ts](../tests/board.test.ts) | 棋盘渲染标记：棋子与楚河汉界、将军警示环、视角翻转、上一步、合法落点、悬停标记 |
+| [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划（棋子/上一步/选中/落点/将军/悬停）、视角翻转 |
 | [notation.test.ts](../tests/notation.test.ts) | 中文记谱（平/进/退/前后消歧/斜走目标列）、describeHistory 回放、capturedPieces 吃子统计 |
 | [ai.test.ts](../tests/ai.test.ts) | 一步杀、白吃子、无着法返回 null、开局着法合法与耗时 |
 | [net.test.ts](../tests/net.test.ts) | 连接握手、心跳 5s、16s 无 pong 判离线、主动关闭不提示（假定时器） |
 | [fullgame.test.ts](../tests/fullgame.test.ts) | 完整一盘棋 WS 回放：双方棋盘一致、seq 单调、history 一致、`game_over`「将死」、重开 |
-| [server.test.ts](../tests/server.test.ts) | 加入/开局/走子/拒绝/悔棋/观战/人机/计时/宽限重连/日志/端口回退/静态资源安全等集成行为 |
+| [server.test.ts](../tests/server.test.ts) | 加入/开局/走子/拒绝/悔棋/观战/人机（含难度参数）/计时/宽限重连/日志/端口回退/静态资源安全与 MIME（png/jpg/wav）等集成行为 |
 | [discover.test.ts](../tests/discover.test.ts) | 主机探测、无服务端口返回 null、网段扫描聚合去重与进度 |
 | [lan-ip.test.ts](../tests/lan-ip.test.ts) | pickLanIp 网段优先级与虚拟网卡跳过 |
 

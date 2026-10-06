@@ -9,62 +9,87 @@
 <body>
 <div class="app">
 
-  <!-- ========== 首页 ========== -->
+  <!-- ========== 首页：木质菜单（参考项目风格） ========== -->
   <section id="screen-home" class="screen active">
-    <div class="card">
-      <div class="logo">♟</div>
-      <h1>局域网象棋</h1>
-      <p class="sub">两人实时对战 · 主机权威</p>
-      <div class="btns">
-        <button class="btn primary" id="btn-create">创建对局</button>
-        <button class="btn ghost" id="btn-create-ai">人机对战</button>
-        <button class="btn ghost" id="btn-show-join">加入对局</button>
+    <div class="menu_wrap">
+      <div class="menu_box">
+        <div class="menu_init" id="menu-index">
+          <a id="btn-create">创建对局</a>
+          <a id="btn-show-join">加入对局</a>
+          <a id="btn-create-ai">人机对弈</a>
+          <a id="btn-skin">更换皮肤</a>
+        </div>
+        <div class="menu_dy" id="menu-ai" hidden>
+          <div class="menu_info">
+            <div class="menu_fh" id="btn-ai-back" title="返回"></div>
+            <label><input name="ai-depth" type="radio" value="2"> 菜鸟水平</label>
+            <label><input name="ai-depth" type="radio" value="3" checked> 中级水平</label>
+            <label><input name="ai-depth" type="radio" value="4"> 高手水平</label>
+          </div>
+          <a id="btn-ai-start">开始对弈</a>
+        </div>
       </div>
-      <p class="hint" id="home-hint"></p>
+      <p class="home-hint" id="home-hint"></p>
     </div>
   </section>
 
   <!-- ========== 主机等待 ========== -->
   <section id="screen-host" class="screen">
-    <div class="card">
-      <h2>等待对手加入</h2>
-      <div class="ip-box">
-        <div class="ip-label">本机地址</div>
-        <div class="ip-value" id="host-ip">—</div>
-        <button class="btn small copy-btn" id="btn-copy-ip">复制地址</button>
-      </div>
-      <div class="spinner"></div>
-      <p class="hint" id="host-wait">请让对方在「加入对局」中输入上方地址</p>
-      <div class="btns" style="margin-top:22px;">
-        <button class="btn ghost" id="btn-cancel-host">取消</button>
+    <div class="menu_box">
+      <div class="menu_info">
+        <div class="menu_fh" id="btn-cancel-host" title="取消"></div>
+        <p class="info-title">等待对手加入</p>
+        <div class="ip-box">
+          <div class="ip-label">本机地址</div>
+          <div class="ip-value" id="host-ip">—</div>
+        </div>
+        <button class="btn small" id="btn-copy-ip">复制地址</button>
+        <p class="hint" id="host-wait">请让对方在「加入对局」中输入上方地址</p>
+        <div class="spinner"></div>
       </div>
     </div>
   </section>
 
   <!-- ========== 加入 ========== -->
   <section id="screen-join" class="screen">
-    <div class="card">
-      <h2>加入对局</h2>
-      <label for="join-ip">主机地址</label>
-      <input id="join-ip" autocomplete="off" placeholder="192.168.1.42">
-      <label for="join-port">端口</label>
-      <input id="join-port" autocomplete="off" placeholder="7777" value="7777">
-      <p class="hint" id="join-msg"></p>
-      <div class="btns" style="margin-top:18px;">
-        <button class="btn primary" id="btn-connect">连接</button>
-        <button class="btn ghost" id="btn-spectate">观战（只读）</button>
-        <button class="btn ghost" id="btn-scan">搜索局域网主机</button>
-        <button class="btn ghost" id="btn-join-back">返回</button>
+    <div class="menu_box tall">
+      <div class="menu_info">
+        <div class="menu_fh" id="btn-join-back" title="返回"></div>
+        <label for="join-ip">主机地址</label>
+        <input type="text" id="join-ip" autocomplete="off" placeholder="192.168.1.42">
+        <label for="join-port">端口</label>
+        <input type="text" id="join-port" autocomplete="off" placeholder="7777" value="7777">
+        <div class="scan-actions">
+          <button class="btn small" id="btn-spectate">观 战</button>
+          <button class="btn small" id="btn-scan">搜索主机</button>
+        </div>
+        <p class="hint" id="join-msg"></p>
+        <div class="scan-result" id="scan-result" hidden></div>
       </div>
-      <div class="scan-result" id="scan-result" hidden></div>
+      <a id="btn-connect">连 接</a>
     </div>
   </section>
 
   <!-- ========== 对局 ========== -->
   <section id="screen-game" class="screen">
     <div class="game-layout">
-      <div class="board-area">
-        <svg id="board" viewBox="0 0 516 572" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="chess-box">
+        <canvas id="board" width="523" height="580"></canvas>
+        <div class="bn_box">
+          <div id="actions-play">
+            <input type="button" id="btn-undo" value="悔　棋">
+            <input type="button" id="btn-draw" value="和　棋">
+            <input type="button" id="btn-resign" value="认　输">
+            <input type="button" id="btn-leave" value="离　开">
+          </div>
+          <div id="actions-over" hidden>
+            <input type="button" id="btn-play-again" value="再来一局">
+            <input type="button" id="btn-home" value="返回首页">
+          </div>
+          <div id="actions-spectate" hidden>
+            <input type="button" id="btn-spectate-leave" value="离开观战">
+          </div>
+        </div>
       </div>
       <aside class="panel">
         <div class="player-row" id="p-top">
@@ -79,26 +104,13 @@
         </div>
         <div class="status-box" id="status-box">准备开始</div>
         <div class="req-hint" id="req-hint" hidden></div>
-        <div class="history-box">
+        <div class="panel-box">
           <div class="box-title">棋谱</div>
           <div class="move-list" id="move-list">尚未走子</div>
         </div>
-        <div class="captured-box">
+        <div class="panel-box">
           <div class="cap-row"><span class="cap-label">红方吃子</span><span class="cap-list" id="cap-red-list">—</span></div>
           <div class="cap-row"><span class="cap-label">黑方吃子</span><span class="cap-list" id="cap-black-list">—</span></div>
-        </div>
-        <div class="actions" id="actions-play">
-          <button class="btn small" id="btn-resign">认输</button>
-          <button class="btn small" id="btn-draw">和棋</button>
-          <button class="btn small" id="btn-undo">悔棋</button>
-          <button class="btn small danger" id="btn-leave">离开</button>
-        </div>
-        <div class="actions" id="actions-over" hidden>
-          <button class="btn small primary" id="btn-play-again">再来一局</button>
-          <button class="btn small" id="btn-home">返回首页</button>
-        </div>
-        <div class="actions" id="actions-spectate" hidden>
-          <button class="btn small danger" id="btn-spectate-leave">离开观战</button>
         </div>
         <div class="role-hint" id="role-hint"></div>
       </aside>

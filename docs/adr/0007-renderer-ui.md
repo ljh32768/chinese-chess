@@ -1,9 +1,9 @@
 # ADR-0007：渲染层模块规格（src/renderer/）
 
-- 状态：已接受（记录现状实现）
-- 日期：2026-10-03
-- 关联入口：首页、主机等待页（含地址复制）、加入页、对局页、结束结果卡、断线提示与宽限重连、视角翻转、悬停反馈、快捷键、心跳
-- 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0005 主机服务](./0005-host-server.md)
+- 状态：已接受（记录现状实现；v1.4 起棋盘改为 Canvas + 图片素材）
+- 日期：2026-10-03（v1.4 视觉改造：2026-10-06）
+- 关联入口：首页（含人机难度子菜单与更换皮肤）、主机等待页（含地址复制）、加入页、对局页、结束结果卡、断线提示与宽限重连、视角翻转、悬停反馈、快捷键、心跳、音效
+- 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0009 扩展](./0009-c-d-extensions.md)
 
 ---
 
@@ -17,8 +17,15 @@
 
 - 页面为单页多屏（screen-home / screen-host / screen-join / screen-game），
   以 CSS 类 `active` 切换，不用路由。
-- 棋盘用 **SVG 动态渲染**（字符串拼装 `innerHTML`），不引入框架与外部素材。
-- 文件职责分离：`app.ts` 流程与交互、`board.ts` 纯渲染与坐标换算、`net.ts` 连接与心跳。
+- 视觉与素材对齐参考项目 [Reference/Chess](../../Reference/Chess)（MIT，许可随素材一起分发：
+  [assets/LICENSE-ReferenceChess.txt](../../src/renderer/assets/LICENSE-ReferenceChess.txt)）：
+  木质挂板菜单、金框按钮、木纹棋盘底图、图片棋子、提示点、落点框与点击/选子音效。
+- 棋盘用 **Canvas + 图片素材**渲染（`drawImage`），不引入框架；画布内部尺寸固定为皮肤尺寸，
+  显示尺寸由 CSS 响应式缩放（点击位置按显示比例换算回画布坐标）。
+- 皮肤三套（`stype1/2/3`，几何参数与素材目录与参考项目一致），首页「更换皮肤」按
+  `stype1 → stype2 → stype3` 循环切换，偏好写入 `localStorage`，同时对局页与页面背景（`bg.jpg`）一起换。
+- 文件职责分离：`app.ts` 流程与交互、`board.ts` 纯渲染/绘制计划与坐标换算、
+  `sound.ts` 音效、`net.ts` 连接与心跳。
 - 客户端本地状态对象 `S` 只保存「用于渲染的镜像」，不参与任何权威判定。
 - 黑方视角通过坐标翻转（`flip`）实现，逻辑坐标与视图坐标显式互转。
 - 对局结束不使用全屏遮罩：结果卡与结束操作放在侧栏，棋盘保持完整可见（终局最需要复盘棋盘）。
@@ -30,10 +37,10 @@
 
 | 屏 | id | 元素与入口 |
 |---|---|---|
-| 首页 | `screen-home` | 「创建对局」`btn-create`、「人机对战」`btn-create-ai`、「加入对局」`btn-show-join`、本机地址提示 `home-hint` |
-| 主机等待 | `screen-host` | 地址大字显示 `host-ip`、复制地址 `btn-copy-ip`（非安全上下文降级）、等待文案 `host-wait`、取消 `btn-cancel-host` |
-| 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`、返回 `btn-join-back`、错误提示 `join-msg` |
-| 对局 | `screen-game` | SVG 棋盘 `board`、双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、棋谱 `move-list`、吃子 `cap-red-list`/`cap-black-list`、三组操作 `actions-play`（`btn-resign/btn-draw/btn-undo/btn-leave`）、`actions-over`（`btn-play-again/btn-home`）、`actions-spectate`（`btn-spectate-leave`）、角色提示 `role-hint` |
+| 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「更换皮肤」`btn-skin`；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`）；本机地址提示 `home-hint` |
+| 主机等待 | `screen-host` | 地址大字显示 `host-ip`、复制地址 `btn-copy-ip`（非安全上下文降级）、等待文案 `host-wait`、取消 `btn-cancel-host`（素材返回箭头） |
+| 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`、返回 `btn-join-back`、提示 `join-msg` |
+| 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、棋谱 `move-list`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint` |
 | 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；仅用于和棋/重开请求、认输确认、对手离开与断线提示，**不用于对局结束** |
 | 轻提示 | `toast` | 1.8s 自动消失 |
 
@@ -53,6 +60,8 @@
 | `deadline` | 本回合截止时间（计时读秒倒计时显示）；null 表示不限时 |
 | `spectator` | 观战模式：只读渲染、隐藏对局操作、双方名称不带「你/对手」 |
 | `aiMode` | 本机创建的人机对战（AI 执黑）：角色提示显示「人机对战 · AI 执黑」 |
+| `skin` | 当前皮肤（`stype1/2/3`），来自 `localStorage`（键 `lanschess-skin`），不可用时回退 `stype2` |
+| `hover` | 鼠标悬停的交叉点（仅用于预高亮，非规则判定；快照同步与离开棋盘时清空） |
 
 ### 3.3 页面流转
 
@@ -84,28 +93,43 @@
 
 `applySnapshot` 会同时清空 `selected` / `moves` / `pending` / `oppAway`，保证任何全量同步后回到干净状态。
 
-### 3.5 棋盘渲染规格（board.ts）
+### 3.5 棋盘渲染规格（board.ts，Canvas + 素材）
 
-| 常量 | 值 | 说明 |
+皮肤几何参数（与参考项目 `com.stype` 完全一致；`discX/discY/disc` 为实测素材内圆盘偏移与直径，
+仅用于视觉中心与点击命中）：
+
+| 皮肤 | 画布 | 格距 | 贴图起点 | 圆盘偏移 | 圆盘直径 | 素材目录 |
+|---|---|---|---|---|---|---|
+| `stype1` 经典小盘 | 325×403 | 35 / 36 | 5 / 19 | 18 / 17 | 27 | `assets/img/stype_1/` |
+| `stype2` 木质大盘（默认） | 523×580 | 57 / 57 | 3 / 5 | 27.5 / 24 | 47 | `assets/img/stype_2/` |
+| `stype3` 雅致棋盘 | 530×567 | 57 / 57 | -2 / 0 | 23.5 / 23.5 | 40 | `assets/img/stype_3/` |
+
+绘制计划 `computeDrawList(view, skin)`（纯数据，可单测）：
+
+| 顺序 | 元素 | 画法 |
 |---|---|---|
-| `CELL` | 56 | 格距 |
-| `PAD` | 34 | 边距 |
-| `R` | 24 | 棋子半径 |
-| `viewBox` | `0 0 516 572` | 8×CELL+2PAD × 9×CELL+2PAD |
+| 1 | 棋盘底图 | `bg.png` 贴于 (0,0)，画布尺寸即皮肤尺寸（与参考项目一致，超出部分自然裁切） |
+| 2 | 上一步 | 起点/终点各贴一张落点框 `r_box.png`（红色四角框） |
+| 3 | 当前选中 | 落点框 + 被选中棋子压暗到 `alpha 0.75`（参考项目做法） |
+| 4 | 合法落点 | 空位贴提示点 `dot.png`（参考项目固定 +10 偏移）；可吃子改画空心红环（本项目增强） |
+| 5 | 棋子 | `${红/黑}_${车马相仕帅炮兵→c m x s j p z}` 贴图，坐标为 `space*坐标 + pointStart` |
+| 6 | 将军警示 | 被将军一方将帅加红色脉冲环（半径 `disc/2 + 6`，透明度随时间正弦变化，100ms 重绘一帧） |
+| 7 | 悬停预高亮 | 本方可操作时，己方棋子 / 合法落点画金色环（半径 `disc/2 + 3` / 13） |
 
-| 元素 | 画法 |
+坐标换算：
+- 视觉中心 `cellCenter` = 贴图起点 + 素材圆盘偏移；
+- `pickCell(px, py, skin, flip)` 以视觉中心四舍五入取最近交叉点，行/列越界或距离超过 `0.75×spaceX` 返回 null；
+- `canvasPoint(canvas, clientX, clientY, skin)` 按画布 CSS 显示尺寸等比换算回画布内部坐标（响应式缩放后点击仍准确）；
+- 视角翻转 `toView/toLogic`：黑方视角 `[9-r, 8-c]`（底图不翻转，棋子/落点按翻转后坐标贴图）。
+
+### 3.5.1 皮肤与音效（v1.4）
+
+| 项 | 规格 |
 |---|---|
-| 棋盘线 | 10 条横线 + 9 条竖线（中间列在楚河汉界处断开）+ 九宫斜线 + 外框 |
-| 文字 | 「楚河」「汉界」 |
-| 上一步 | 金色双圆环（from/to） |
-| 合法落点 | 空点=绿色实心小圆（`mv mv-dot`）；可吃子=绿色空心环（`mv mv-cap`） |
-| 棋子 | 圆盘 + 内圈 + 汉字（帅仕相马车炮兵 / 将士象马车炮卒），红黑配色；`interactiveSide` 一方的棋子带 `hoverable` 类与悬停环（`ring`，默认透明） |
-| 选中 | 金色高亮环 |
-| 将军/将死警示 | 被将军（含将死）一方的将/帅加红色脉冲环（`checkKing`，CSS `checkPulse`） |
-| 视角翻转 | `toView/toLogic`：黑方视角 `[9-r, 8-c]` |
-
-坐标换算：`pickCell` 将点击位置四舍五入到最近交叉点，超过 `0.52×CELL` 判定为无效点击；
-`svgPoint` 处理 `preserveAspectRatio: meet` 下的 letterbox 偏移。
+| 皮肤切换 | 首页「更换皮肤」→ `nextSkin` 循环 `stype1 → stype2 → stype3`；切换时套用页面背景 `bg.jpg`、按需加载该皮肤素材并重绘；对局进行中禁止切换（toast 提示）；偏好写入 `localStorage` |
+| 素材加载 | `loadSkinImages(skin)` 预加载 `bg / dot / box / 14 枚棋子`，按皮肤缓存（同一皮肤只加载一次）；加载完成补一次重绘，缺图静默跳过 |
+| 音效 | `sound.ts`：选子 `select.wav`、走子（收到 `move_applied`）`click.wav`；播放失败静默忽略（自动播放策略） |
+| 服务器 | 静态资源需按 MIME 下发：`.png / .jpg / .wav` 已加入主机服务 MIME 白名单 |
 
 ### 3.6 走子交互（app.ts `onCell`）
 
@@ -123,8 +147,8 @@
 
 | 项 | 规格 |
 |---|---|
-| 悬停预高亮 | `render()` 在「对局中且轮到自己」时传入 `interactiveSide`；己方棋子带 `hoverable`，CSS `:hover` 显示金色环；合法落点 `mv-dot` / `mv-cap` 悬停放大/加粗 |
-| 光标 | `#board` 默认光标；仅 `.piece.hoverable`、`.mv-dot`、`.mv-cap` 为手型。触摸设备无 hover，不受影响 |
+| 悬停预高亮 | `render()` 在「对局中且轮到自己」时传入 `interactiveSide`；`mousemove` 命中交叉点后写入 `S.hover` 并重绘，绘制计划对己方棋子 / 合法落点追加金色环 |
+| 光标 | 悬停在可选中棋子或合法落点上时 `canvas.style.cursor = 'pointer'`，其余为默认；`mouseleave` 清空悬停；触摸设备不触发 mousemove，不受影响 |
 | ESC | 有弹层时关闭弹层；否则调用 `clearSelection()` 取消棋盘选中 |
 | 右键 | 棋盘 `contextmenu` 阻止默认菜单并取消选中 |
 | 遮罩点击 | 点击 `modal` 遮罩空白处关闭弹层（等效「取消」） |
@@ -142,7 +166,7 @@
 
 ### 3.9 明确不做
 
-动画/音效/皮肤、移动端专门适配（仅基础 viewport）、断线自动重连（宽限期内手动重新加入即可恢复原局）、
+落子补间动画、移动端专门适配（仅基础 viewport + 媒体查询）、断线自动重连（宽限期内手动重新加入即可恢复原局）、
 聊天、棋谱导出/回放播放器。
 
 ## 4. 代码入口
@@ -150,30 +174,35 @@
 | 内容 | 位置 |
 |---|---|
 | 页面结构 / 控件 id | [index.html](../../src/renderer/index.html) |
-| 镜像状态 `S` | [app.ts](../../src/renderer/app.ts#L25-L49) |
-| 页面切换/弹层/toast | [app.ts](../../src/renderer/app.ts#L53-L95) |
-| 消息处理（断线重连/悔棋分支） | [app.ts `handleMessage()`](../../src/renderer/app.ts#L246-L371) |
-| 棋谱与吃子渲染 | [app.ts `renderNotation()`](../../src/renderer/app.ts#L204-L244) |
-| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts#L139-L202) |
-| 创建/人机/复制地址/搜索/加入/离开 | [app.ts](../../src/renderer/app.ts#L449-L628) |
-| 走子交互 | [app.ts `onCell()`](../../src/renderer/app.ts#L681-L713) |
-| 取消选中与快捷键 | [app.ts `clearSelection()`](../../src/renderer/app.ts#L672-L677)、[app.ts `bindEvents()`](../../src/renderer/app.ts#L715-L765) |
-| 棋盘标记生成 | [board.ts `boardMarkup()`](../../src/renderer/board.ts#L72-L154) |
-| 棋盘挂载 / 坐标与点击 | [board.ts `renderBoard()`](../../src/renderer/board.ts#L157-L159)、[board.ts](../../src/renderer/board.ts#L23-L62) |
+| 镜像状态 `S` | [app.ts `S`](../../src/renderer/app.ts) |
+| 页面切换/弹层/toast | [app.ts `show()` / `showModal()` / `toast()`](../../src/renderer/app.ts) |
+| 消息处理（断线重连/悔棋分支） | [app.ts `handleMessage()`](../../src/renderer/app.ts) |
+| 棋谱与吃子渲染 | [app.ts `renderNotation()`](../../src/renderer/app.ts) |
+| 结束结果卡与操作组切换 | [app.ts `updatePanel()`](../../src/renderer/app.ts) |
+| 皮肤/主题/素材预加载/脉冲重绘 | [app.ts `switchSkin()` / `applyTheme()` / `ensureSkinImages()` / `syncPulse()`](../../src/renderer/app.ts) |
+| 创建/人机/复制地址/搜索/加入/离开 | [app.ts](../../src/renderer/app.ts) |
+| 走子交互与悬停 | [app.ts `onCell()` / `bindEvents()`](../../src/renderer/app.ts) |
+| 棋盘绘制计划与执行 | [board.ts `computeDrawList()` / `renderBoard()`](../../src/renderer/board.ts) |
+| 皮肤定义与素材路径 | [board.ts `SKINS` / `assetUrl()` / `loadSkinImages()`](../../src/renderer/board.ts) |
+| 坐标与点击命中 | [board.ts `cellCenter()` / `pickCell()` / `canvasPoint()` / `toView()`](../../src/renderer/board.ts) |
+| 音效 | [sound.ts](../../src/renderer/sound.ts) |
+| 素材与许可 | [assets/](../../src/renderer/assets/)（含 `LICENSE-ReferenceChess.txt`） |
 | 局域网主机发现 | [discover.ts](../../src/renderer/discover.ts) |
-| WebSocket 客户端 | [net.ts](../../src/renderer/net.ts#L38-L107) |
-| 心跳 | [net.ts `startPing()`](../../src/renderer/net.ts#L124-L137) |
+| WebSocket 客户端 / 心跳 | [net.ts](../../src/renderer/net.ts) |
 
-> 观战/悔棋/人机对战/计时读秒/主机搜索的完整规格见 [ADR-0009](./0009-c-d-extensions.md)。
+> 观战/悔棋/人机对战（含难度参数）/计时读秒/主机搜索的完整规格见 [ADR-0009](./0009-c-d-extensions.md)。
 
 ## 5. 验收标准
 
 - 首页 → 创建 → 等待 → 开局 → 走子 → 终局结果卡（棋盘保持可见）→ 再来一局/返回首页，全流程无死路。
-- 加入者执黑时棋盘自动上下翻转，点击命中与显示一致。
+- 首页菜单、加入页、等待页均为参考项目木质挂板风格；对局页为木纹棋盘 + 图片棋子 + 棋盘下方按钮条 + 侧栏信息。
+- 三套皮肤可循环切换（页面背景与棋盘同时更换、偏好持久化），切换后点击命中仍准确。
+- 加入者执黑时棋盘自动翻转，点击命中与显示一致。
 - 主机广播的任何快照都能正确渲染（包括 `check` 提示与终局状态）。
 - 对方断线/主机断线均有明确弹层提示，不白屏、不崩溃。
 - 对手意外断线：状态框显示等待重连、棋盘冻结；宽限内重连后弹层自动关闭并恢复对局；
   宽限超时自动回到等待页（弹层不残留）。
 - 等待页地址可一键复制（非安全上下文降级为选中文本 + `execCommand`）。
 - 悬停己方棋子/合法落点有预高亮且光标为手型；ESC / 右键可取消选中，ESC / 遮罩可关闭弹层。
-- 请求发出后侧栏显示等待状态；矮窗口下内容不被裁剪、可滚动。
+- 选子/走子有音效；素材（png/jpg/wav）经主机服务按正确 MIME 下发，无 404。
+- 请求发出后侧栏显示等待状态；矮窗口下棋盘按高度等比缩小、内容不被裁剪。
