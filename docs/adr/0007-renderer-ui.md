@@ -96,7 +96,8 @@
 | `opponent_away` | 置 `oppAway`：状态框显示「对手已断开，等待重连…」，棋盘冻结；弹层「对手已断开」，主机可选「等待新对手」（发 `wait_new_opponent`） |
 | `opponent_left` | 对局中：弹「对手已离开」；否则 toast |
 | `error` | toast 服务端错误消息（如「尚未加入对局」），不再静默丢弃 |
-| `guess_request` | 客方：弹层「猜先」提供「猜单 / 猜双」（回 `guess`）；主机：等待文案改为「进入猜先：等待加入者猜单双…」 |
+| `guess_request` | 猜先第二步：客方弹层「猜先」提供「猜单 / 猜双」（回 `guess`）；主机：等待文案改为「进入猜先：等待加入者猜单双…」 |
+| `grasp_request` | 猜先第一步：主机弹层「猜先」提供「抓单 / 抓双」（回 `grasp`），等待文案改为「猜先：请选择抓单或抓双…」；客方不会收到该消息 |
 | `first_result` | 关闭猜先弹层；`random` / `guess` 用 toast 提示席位结果（含猜先选择、实际结果与归属） |
 
 `applySnapshot` 会同时清空 `selected` / `moves` / `pending` / `oppAway`，保证任何全量同步后回到干净状态。

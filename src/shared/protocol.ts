@@ -32,6 +32,8 @@ export type ClientMessage =
   | { type: 'wait_new_opponent' }
   /** 主机选择先手（红方）归属方式；仅等待阶段有效 */
   | { type: 'choose_first'; mode: FirstMode }
+  /** 主机「抓子」（猜先第一步）：抓单 / 抓双，作为隐藏结果 */
+  | { type: 'grasp'; choice: GuessChoice }
   /** 客方猜先应答（猜单 / 猜双） */
   | { type: 'guess'; choice: GuessChoice }
   /** 离开对局 */
@@ -53,7 +55,9 @@ export type ServerMessage =
     }
   /** 对手已加入，对局开始（side 为本连接最终阵营，观战者为 null） */
   | { type: 'start'; state: GameSnapshot; side: Side | null }
-  /** 猜先开始：主机已「抓子」，请客方猜单双 */
+  /** 猜先第一步：请主机抓单 / 抓双（仅主机可见） */
+  | { type: 'grasp_request' }
+  /** 猜先第二步：主机已抓子，请客方猜单双 */
   | { type: 'guess_request' }
   /** 席位与先手结果（随机 / 猜先开赛前广播） */
   | { type: 'first_result'; mode: FirstMode; hostSide: Side; guess: GuessResult | null }

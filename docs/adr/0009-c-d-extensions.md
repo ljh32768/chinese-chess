@@ -103,12 +103,13 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 项 | 规格 |
 |---|---|
 | 选择入口 | 主机等待页 `side-opts`：「随机黑红」`random`、「猜先」`guess`、「黑」`b`、「红」`r`；仅等待阶段可改（对局中回 `error: 对局进行中，无法更改先手方式`） |
-| 席位确定 | 双方到齐后由 `beginFirst()` 统一分配：`r`/`b` 固定；`random` 服务端随机；`guess` 由客方猜单双决定 |
-| 猜先规则 | 服务端随机「抓子」（单 / 双）→ 双方收到 `guess_request` → 客方回 `guess{choice}` → **猜中者执红**；结果由 `first_result{guess{choice,actual,guestWon}}` 广播 |
-| 开放出错 | 非主机 `choose_first` → `只有主机可以选择先手方式`；非客方 `guess` → `只有加入者可以猜先`；非猜先阶段 `guess` → `当前不在猜先阶段` |
+| 席位确定 | 双方到齐后由 `beginFirst()` 统一分配：`r`/`b` 固定；`random` 服务端随机；`guess` 由「主机抓子 + 客方猜」决定 |
+| 猜先规则 | **主机自己抓子**：双方到齐后主机收到 `grasp_request`，弹层选择「抓单 / 抓双」（`grasp`）→ 双方收到 `guess_request` → 客方回 `guess{choice}` → **猜中者执红**；结果由 `first_result{guess{choice,actual,guestWon}}` 广播（`actual` = 主机抓到的结果） |
+| 猜先进度 | 主机等待页文案：请选择抓单或抓双… → 等待加入者猜单双…；客方重连时补发 `guess_request`，不重复请主机抓子 |
+| 开放出错 | 非主机 `choose_first` → `只有主机可以选择先手方式`；非主机 `grasp` → `只有主机可以抓子`；非抓子阶段 `grasp` → `当前不在抓子阶段`；非客方 `guess` → `只有加入者可以猜先`；未抓子或已开局时 `guess` → `当前不在猜先阶段` |
 | 阵营下发 | `start` 逐连接携带 `side`（观战者 null）；`welcome.side` 在 `random`/`guess` 下是临时占位 |
 | 路由 | `connOf(side)` 按阵营找连接（主机不一定执红），`sendTo` / `broadcast` / `sendToOpponent` 均与席位无关 |
-| 客户端提示 | 猜先弹层（猜单 / 猜双）；结果用 toast 提示（如「猜先：你猜「单」实际「双」→ 主机执红」） |
+| 客户端提示 | 主机弹层「抓单 / 抓双」（`grasp_request`）→ 客方弹层「猜单 / 猜双」（`guess_request`）；结果用 toast 提示（如「猜先：主机抓「双」，加入者猜「单」→ 主机执红」） |
 
 ### 3.10 对局回顾与 AI 推荐（v1.5）
 

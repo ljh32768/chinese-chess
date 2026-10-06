@@ -150,7 +150,9 @@ export class HostServer {
   private firstMode: FirstMode = 'r';
   /** 主机席位阵营（随机 / 猜先时开赛前才确定） */
   private hostSide: Side = 'r';
-  /** 猜先进行中：主机「抓子」的隐藏结果 */
+  /** 猜先阶段：'grasp' 等主机抓子 / 'guess' 等客方猜 / null 未进行 */
+  private guessStage: 'grasp' | 'guess' | null = null;
+  /** 主机抓到的隐藏结果（单 / 双） */
   private pendingGuess: GuessChoice | null = null;
   /** 本局猜先明细（写入对局记录） */
   private lastGuess: GuessResult | null = null;
@@ -530,7 +532,8 @@ export class HostServer {
         }
         this.firstMode = msg.mode;
         if (msg.mode === 'r' || msg.mode === 'b') this.hostSide = msg.mode;
-        this.pendingGuess = null; // 更换方式时取消进行中的猜先
+        this.guessStage = null; // 更换方式时取消进行中的猜先
+        this.pendingGuess = null;
         logInfo(`主机选择先手方式：${FIRST_MODE_LABEL[msg.mode]}`);
         this.maybeStart();
         return;
@@ -540,7 +543,7 @@ export class HostServer {
         if (conn.role !== 'guest') {
           return this.send(conn.ws, { type: 'error', message: '只有加入者可以猜先' });
         }
-        if (this.pendingGuess === null || this.game.status === 'playing') {
+        if (this.guessStage !== 'guess' || this.pendingGuess === null || this.game.status === 'playing') {
           return this.send(conn.ws, { type: 'error', message: '当前不在猜先阶段' });
         }
         if (!isGuessChoice(msg.choice)) {
@@ -550,6 +553,23 @@ export class HostServer {
         const guestWon = msg.choice === actual;
         logInfo(`猜先：加入者猜${msg.choice === 'odd' ? '单' : '双'}，实际${actual === 'odd' ? '单' : '双'}`);
         this.beginFirst('guess', guestWon ? 'b' : 'r', { choice: msg.choice, actual, guestWon });
+        return;
+      }
+      case 'grasp': {
+        // 猜先第一步：主机自己抓单 / 抓双（不再由程序随机抓）
+        if (conn.role !== 'host') {
+          return this.send(conn.ws, { type: 'error', message: '只有主机可以抓子' });
+        }
+        if (this.guessStage !== 'grasp') {
+          return this.send(conn.ws, { type: 'error', message: '当前不在抓子阶段' });
+        }
+        if (!isGuessChoice(msg.choice)) {
+          return this.send(conn.ws, { type: 'error', message: '抓子选择非法' });
+        }
+        this.pendingGuess = msg.choice;
+        this.guessStage = 'guess';
+        logInfo(`猜先：主机抓${msg.choice === 'odd' ? '单' : '双'}，等待加入者猜单双`);
+        this.sendToSeats({ type: 'guess_request' });
         return;
       }
       case 'wait_new_opponent': {
@@ -813,11 +833,15 @@ export class HostServer {
         return;
       }
       case 'guess': {
-        if (this.pendingGuess) return; // 已发出猜先请求，等待客方应答
-        this.pendingGuess = Math.random() < 0.5 ? 'odd' : 'even';
-        logInfo('猜先开始：等待加入者猜单双');
-        // 双方都收到：客方弹层应答，主机在等待页看到进度
-        this.sendToSeats({ type: 'guess_request' });
+        if (this.guessStage === 'grasp') return; // 已请主机抓子，等待主机应答
+        if (this.guessStage === 'guess') {
+          // 已抓子：等客方猜（客方重连时补发请求）
+          this.sendToSeats({ type: 'guess_request' });
+          return;
+        }
+        this.guessStage = 'grasp';
+        logInfo('猜先开始：等待主机抓单 / 抓双');
+        if (this.hostConn) this.send(this.hostConn.ws, { type: 'grasp_request' });
         return;
       }
       default: {
@@ -831,6 +855,7 @@ export class HostServer {
   private beginFirst(mode: FirstMode, hostSide: Side, guess: GuessResult | null): void {
     this.firstMode = mode;
     this.hostSide = hostSide;
+    this.guessStage = null;
     this.pendingGuess = null;
     this.lastGuess = guess;
     if (this.hostConn) this.hostConn.side = hostSide;
@@ -909,6 +934,7 @@ export class HostServer {
   /** 放弃一局（离开 / 宽限超时）：清空进行中记录与猜先状态，避免串到下一局 */
   private abandonGame(): void {
     this.currentRecord = null;
+    this.guessStage = null;
     this.pendingGuess = null;
     this.lastGuess = null;
   }

@@ -592,36 +592,63 @@ describe('主机服务 · 先手方式（红黑 / 随机 / 猜先）', () => {
     expect((await redConn.waitType('move_applied')).turn).toBe('b');
   });
 
-  it('猜先：客方猜单双，猜中者执红，并要求双方阵营与结果一致', async () => {
+  it('猜先：主机抓单双、客方猜，猜中者执红（双方阵营与结果一致）', async () => {
     const { host } = await setupWaiting('guess');
     const guest = await connect(server!.address.port, 'guest');
     await guest.waitType('welcome');
-    await guest.waitType('guess_request'); // 加入后即进入猜先阶段
 
-    // 主机不能替客方猜先
-    host.send({ type: 'guess', choice: 'odd' });
-    expect((await host.waitType('error')).message).toBe('只有加入者可以猜先');
+    // 第一步：主机收到「抓子」请求（客方不该收到）
+    await host.waitType('grasp_request');
+    await guest.expectNo('grasp_request');
+
+    // 抓子前：客方猜先或抢着抓子都被拒
+    guest.send({ type: 'guess', choice: 'odd' });
+    expect((await guest.waitType('error')).message).toBe('当前不在猜先阶段');
+    guest.send({ type: 'grasp', choice: 'odd' });
+    expect((await guest.waitType('error')).message).toBe('只有主机可以抓子');
+
+    // 主机抓「单」，双方收到猜先请求
+    host.send({ type: 'grasp', choice: 'odd' });
+    await guest.waitType('guess_request');
+    await host.waitType('guess_request');
+
+    // 客方猜「单」→ 猜中 → 客方执红
+    guest.send({ type: 'guess', choice: 'odd' });
+    const result = await guest.waitType('first_result');
+    expect(result.mode).toBe('guess');
+    expect(result.guess).toEqual({ choice: 'odd', actual: 'odd', guestWon: true });
+    expect(result.hostSide).toBe('b');
+
+    expect((await guest.waitType('start')).side).toBe('r');
+    expect((await host.waitType('start')).side).toBe('b');
+
+    // 红方（客方）先行，主机（黑方）抢先走子被拒
+    host.send({ type: 'move', from: [3, 0], to: [4, 0] });
+    await host.waitType('move_rejected');
+    guest.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await guest.waitType('move_applied')).turn).toBe('b');
+  });
+
+  it('猜先未猜中：主机执红；非主机不能改先手方式', async () => {
+    const { host } = await setupWaiting('guess');
+    const guest = await connect(server!.address.port, 'guest');
+    await guest.waitType('welcome');
+    await host.waitType('grasp_request');
 
     // 非主机不能选择先手方式
     guest.send({ type: 'choose_first', mode: 'r' });
     expect((await guest.waitType('error')).message).toBe('只有主机可以选择先手方式');
 
+    // 主机抓「双」，客方猜「单」→ 未猜中 → 主机执红
+    host.send({ type: 'grasp', choice: 'even' });
+    await guest.waitType('guess_request');
     guest.send({ type: 'guess', choice: 'odd' });
 
-    const result = await guest.waitType('first_result');
-    expect(result.mode).toBe('guess');
-    expect(result.guess?.choice).toBe('odd');
-    expect(result.guess?.guestWon).toBe(result.guess?.actual === 'odd');
-    expect(result.hostSide).toBe(result.guess?.guestWon ? 'b' : 'r');
-
-    const guestSide = (await guest.waitType('start')).side;
-    const hostSide = (await host.waitType('start')).side;
-    expect(guestSide).toBe(result.hostSide === 'r' ? 'b' : 'r');
-    expect(hostSide).toBe(result.hostSide);
-    // 猜中者执红：红方先行
-    const redConn = result.hostSide === 'r' ? host : guest;
-    redConn.send({ type: 'move', from: [9, 0], to: [8, 0] });
-    expect((await redConn.waitType('move_applied')).turn).toBe('b');
+    const result = await host.waitType('first_result');
+    expect(result.guess).toEqual({ choice: 'odd', actual: 'even', guestWon: false });
+    expect(result.hostSide).toBe('r');
+    expect((await host.waitType('start')).side).toBe('r');
+    expect((await guest.waitType('start')).side).toBe('b');
   });
 
   it('对局进行中不允许更改先手方式', async () => {

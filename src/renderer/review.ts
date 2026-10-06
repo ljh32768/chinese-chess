@@ -200,7 +200,7 @@ export function initReview(deps: ReviewDeps): ReviewController {
     if (!record) return;
     const line = recordLine(record);
     const guess = record.guess
-      ? `<div>猜先：${SEAT_LABEL.guest}猜${record.guess.choice === 'odd' ? '单' : '双'}，实际${record.guess.actual === 'odd' ? '单' : '双'}（${record.guess.guestWon ? '猜中' : '未中'}）</div>`
+      ? `<div>猜先：主机抓「${record.guess.actual === 'odd' ? '单' : '双'}」，加入者猜「${record.guess.choice === 'odd' ? '单' : '双'}」（${record.guess.guestWon ? '猜中' : '未中'}）</div>`
       : '';
     $('replay-info').innerHTML =
       `<div>${line.vs}</div><div>取先方式：${line.first}</div>` +

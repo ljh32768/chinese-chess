@@ -329,8 +329,20 @@ function handleMessage(msg: ServerMessage): void {
       enterGame();
       toast('对局开始，红方先行');
       break;
+    case 'grasp_request':
+      // 猜先第一步：主机自己抓单 / 抓双
+      $('host-wait').textContent = '猜先：请选择抓单或抓双…';
+      showModal({
+        title: '猜 先',
+        sub: '请抓子（藏好，让对方猜单双）',
+        buttons: [
+          { label: '抓 单', primary: true, onClick: () => net?.send({ type: 'grasp', choice: 'odd' }) },
+          { label: '抓 双', onClick: () => net?.send({ type: 'grasp', choice: 'even' }) },
+        ],
+      });
+      break;
     case 'guess_request':
-      // 猜先：客方弹层应答，主机在等待页看到进度
+      // 猜先第二步：客方弹层应答，主机在等待页看到进度
       if (S.role === 'host') {
         $('host-wait').textContent = '进入猜先：等待加入者猜单双…';
       } else {
@@ -353,7 +365,7 @@ function handleMessage(msg: ServerMessage): void {
       if (msg.mode === 'guess' && msg.guess) {
         const cn = (c: GuessChoice) => (c === 'odd' ? '单' : '双');
         toast(
-          `猜先：${S.role === 'guest' ? '你' : '对方'}猜「${cn(msg.guess.choice)}」实际「${cn(msg.guess.actual)}」→ 主机执${
+          `猜先：主机抓「${cn(msg.guess.actual)}」，${S.role === 'guest' ? '你' : '对方'}猜「${cn(msg.guess.choice)}」→ 主机执${
             hostRed ? '红' : '黑'
           }`,
         );
@@ -583,7 +595,7 @@ const FIRST_HINT: Record<FirstMode, string> = {
   r: '先手（红方）：主机执红先行',
   b: '先手（红方）：主机执黑，加入者执红先行',
   random: '先手（红方）：开局时随机分配红黑',
-  guess: '先手（红方）：加入者猜单双，猜中者执红',
+  guess: '先手（红方）：主机抓单双、加入者猜，猜中者执红',
 };
 
 /** 等待页：渲染先手（红方）方式的选择状态 */

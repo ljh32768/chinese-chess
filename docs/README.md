@@ -55,7 +55,7 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
 
 1. 主机运行 `npm start`（或 `npm run build && npm run host`），在首页点击「创建对局」，页面显示本机地址，如 `192.168.1.42:7777`。
 2. 对手在同一局域网的浏览器中打开 `http://192.168.1.42:7777/`，点击「加入对局」，输入该地址连接（也可点「搜索局域网主机」自动发现）。
-3. 开局前主机可在等待页选择先手方式：红 / 黑 / 随机黑红 / 猜先（猜先由加入者猜单双，猜中者执红）；
+3. 开局前主机可在等待页选择先手方式：红 / 黑 / 随机黑红 / 猜先（猜先由主机抓单双、加入者猜，猜中者执红）；
    双方到齐后自动开局（默认主机执红先行，加入者执黑）。
 4. 单人可点首页「人机对弈」选择难度（菜鸟/中级/高手）后与 AI（执黑）对弈；第三方观众可点「观战」旁观。
 5. 对局结束后可在首页「对局回顾」查看对战列表（红黑方 / 取先方式 / 时间 / 胜负），
@@ -155,7 +155,7 @@ main / cli（进程入口，装配 server 与页面）
 |---|---|---|---|
 | 创建对局 | 首页「创建对局」按钮 | [app.ts `createGame()`](../src/renderer/app.ts) → `POST /api/host/start` → [host-server.ts `setHosting()`](../src/server/host-server.ts)（等待页可选先手方式） | [ADR-0005](./adr/0005-host-server.md) |
 | 先手方式（红/黑/随机/猜先） | 等待页「先手（红方）」四个选项 | [app.ts `chooseFirst()`](../src/renderer/app.ts) → `choose_first` → [host-server.ts `maybeStart()` / `beginFirst()`](../src/server/host-server.ts)（`random` 随机、`guess` 进入猜先） | [ADR-0003](./adr/0003-wire-protocol.md)、[ADR-0009](./adr/0009-c-d-extensions.md) |
-| 猜先应答 | 客方弹层「猜单 / 猜双」 | `guess` → [host-server.ts `beginFirst()`](../src/server/host-server.ts) → 广播 `first_result`（猜中者执红）→ 逐连接 `start{side}` | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 猜先（主机抓、客方猜） | 主机弹层「抓单 / 抓双」→ 客方弹层「猜单 / 猜双」 | `grasp` → `guess` → [host-server.ts `beginFirst()`](../src/server/host-server.ts) → 广播 `first_result`（猜中者执红）→ 逐连接 `start{side}` | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 对局回顾（列表） | 首页「对局回顾」 | [review.ts `open()`](../src/renderer/review.ts) → `GET /api/history`（红黑方 / 取先方式 / 时间 / 胜负） | [ADR-0007](./adr/0007-renderer-ui.md)、[ADR-0009](./adr/0009-c-d-extensions.md) |
 | 复盘（逐步 + AI 推荐） | 回顾列表点击某局 → 「下一步 ▶」/ → 键 | [review.ts](../src/renderer/review.ts) → `GET /api/history/:id`（着法）+ `GET /api/ai/hint?id&index`（[host-server.ts `hintFor()`](../src/server/host-server.ts)） | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 人机对战 | 首页「人机对弈」→ 选难度 →「开始对弈」 | [app.ts `createAiGame()`](../src/renderer/app.ts) → `POST /api/host/start-ai?depth=2|3|4` → [host-server.ts `startAiGame()` / `scheduleAiMove()`](../src/server/host-server.ts) → [ai.ts](../src/server/ai.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
