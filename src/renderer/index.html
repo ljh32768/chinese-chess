@@ -34,29 +34,26 @@
     </div>
   </section>
 
-  <!-- ========== 主机等待（放大版块 + 先手方式选择） ========== -->
+  <!-- ========== 主机等待（版块与挂板内框对齐：实测素材内框 x10..290 / y158..395） ========== -->
   <section id="screen-host" class="screen">
     <div class="menu_box host_box">
       <div class="menu_info wide">
         <div class="menu_fh" id="btn-cancel-host" title="取消"></div>
-        <p class="info-title">等待对手加入</p>
-        <div class="ip-box">
-          <div class="ip-label">本机地址</div>
+        <p class="info-title">等待对手加入<i class="spinner" aria-hidden="true"></i></p>
+        <div class="ip-box" id="ip-box" title="点击复制地址">
+          <div class="ip-label">本机地址（点击复制）</div>
           <div class="ip-value" id="host-ip">—</div>
         </div>
-        <button class="btn small" id="btn-copy-ip">复制地址</button>
         <div class="side_pick">
-          <div class="side_title">先手（红方）</div>
           <div class="side_opts" id="side-opts">
             <button type="button" class="side_opt" data-mode="random">随机黑红</button>
             <button type="button" class="side_opt" data-mode="guess">猜先</button>
             <button type="button" class="side_opt" data-mode="b">黑</button>
             <button type="button" class="side_opt" data-mode="r">红</button>
           </div>
-          <p class="side_hint" id="side-hint">主机执红先行</p>
+          <p class="side_hint" id="side-hint">先手（红方）：主机执红先行</p>
         </div>
-        <div class="spinner"></div>
-        <p class="hint" id="host-wait">请让对方在「加入对局」中输入上方地址</p>
+        <p class="hint" id="host-wait">让对方在「加入对局」中输入上方地址</p>
       </div>
     </div>
   </section>

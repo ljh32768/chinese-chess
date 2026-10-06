@@ -67,21 +67,36 @@ body {
   border-radius: 3px;
 }
 .menu_info .info-title { color: #ffcf7a; letter-spacing: 2px; }
-/* 主机等待页：版块放大并贴合挂板（宽度接近木板内框，木纹底色更整体） */
+/* 主机等待页：版块与挂板内框对齐
+   （实测 init_bg.png：木板内表面 x≈10..290、y≈158..395，外围约 10px 深色边框） */
+.menu_box.host_box {
+  height: auto;
+  padding-top: 158px;
+}
 .menu_info.wide {
-  width: 250px;
-  margin: 6px 0 6px 18px;
-  padding: 12px 14px;
+  width: 280px;
+  height: 237px;
+  margin: 0 0 0 10px;
+  padding: 10px 12px;
+  overflow: hidden;
   background: linear-gradient(180deg, rgba(84, 64, 40, 0.96), rgba(63, 47, 29, 0.96));
   border-color: #8a6b3f;
-  box-shadow: inset 0 0 0 1px rgba(255, 214, 150, 0.18), 0 8px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 150, 0.18);
 }
-.menu_info.wide .ip-value { font-size: 18px; letter-spacing: 1px; }
-.side_pick { margin-top: 10px; }
-.side_title { font-size: 12px; color: #e8c98c; letter-spacing: 2px; }
-.side_opts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 4px; }
+.menu_info.wide .info-title { line-height: 1.5; }
+.menu_info.wide .ip-box {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.menu_info.wide .ip-box:hover { border-color: #c9963c; background: #2f2015; }
+.menu_info.wide .ip-label { font-size: 11px; line-height: 1.4; }
+.menu_info.wide .ip-value { font-size: 18px; line-height: 1.35; letter-spacing: 0.5px; }
+.side_pick { margin-top: 8px; }
+.side_opts { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 3px; }
 .side_opt {
-  padding: 7px 0;
+  padding: 5px 0;
   font: 500 12px/1.4 inherit;
   color: #ffcf7a;
   white-space: nowrap;
@@ -97,7 +112,8 @@ body {
   background: linear-gradient(180deg, #f7e3bd, #e2c288);
   border-color: #8a6b3f;
 }
-.side_hint { margin-top: 5px; font-size: 11px; color: #e8dcc8; }
+.menu_info.wide .side_hint { margin-top: 4px; font-size: 11px; line-height: 1.5; color: #e8dcc8; }
+.menu_info.wide .hint { margin-top: 6px; font-size: 11.5px; line-height: 1.5; }
 .menu_fh {
   float: right;
   width: 14px;
@@ -142,10 +158,13 @@ body {
   color: #ffd98a;
   word-break: break-all;
 }
+/* 等待中的小转圈：内联在标题后，不额外占行高 */
 .spinner {
-  width: 20px;
-  height: 20px;
-  margin: 10px auto 2px;
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-left: 6px;
+  vertical-align: -1px;
   border: 2px solid #6b4f2a;
   border-top-color: #ffcf7a;
   border-radius: 50%;

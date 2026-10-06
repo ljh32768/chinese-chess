@@ -162,7 +162,7 @@ main / cli（进程入口，装配 server 与页面）
 | 更换皮肤 | 首页「更换皮肤」 | [app.ts `switchSkin()`](../src/renderer/app.ts) → [board.ts `nextSkin()` / `loadSkinImages()`](../src/renderer/board.ts)（页面背景同步换 `bg.jpg`，偏好存 `localStorage`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 选子 / 走子音效 | 点击棋子 / 收到走子广播时自动 | [sound.ts](../src/renderer/sound.ts)（`select.wav` / `click.wav`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 显示本机地址 | 主机等待页 | [app.ts `init()`](../src/renderer/app.ts) → `GET /api/host-info` → [host-server.ts `pickLanIp()`](../src/server/host-server.ts#L43-L62) | [ADR-0005](./adr/0005-host-server.md) |
-| 复制主机地址 | 主机等待页「复制地址」 | [app.ts `copyHostAddr()`](../src/renderer/app.ts)（非安全上下文降级 `execCommand`） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 复制主机地址 | 等待页点击地址块（`ip-box`，提示「点击复制」） | [app.ts `copyHostAddr()`](../src/renderer/app.ts)（非安全上下文降级 `execCommand`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 加入对局 | 「加入对局」→ 输入 IP:端口 →「连接」 | [app.ts `doJoin()`](../src/renderer/app.ts) → WS `join(guest)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts) | [ADR-0005](./adr/0005-host-server.md) |
 | 搜索局域网主机 | 加入页「搜索主机」 | [app.ts `scanHosts()`](../src/renderer/app.ts) → [discover.ts](../src/renderer/discover.ts)（WS 探测 + 网段扫描） | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 观战（只读） | 加入页「观战」 | `join(spectator)` → [host-server.ts `handleJoin()`](../src/server/host-server.ts)（spectator 分支）→ [app.ts `openNet()`](../src/renderer/app.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |

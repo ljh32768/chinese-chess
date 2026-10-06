@@ -570,7 +570,7 @@ async function createGame(): Promise<void> {
     S.aiMode = false;
     S.firstMode = 'r'; // 主机服务在新建等待时也会重置为默认
     $('host-ip').textContent = `${info.ip}:${info.port}`;
-    $('host-wait').textContent = '请让对方在「加入对局」中输入上方地址';
+    $('host-wait').textContent = '让对方在「加入对局」中输入上方地址';
     renderSidePick();
     show('screen-host');
     await openNet(`ws://${location.host}/ws`, 'host');
@@ -580,10 +580,10 @@ async function createGame(): Promise<void> {
 }
 
 const FIRST_HINT: Record<FirstMode, string> = {
-  r: '主机执红先行',
-  b: '主机执黑，加入者执红先行',
-  random: '开局时随机分配红黑',
-  guess: '加入者猜单双，猜中者执红',
+  r: '先手（红方）：主机执红先行',
+  b: '先手（红方）：主机执黑，加入者执红先行',
+  random: '先手（红方）：开局时随机分配红黑',
+  guess: '先手（红方）：加入者猜单双，猜中者执红',
 };
 
 /** 等待页：渲染先手（红方）方式的选择状态 */
@@ -599,7 +599,7 @@ function chooseFirst(mode: FirstMode): void {
   if (S.firstMode === mode) return;
   S.firstMode = mode;
   renderSidePick();
-  $('host-wait').textContent = '请让对方在「加入对局」中输入上方地址';
+  $('host-wait').textContent = '让对方在「加入对局」中输入上方地址';
   net?.send({ type: 'choose_first', mode });
 }
 
@@ -915,7 +915,7 @@ function bindEvents(): void {
     btn.addEventListener('click', () => chooseFirst(btn.dataset.mode as FirstMode));
   });
   $('btn-cancel-host').addEventListener('click', () => void cancelHost());
-  $('btn-copy-ip').addEventListener('click', () => void copyHostAddr());
+  $('ip-box').addEventListener('click', () => void copyHostAddr());
   $('btn-connect').addEventListener('click', () => void doJoin());
   $('btn-spectate').addEventListener('click', () => void doJoin(true));
   $('btn-scan').addEventListener('click', () => void scanHosts());

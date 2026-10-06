@@ -38,7 +38,7 @@
 | 屏 | id | 元素与入口 |
 |---|---|---|
 | 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「对局回顾」`btn-history`、「更换皮肤」`btn-skin`（5 个入口铺满挂板按钮区）；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`）；本机地址提示 `home-hint` |
-| 主机等待 | `screen-host` | 放大版块 `menu_info wide`：地址大字显示 `host-ip`、复制地址 `btn-copy-ip`（非安全上下文降级）、先手（红方）方式 `side-opts`（随机黑红 / 猜先 / 黑 / 红，选中态 `.active`）+ 说明 `side-hint`、等待文案 `host-wait`（猜先阶段显示进度）、取消 `btn-cancel-host`（素材返回箭头） |
+| 主机等待 | `screen-host` | 版块与挂板内框对齐（实测 `init_bg.png` 内表面 x≈10..290、y≈158..395，面板 `280×237`）：标题 `info-title`（内含等待转圈 `spinner`）、地址大字显示 `host-ip`（**点击地址块 `ip-box` 即复制**，非安全上下文降级）、先手（红方）方式 `side-opts`（随机黑红 / 猜先 / 黑 / 红，选中态 `.active`）+ 说明 `side-hint`、等待文案 `host-wait`（猜先阶段显示进度）、取消 `btn-cancel-host`（素材返回箭头） |
 | 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`、返回 `btn-join-back`、提示 `join-msg` |
 | 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint`（**棋谱面板已移除，改由「对局回顾」复盘**） |
 | 对局回顾 | `screen-history` | 列表 `history-list`（每行：红黑方 / 取先方式 / 时间 / 胜负，点击进入复盘）、返回 `btn-history-back`、刷新 `btn-history-refresh` |
