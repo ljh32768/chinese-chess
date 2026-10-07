@@ -1115,3 +1115,94 @@ describe('服务器 · 日志与端口回退', () => {
     }
   });
 });
+
+describe('服务器 · 在线玩家与房间邀请', () => {
+  it('list_players 返回在线玩家：在房间内的人带房间号，大厅玩家 roomId 为 null', async () => {
+    const s = await startServer();
+    const { host, roomId } = await setupGame(s);
+    const lobby = await open(s.address.port);
+
+    host.send({ type: 'list_players' });
+    const list = await host.waitType('player_list');
+    expect(list.players).toHaveLength(3);
+    expect(list.players.filter((p) => p.roomId === roomId)).toHaveLength(2);
+    expect(list.players.filter((p) => p.roomId === null)).toHaveLength(1);
+    expect(lobby).toBeDefined();
+  });
+
+  it('邀请大厅玩家：对方收到 invite（含邀请者 / 房间号 / 角色 / 是否上锁）', async () => {
+    const s = await startServer();
+    const { c: host, roomId, playerId } = await createRoom(s, { password: 'pw' });
+    const lobby = await open(s.address.port);
+
+    host.send({ type: 'list_players' });
+    const list = await host.waitType('player_list');
+    const target = list.players.find((p) => p.id !== playerId)!;
+    expect(target.roomId).toBeNull();
+
+    host.send({ type: 'invite_player', playerId: target.id, role: 'player' });
+    const inv = await lobby.waitType('invite');
+    expect(inv.roomId).toBe(roomId);
+    expect(inv.role).toBe('player');
+    expect(inv.locked).toBe(true);
+    expect(inv.from.name).toBeTruthy();
+  });
+
+  it('被邀请者可免口令加入上锁房间，未被邀请者仍需口令', async () => {
+    const s = await startServer();
+    const { c: host, roomId } = await createRoom(s, { password: 'pw' });
+    // 用账号登录，使被邀请者拥有可预测的身份 id
+    const invitee = await open(s.address.port);
+    invitee.send({ type: 'register', username: 'alice', password: 'pass1' });
+    await invitee.waitType('auth_ok');
+    const stranger = await open(s.address.port);
+
+    host.send({ type: 'list_players' });
+    const list = await host.waitType('player_list');
+    expect(list.players.some((p) => p.id === 'account:alice')).toBe(true);
+
+    host.send({ type: 'invite_player', playerId: 'account:alice', role: 'player' });
+    await invitee.waitType('invite');
+
+    invitee.send({ type: 'join_room', roomId, role: 'player' });
+    expect((await invitee.waitType('room_joined')).seat).toBe('b');
+
+    stranger.send({ type: 'join_room', roomId, role: 'player' });
+    expect((await stranger.waitType('error')).message).toBe('房间口令错误');
+  });
+
+  it('邀请校验：玩家不在线 / 已在房间中', async () => {
+    const s = await startServer();
+    const { host, guestId } = await setupGame(s);
+
+    host.send({ type: 'invite_player', playerId: 'guest:nobody', role: 'player' });
+    expect((await host.waitType('error')).message).toBe('该玩家不在线');
+
+    // 已在房间中的对手不能再被邀请
+    host.send({ type: 'invite_player', playerId: guestId, role: 'player' });
+    expect((await host.waitType('error')).message).toBe('该玩家已在房间中');
+  });
+
+  it('房间满员时仍可邀请观战（只读不占席位）', async () => {
+    const s = await startServer();
+    const { host } = await setupGame(s); // 两席已满
+    const lobby = await open(s.address.port);
+
+    host.send({ type: 'list_players' });
+    const list = await host.waitType('player_list');
+    const target = list.players.find((p) => p.roomId === null)!;
+
+    host.send({ type: 'invite_player', playerId: target.id, role: 'player' });
+    expect((await host.waitType('error')).message).toBe('房间已满，无法邀请对局');
+
+    host.send({ type: 'invite_player', playerId: target.id, role: 'spectator' });
+    expect((await lobby.waitType('invite')).role).toBe('spectator');
+  });
+
+  it('未加入房间时不能邀请，返回错误', async () => {
+    const s = await startServer();
+    const c = await open(s.address.port);
+    c.send({ type: 'invite_player', playerId: 'guest:x', role: 'player' });
+    expect((await c.waitType('error')).message).toBe('尚未加入房间');
+  });
+});

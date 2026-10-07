@@ -69,6 +69,11 @@ export interface ReviewDeps {
   images: () => Record<string, HTMLImageElement>;
   /** 确保当前皮肤素材已加载，resolve 后即可重绘 */
   loadImages: () => Promise<void>;
+  /**
+   * 对局记录接口的基址（形如 `http://192.168.1.42:7777`，无服务器时为空串表示同源）。
+   * 桌面客户端的页面由本机外壳服务提供，因此必须显式指向所选服务器。
+   */
+  apiBase: () => string;
   /** 切屏（复用 app.ts 的 show） */
   show: (id: string) => void;
   toast: (msg: string) => void;
@@ -100,7 +105,7 @@ export function initReview(deps: ReviewDeps): ReviewController {
   // ---------------------------------------------------------------- 列表
 
   async function fetchJson<T>(url: string): Promise<T> {
-    const res = await fetch(url);
+    const res = await fetch(`${deps.apiBase()}${url}`);
     if (!res.ok) throw new Error(`请求失败（${res.status}）`);
     return (await res.json()) as T;
   }

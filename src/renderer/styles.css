@@ -24,7 +24,8 @@ body {
   justify-content: center;
   -webkit-tap-highlight-color: transparent;
 }
-[hidden] { display: none; }
+/* hidden 必须生效：需要盖过 .menu_info label 这类更具体的选择器（否则隐藏不彻底） */
+[hidden] { display: none !important; }
 
 .app { width: 100%; max-width: 1180px; }
 .screen { display: none; }
@@ -61,9 +62,10 @@ body {
 .menu_box a:active { color: #ffc266; }
 /* 首页 5 个入口正好铺满挂板按钮区（原位置：从 y=190 开始，5×46 = 230） */
 .menu_init { padding-top: 32px; }
-/* 面板下方的挂板按钮（人机「开始对弈」/ 加入「连接」）：与面板间隔 8px */
+/* 面板下方的挂板按钮（人机「开始对弈」/ 加入「连接」/ 服务器「进入游戏」）：与面板间隔 8px */
 .menu_dy a,
-#btn-connect { margin-top: 8px; }
+#btn-connect,
+#btn-server-enter { margin-top: 8px; }
 
 .menu_info {
   position: relative;
@@ -133,7 +135,14 @@ body {
 #screen-join .menu_info {
   max-height: 183px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
+/* 等待页与连接服务器页：内容可能超出一屏，允许面板内滚动（尺寸与内框仍不变） */
+#screen-host .menu_info.wide,
+#server-panel {
+  overflow-y: auto;
+}
+#server-panel { overflow-x: hidden; }
 .home-hint {
   margin-top: 8px;
   min-height: 18px;
@@ -194,6 +203,115 @@ body {
 .scan-actions .btn { flex: 1; width: auto; margin-top: 0; padding: 6px 4px; font-size: 11px; font-weight: 500; }
 .scan-result { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
+/* ---------- 连接服务器：手动地址 + 服务器列表（绿=已连接 / 红=连接失败 / 灰=未连接） ---------- */
+.server-manual { display: flex; gap: 6px; margin-top: 8px; }
+.server-manual input[type="text"] { flex: 1; width: auto; min-width: 0; }
+.server-manual .btn { flex: none; margin-top: 0; padding: 6px 10px; font-size: 11px; font-weight: 500; }
+.server-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font: 500 12px/1.4 inherit;
+  color: #e8dcc8;
+  background: #2b1d12;
+  border: 1px solid #6b4f2a;
+  border-radius: 3px;
+}
+.server-row .dot-status {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #8b8073;
+}
+.server-row .addr {
+  flex: 1;
+  /* flex 项默认 min-width:auto 会撑破窄面板，必须显式归零才能换行/省略 */
+  min-width: 0;
+  text-align: left;
+  font-family: Consolas, Menlo, monospace;
+  word-break: break-all;
+}
+.server-row .tag-line { flex: none; font-size: 11px; letter-spacing: 1px; }
+.server-row.ok { border-color: #4c8a4c; }
+.server-row.ok .dot-status { background: #4fd24f; box-shadow: 0 0 8px rgba(79, 210, 79, 0.7); }
+.server-row.ok .tag-line { color: #9fdc9f; }
+.server-row.fail { border-color: #8a4a3a; }
+.server-row.fail .dot-status { background: #e2503f; box-shadow: 0 0 8px rgba(226, 80, 63, 0.7); }
+.server-row.fail .tag-line { color: #ff9d8a; }
+.server-row .btn { flex: none; margin-top: 0; padding: 4px 8px; font-size: 11px; }
+.server-row.locked { opacity: 0.72; }
+#server-panel.locked { opacity: 0.85; }
+
+/* ---------- 主页右上角：服务器 / 账号入口 ---------- */
+.home-corner {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+}
+.chip {
+  appearance: none;
+  padding: 6px 12px;
+  font: 500 12px/1.4 inherit;
+  color: #ffcf7a;
+  background: rgba(43, 29, 18, 0.9);
+  border: 1px solid #6b4f2a;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.chip:hover { border-color: #c9963c; color: #ffd98a; }
+.chip.on { color: #5b3a12; background: linear-gradient(180deg, #f7e3bd, #e2c288); border-color: #8a6b3f; }
+
+/* ---------- 加入房间：房间列表 ---------- */
+.room-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.room-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font: 500 12px/1.4 inherit;
+  color: #ffe9c9;
+  background: #2b1d12;
+  border: 1px solid #6b4f2a;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.room-row:hover { border-color: #c9963c; background: #35261a; }
+.room-row .room-no { flex: none; font-family: Consolas, Menlo, monospace; color: #ffd98a; }
+.room-row .room-info {
+  flex: 1;
+  /* 同上：不归零 min-width 会让「加入 / 观战」被挤出面板并被裁剪 */
+  min-width: 0;
+  text-align: left;
+  font-size: 11.5px;
+  color: #e0cba6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-row .btn { flex: none; margin-top: 0; padding: 4px 8px; font-size: 11px; }
+.room-empty { color: #e8dcc8; font-size: 12px; padding: 4px 0; }
+
+/* 对局面板内的「邀请在线玩家」按钮 */
+#btn-invite {
+  padding: 6px 10px;
+  font: 500 12px/1.4 inherit;
+  color: #ffcf7a;
+  background: #2f2418;
+  border: 1px solid #6b4f2a;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+#btn-invite:hover { border-color: #c9963c; color: #ffd98a; }
+
 /* ---------- 通用按钮（弹层 / 面板内小按钮） ---------- */
 .btn {
   appearance: none;
@@ -211,7 +329,9 @@ body {
 .btn.ghost { color: #ffcf7a; background: #2f2418; }
 .btn.small { padding: 6px 10px; font-size: 12px; font-weight: 500; }
 .btn.small.danger { color: #ff9d8a; }
-.menu_info .btn { width: 100%; margin-top: 6px; }
+/* 面板内的整行按钮（如账号「退出登录」/「邀请在线玩家」）：仅限直接子元素，
+   避免命中 .scan-actions / .room-row / .server-row / .server-manual 里的并排小按钮 */
+.menu_info > .btn { width: 100%; margin-top: 6px; }
 .scan-result .btn { width: auto; margin-top: 0; }
 
 /* ---------- 对局 ---------- */
@@ -408,6 +528,8 @@ body {
 .modal {
   width: 100%;
   max-width: 330px;
+  max-height: 80vh;
+  overflow-y: auto;
   padding: 20px 18px;
   background: #463521;
   border: 2px solid #8a6b3f;
@@ -416,7 +538,9 @@ body {
 }
 .modal-title { font-size: 18px; letter-spacing: 2px; color: #ffcf7a; margin-bottom: 6px; }
 .modal-sub { min-height: 16px; font-size: 12px; color: #e8dcc8; margin-bottom: 16px; }
-.modal .btns { display: flex; gap: 10px; justify-content: center; }
+.modal .btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.modal .btns.col { flex-direction: column; }
+.modal .btns.col .btn { width: 100%; }
 .modal .btn { flex: 1; padding: 10px; font-size: 13px; }
 
 .toast {

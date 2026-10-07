@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { boardAfterMove, initBoard, judgeAfterMove, legalMoves } from '../src/shared/rules.js';
-import { pickMove } from '../src/server/ai.js';
+import { pickMove } from '../src/shared/ai.js';
 import { Board, PieceType, Side } from '../src/shared/types.js';
 
 /** 构造一个只含指定棋子的空棋盘 */

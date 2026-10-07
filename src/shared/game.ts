@@ -1,10 +1,10 @@
 /**
- * 主机权威的对局状态机。
+ * 权威对局状态机（服务端房间 / 客户端本地人机对弈共用）。
  * 唯一真实棋盘状态在这里维护，所有走子都必须经过 applyMove 校验。
  */
 
-import { Board, GameSnapshot, GameStatus, Move, Pos, Side } from '../shared/types.js';
-import { cloneBoard, initBoard, isInCheck, judgeAfterMove, makeMove, validateMove } from '../shared/rules.js';
+import { Board, GameSnapshot, GameStatus, Move, Pos, Side } from './types.js';
+import { cloneBoard, initBoard, isInCheck, judgeAfterMove, makeMove, validateMove } from './rules.js';
 
 export interface MoveResult {
   ok: boolean;

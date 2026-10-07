@@ -1,4 +1,4 @@
-# ADR-0004：对局状态机模块规格（server/game.ts）
+# ADR-0004：对局状态机模块规格（shared/game.ts）
 
 - 状态：已接受（记录现状实现）
 - 日期：2026-10-03
@@ -90,13 +90,13 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 
 | 内容 | 位置 |
 |---|---|
-| `Game` 类与字段 | [game.ts](../../src/server/game.ts#L14-L27) |
-| 重置 `reset()` | [game.ts](../../src/server/game.ts#L29-L41) |
-| 快照 `snapshot()` | [game.ts](../../src/server/game.ts#L43-L54) |
-| 走子 `applyMove()` | [game.ts](../../src/server/game.ts#L60-L85) |
-| 认输 `resign()` | [game.ts](../../src/server/game.ts#L88-L95) |
-| 和棋 `acceptDraw()` | [game.ts](../../src/server/game.ts#L98-L105) |
-| 可重开判定 `canRestart()` | [game.ts](../../src/server/game.ts#L108-L110) |
+| `Game` 类与字段 | [game.ts](../../src/shared/game.ts#L14-L27) |
+| 重置 `reset()` | [game.ts](../../src/shared/game.ts#L29-L41) |
+| 快照 `snapshot()` | [game.ts](../../src/shared/game.ts#L43-L54) |
+| 走子 `applyMove()` | [game.ts](../../src/shared/game.ts#L60-L85) |
+| 认输 `resign()` | [game.ts](../../src/shared/game.ts#L88-L95) |
+| 和棋 `acceptDraw()` | [game.ts](../../src/shared/game.ts#L98-L105) |
+| 可重开判定 `canRestart()` | [game.ts](../../src/shared/game.ts#L108-L110) |
 
 调用方：[host-server.ts `handleMessage()`](../../src/server/host-server.ts#L260-L365)、
 测试 [game.test.ts](../../tests/game.test.ts)。

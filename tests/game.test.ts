@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Game } from '../src/server/game.js';
+import { Game } from '../src/shared/game.js';
 import { initBoard } from '../src/shared/rules.js';
 
 describe('Game 状态机', () => {

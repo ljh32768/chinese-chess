@@ -1,5 +1,5 @@
 /**
- * 中国象棋 AI 引擎（主机端替黑方走子用）。
+ * 中国象棋 AI 引擎（服务端 AI 席位 / 客户端本地人机对弈共用）。
  *
  * 采用负极大值（negamax）+ alpha-beta 剪枝的固定深度搜索：
  * - 叶子评估 = 子力价值 + 简单位置分（兵/卒过河加分），红黑对称。
@@ -7,11 +7,11 @@
  * - 某方无合法着法时按将死 / 困毙给极大的负分（相对走子方）。
  * - 迭代加深 + 时间保护：超时回退到已完成的浅层最佳着法。
  *
- * 只依赖纯规则引擎，不依赖 DOM / 网络。
+ * 只依赖纯规则引擎，不依赖 DOM / 网络 / Node，因此可同时运行在服务端与浏览器。
  */
 
-import { Board, COLS, Move, PieceType, Pos, ROWS, Side } from '../shared/types.js';
-import { cloneBoard, findKing, isAttacked, legalMoves, makeMove, pieceMoves } from '../shared/rules.js';
+import { Board, COLS, Move, PieceType, Pos, ROWS, Side } from './types.js';
+import { cloneBoard, findKing, isAttacked, legalMoves, makeMove, pieceMoves } from './rules.js';
 
 /** 各棋子基础子力价值 */
 const PIECE_VALUE: Record<PieceType, number> = {

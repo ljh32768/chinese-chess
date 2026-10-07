@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
-import { ClientMessage, ServerMessage, decode } from '../shared/protocol.js';
+import { ClientMessage, OnlinePlayer, Role, ServerMessage, decode } from '../shared/protocol.js';
 import { GameRecord, PlayerRef, RoomMode, RoomSummary, Side } from '../shared/types.js';
 import { AccountStore } from './accounts.js';
 import { Conn, sendTo as wsSend } from './conn.js';
@@ -317,6 +317,8 @@ export class GameServer {
   private handleConnection(ws: WebSocket): void {
     const conn: Conn = { ws, roomId: null, role: null, player: null };
     this.conns.add(conn);
+    // 一上线就分配身份（游客或账号），使大厅中的玩家也可被点名邀请
+    conn.player = this.identityOf(conn);
     logDebug('收到新的 WebSocket 连接');
 
     ws.on('message', (raw) => {
@@ -351,6 +353,10 @@ export class GameServer {
         return this.handleLeaveRoom(conn);
       case 'list_rooms':
         return wsSend(conn, { type: 'room_list', rooms: this.listRooms() });
+      case 'list_players':
+        return wsSend(conn, { type: 'player_list', players: this.onlinePlayers() });
+      case 'invite_player':
+        return this.handleInvite(conn, msg);
       case 'ping':
         return wsSend(conn, { type: 'pong', t: msg.t, ip: getLanIp(), port: this.port });
       default: {
@@ -425,11 +431,17 @@ export class GameServer {
       return wsSend(conn, this.roomJoinedPayload(room, null, '观众', ''));
     }
 
-    if (room.password !== null && (typeof msg.password !== 'string' || msg.password !== room.password)) {
+    // 先解析身份：被邀请者（同一连接）可免口令加入
+    const player = this.identityOf(conn, msg.playerId, msg.token);
+    const invited = room.isInvited(player.id);
+    if (
+      room.password !== null &&
+      !invited &&
+      (typeof msg.password !== 'string' || msg.password !== room.password)
+    ) {
       return wsSend(conn, { type: 'error', message: '房间口令错误' });
     }
 
-    const player = this.identityOf(conn, msg.playerId, msg.token);
     conn.roomId = roomId;
     conn.role = 'player';
     conn.player = player;
@@ -439,9 +451,48 @@ export class GameServer {
       conn.role = null;
       return wsSend(conn, { type: 'error', message: '房间已满' });
     }
+    room.consumeInvite(player.id);
     room.cancelIdleTimer();
     this.sendRoomJoined(conn, room, player);
     room.afterJoin(result === 'rejoined', player.id);
+  }
+
+  /** 在线玩家列表（房间邀请用）：每个已识别身份的连接一条 */
+  private onlinePlayers(): OnlinePlayer[] {
+    const out: OnlinePlayer[] = [];
+    for (const c of this.conns) {
+      if (!c.player) continue;
+      out.push({
+        id: c.player.id,
+        name: c.player.name,
+        kind: c.player.kind,
+        roomId: c.roomId,
+        role: c.role,
+      });
+    }
+    return out;
+  }
+
+  /** 邀请在线玩家加入本房间（对局 / 观战）；房间设口令时为其开通免口令入口 */
+  private handleInvite(conn: Conn, msg: Extract<ClientMessage, { type: 'invite_player' }>): void {
+    const room = conn.roomId ? this.rooms.get(conn.roomId) : null;
+    if (!room) return wsSend(conn, { type: 'error', message: '尚未加入房间' });
+    const role: Role = msg.role === 'spectator' ? 'spectator' : 'player';
+    const target = [...this.conns].find((c) => c.player && c.player.id === msg.playerId);
+    if (!target || target === conn) return wsSend(conn, { type: 'error', message: '该玩家不在线' });
+    if (target.roomId) return wsSend(conn, { type: 'error', message: '该玩家已在房间中' });
+    if (role === 'player' && !room.canAcceptPlayer()) {
+      return wsSend(conn, { type: 'error', message: '房间已满，无法邀请对局' });
+    }
+    if (role === 'spectator' && !room.canAcceptSpectator()) {
+      return wsSend(conn, { type: 'error', message: '观战人数已满' });
+    }
+    const inviter: PlayerRef = conn.player ?? { id: 'room', name: '房间', kind: 'guest' };
+    room.markInvited(target.player!.id);
+    wsSend(target, { type: 'invite', from: inviter, roomId: room.id, role, locked: room.password !== null });
+    logInfo(
+      `房间 ${room.id}：${inviter.name} 邀请 ${target.player!.name}（${role === 'player' ? '对局' : '观战'}）`,
+    );
   }
 
   private handleLeaveRoom(conn: Conn): void {
@@ -475,10 +526,10 @@ export class GameServer {
   }
 
   /**
-   * 玩家身份：优先用请求携带的账号 token 解析；其次用本连接已登录的身份；
-   * 都没有则沿用客户端带来的游客 id（重连用），否则新建一个游客身份。
+   * 玩家身份：优先用请求携带的账号 token 解析；其次用客户端带来的游客 id（重连恢复席位用）；
+   * 再次沿用本连接已分配的身份（连接建立时已签发）；都没有则新建一个游客身份。
    */
-  private identityOf(conn: Conn, playerId: unknown, token?: unknown): PlayerRef {
+  private identityOf(conn: Conn, playerId?: unknown, token?: unknown): PlayerRef {
     if (typeof token === 'string' && token) {
       const account = this.accounts.resolve(token);
       if (account) {
@@ -486,15 +537,23 @@ export class GameServer {
         return account;
       }
     }
-    if (conn.player?.kind === 'account') return conn.player;
     if (typeof playerId === 'string' && playerId.startsWith('guest:')) {
       const suffix = playerId.slice('guest:'.length);
       if (/^[a-f0-9]{8,}$/i.test(suffix)) {
-        return { id: playerId, name: `游客${suffix.slice(-4).toUpperCase()}`, kind: 'guest' };
+        const player: PlayerRef = {
+          id: playerId,
+          name: `游客${suffix.slice(-4).toUpperCase()}`,
+          kind: 'guest',
+        };
+        conn.player = player;
+        return player;
       }
     }
+    if (conn.player) return conn.player;
     const suffix = crypto.randomBytes(4).toString('hex');
-    return { id: `guest:${suffix}`, name: `游客${suffix.toUpperCase()}`, kind: 'guest' };
+    const player: PlayerRef = { id: `guest:${suffix}`, name: `游客${suffix.toUpperCase()}`, kind: 'guest' };
+    conn.player = player;
+    return player;
   }
 
   private handleClose(conn: Conn): void {

@@ -101,7 +101,7 @@
 | 终局判定 `judgeAfterMove` | [rules.ts](../../src/shared/rules.ts#L299-L307) |
 | 权威校验 `validateMove` | [rules.ts](../../src/shared/rules.ts#L313-L330) |
 
-调用方：主机 [game.ts `applyMove()`](../../src/server/game.ts#L60-L82)、
+调用方：主机 [game.ts `applyMove()`](../../src/shared/game.ts#L60-L82)、
 客户端落点提示 [app.ts `onCell()`](../../src/renderer/app.ts#L449-L481)。
 
 ## 5. 验收标准

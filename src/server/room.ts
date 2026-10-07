@@ -26,9 +26,9 @@ import {
 import { describeMove } from '../shared/notation.js';
 import { initBoard, makeMove } from '../shared/rules.js';
 import { Conn, sendTo as wsSend } from './conn.js';
-import { Game, MoveResult } from './game.js';
+import { Game, MoveResult } from '../shared/game.js';
 import { logDebug, logInfo } from './log.js';
-import { pickMove } from './ai.js';
+import { pickMove } from '../shared/ai.js';
 
 export const sideLabel = (s: Side): string => (s === 'r' ? '红方' : '黑方');
 export const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
@@ -81,6 +81,8 @@ export class Room {
   /** 对手席（AI 模式 conn 为 null） */
   private b: Member | null = null;
   private readonly spectators = new Set<Conn>();
+  /** 被邀请过的玩家 id（房间设口令时可免口令加入） */
+  private readonly invited = new Set<string>();
 
   private readonly aiDepth: number;
   private firstMode: FirstMode = 'r';
@@ -146,6 +148,33 @@ export class Room {
     this.pwd = pw;
     logInfo(`房间 ${this.id}：口令已${pw ? '设置' : '取消'}`);
     return true;
+  }
+
+  // ------------------------------------------------------- 邀请（口令豁免）
+
+  /** 记录被邀请者：房间设了口令时，被邀请者可免口令加入 */
+  markInvited(playerId: string): void {
+    this.invited.add(playerId);
+  }
+
+  /** 该玩家是否被本房间邀请过 */
+  isInvited(playerId: string): boolean {
+    return this.invited.has(playerId);
+  }
+
+  /** 邀请已消费（成功加入后调用，避免长期豁免） */
+  consumeInvite(playerId: string): void {
+    this.invited.delete(playerId);
+  }
+
+  /** 是否还有空席位（可邀请为对局玩家） */
+  canAcceptPlayer(): boolean {
+    return !(this.a && this.b);
+  }
+
+  /** 观战席是否还有余位 */
+  canAcceptSpectator(): boolean {
+    return this.spectators.size < this.deps.maxSpectators;
   }
 
   /** 房间内的全部连接（席位 + 观战），服务器在销毁时用于清理归属 */
@@ -778,6 +807,7 @@ export class Room {
   close(reason: string): void {
     if (this.closed) return;
     this.closed = true;
+    this.invited.clear();
     this.cancelGrace(this.a);
     this.cancelGrace(this.b);
     this.clearTurnTimer();

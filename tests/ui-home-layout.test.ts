@@ -225,6 +225,31 @@ describe('子面板与木板内框对齐（创建 / 加入 / 人机）', () => {
     expect(px('#screen-join .menu_info', 'max-height')).toBe(FRAME.h - BTN - 8);
     expect(px('.menu_dy a', 'margin-top')).toBe(8);
     expect(px('#btn-connect', 'margin-top')).toBe(8);
+    expect(px('#btn-server-enter', 'margin-top')).toBe(8);
     expect(px('.menu_box a', 'height')).toBe(BTN);
+  });
+});
+
+// ---------------------------------------------------------------- 面板内列表行
+
+describe('窄面板内的列表行不会被撑破（连接服务器 / 加入房间）', () => {
+  it('整行按钮只作用于直接子元素，不会命中列表行内的并排小按钮', () => {
+    expect(decl('.menu_info > .btn', 'width')).toBe('100%');
+    // 若退回「后代选择器」写法，房间行里的「加入 / 观战」会被撑到整行宽而溢出被裁剪
+    expect(RULES.some((r) => r.selectors.includes('.menu_info .btn'))).toBe(false);
+  });
+
+  it('列表行用 flex 排布，信息项 min-width 归零（可省略），按钮不参与拉伸', () => {
+    expect(decl('.room-row', 'display')).toBe('flex');
+    expect(decl('.room-row .btn', 'flex')).toBe('none');
+    expect(decl('.room-row .room-info', 'min-width')).toBe('0');
+    expect(decl('.server-row .addr', 'min-width')).toBe('0');
+    expect(decl('.server-manual .btn', 'flex')).toBe('none');
+    // 横向裁掉溢出内容，避免出现横向滚动条
+    expect(decl('#screen-join .menu_info', 'overflow-x')).toBe('hidden');
+  });
+
+  it('hidden 属性必须生效（需盖过 .menu_info label 等更具体的选择器）', () => {
+    expect(decl('[hidden]', 'display')).toBe('none !important');
   });
 });

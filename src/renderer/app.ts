@@ -1,12 +1,13 @@
 /**
- * 渲染层主控制器：页面切换、棋盘交互、消息处理。
+ * 渲染层主控制器：页面切换、棋盘交互、消息处理、服务器选择、房间与账号、人机对弈。
  *
- * 客户端只发送「走子意图」，一切以服务器广播为准；
- * 房间的创建 / 加入通过 `create_room` / `join_room` 完成（见 shared/protocol.ts）。
+ * 客户端不再于启动时绑定服务器：先在「连接服务器」板块选择目标服务器（自动搜索 / 手动输入），
+ * 再进入首页创建 / 加入房间；未连接服务器时仍可本机人机对弈（本地 AI）。
+ * 客户端只发送「走子意图」，联机对局一切以服务器广播为准。
  */
 
 import { findKing, initBoard, legalMoves } from '../shared/rules.js';
-import { ClientMessage, ServerMessage } from '../shared/protocol.js';
+import { ClientMessage, OnlinePlayer, ServerMessage } from '../shared/protocol.js';
 import {
   Board,
   FirstMode,
@@ -18,8 +19,19 @@ import {
   RoomSummary,
   Side,
 } from '../shared/types.js';
+import { Game } from '../shared/game.js';
+import { pickMove } from '../shared/ai.js';
 import { capturedPieces } from '../shared/notation.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
+import {
+  DEFAULT_PORT,
+  ServerAddr,
+  isDesktopClient,
+  pageServer,
+  parseAddress,
+  serverKey,
+  subnetPrefix,
+} from './servers.js';
 import {
   BoardView,
   DEFAULT_SKIN,
@@ -41,6 +53,9 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getEl
 
 const boardEl = document.getElementById('board') as HTMLCanvasElement;
 
+/** 本页面的查询参数（桌面客户端由 Electron 入口附加 client / server / lan） */
+const pageParams = new URLSearchParams(window.location.search);
+
 /** 本地偏好键（localStorage） */
 const SKIN_KEY = 'lanschess-skin';
 const TOKEN_KEY = 'lanschess-token';
@@ -56,6 +71,10 @@ const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
 
 /** 客户端本地视图状态（仅用于渲染，非权威） */
 const S = {
+  /** 当前连接的服务器；未选择时为 null */
+  server: null as ServerAddr | null,
+  /** 通过浏览器访问时锁定服务器地址（与访问地址一致，不可更改） */
+  serverLocked: false,
   /** 当前角色；未加入房间时为 null */
   role: null as 'player' | 'spectator' | null,
   /** 所在房间号 */
@@ -70,6 +89,8 @@ const S = {
   locked: false,
   /** 观战者模式：只读旁观（不占红黑席位） */
   spectator: false,
+  /** 本地人机对弈（不连服务器，规则与 AI 均在本地运行） */
+  offline: false,
   side: 'r' as Side,
   board: initBoard() as Board,
   turn: 'r' as Side,
@@ -91,7 +112,7 @@ const S = {
   history: [] as Move[],
   /** 本回合截止时间（epoch ms）；null 表示不限时 */
   deadline: null as number | null,
-  /** 人机对战（AI 执黑） */
+  /** 人机对战（联机 AI 房间或本地 AI） */
   aiMode: false,
   /** 当前皮肤（参考项目三套素材） */
   skin: DEFAULT_SKIN as SkinId,
@@ -106,6 +127,10 @@ const S = {
 let net: Net | null = null;
 /** 等待服务端对 create_room / join_room / login / register 的回应 */
 let pendingReq: { resolve: () => void; reject: (e: Error) => void } | null = null;
+
+/** 本地人机对弈的权威状态机与 AI 定时器（仅 offline 模式） */
+let localGame: Game | null = null;
+let localAiTimer = 0;
 
 /** 已加载的皮肤素材（按皮肤缓存） */
 const loadedImages: Partial<Record<SkinId, Record<string, HTMLImageElement>>> = {};
@@ -137,11 +162,12 @@ interface ModalButton {
   onClick?: () => void;
 }
 
-function showModal(o: { title: string; sub?: string; buttons: ModalButton[] }): void {
+function showModal(o: { title: string; sub?: string; buttons: ModalButton[]; column?: boolean }): void {
   $('modal-title').textContent = o.title;
   $('modal-sub').textContent = o.sub ?? '';
   const box = $('modal-btns');
-  box.innerHTML = '';
+  box.className = 'btns' + (o.column ? ' col' : '');
+  box.replaceChildren();
   for (const b of o.buttons) {
     const el = document.createElement('button');
     el.className = 'btn ' + (b.primary ? 'primary' : 'ghost');
@@ -256,6 +282,10 @@ function updateRoleHint(): void {
     $('role-hint').textContent = `房间 ${S.roomId} · 观战 · 只读`;
     return;
   }
+  if (S.offline) {
+    $('role-hint').textContent = '人机对战（本地）· 你执红 · AI 执黑';
+    return;
+  }
   if (S.aiMode) {
     $('role-hint').textContent = `房间 ${S.roomId} · 人机对战 · AI 执黑`;
     return;
@@ -272,6 +302,13 @@ function remainText(): string {
   return `（剩余 ${sec}s）`;
 }
 
+/** 房间内的「邀请在线玩家」入口：仅联机且在房间内时可用 */
+function renderInviteButtons(): void {
+  const can = !!S.roomId && !S.offline;
+  $('btn-invite').hidden = !can;
+  $('btn-invite-host').hidden = !can;
+}
+
 function updatePanel(): void {
   const opp: Side = S.side === 'r' ? 'b' : 'r';
   const rowTop = $('p-top');
@@ -279,7 +316,7 @@ function updatePanel(): void {
   rowTop.className = 'player-row ' + (opp === 'r' ? 'red' : 'black');
   rowBottom.className = 'player-row ' + (S.side === 'r' ? 'red' : 'black');
   // 观战者视角显示红黑双方，不出现「你 / 对手」
-  const oppLabel = S.oppName && !S.aiMode && S.oppName !== '对手' ? S.oppName : '对手';
+  const oppLabel = S.oppName && S.oppName !== '对手' ? S.oppName : '对手';
   $('p-top-name').textContent = S.spectator ? sideName(opp) : `${sideName(opp)} · ${oppLabel}`;
   $('p-bottom-name').textContent = S.spectator ? sideName(S.side) : `${sideName(S.side)} · 你`;
 
@@ -334,6 +371,7 @@ function updatePanel(): void {
           : '已发送重开请求，等待对方回应…';
   }
 
+  renderInviteButtons();
   renderCaptured();
 }
 
@@ -375,8 +413,9 @@ function showWaiting(): void {
   $('room-pass-hint').textContent = S.locked
     ? '本房间已设置口令，加入者需输入口令'
     : '未设口令，任何人点击即可加入';
-  $('host-wait').textContent = S.aiMode ? '正在开始人机对战…' : '让对方在「加入房间」中输入上方房间号';
+  $('host-wait').textContent = S.aiMode ? '正在开始人机对战…' : '让对方在「加入房间」中选择本房间';
   renderSidePick();
+  renderInviteButtons();
   show('screen-host');
 }
 
@@ -415,6 +454,8 @@ function handleMessage(msg: ServerMessage): void {
       S.account = { token: msg.token, username: msg.username };
       writeStore(TOKEN_KEY, msg.token);
       writeStore(USER_KEY, msg.username);
+      renderAccountPanel();
+      updateHomeChips();
       renderHomeHint();
       toast(`已登录：${msg.username}`);
       settlePending(true);
@@ -422,10 +463,14 @@ function handleMessage(msg: ServerMessage): void {
     case 'room_list':
       renderRoomList(msg.rooms);
       return;
+    case 'player_list':
+      renderPlayerList(msg.players);
+      return;
+    case 'invite':
+      showInviteModal(msg);
+      return;
     case 'room_closed': {
-      // 房间已被销毁（终局超时 / 空闲回收 / 房主解散 / 服务器停止）
-      net?.close();
-      net = null;
+      // 房间已被销毁（终局超时 / 空闲回收 / 房主解散 / 服务器停止）；连接本身保留
       clearSession();
       const inGame = S.status === 'playing' || S.status === 'over';
       S.status = 'idle';
@@ -439,6 +484,7 @@ function handleMessage(msg: ServerMessage): void {
             primary: true,
             onClick: () => {
               resetLocal();
+              backToIndex();
               show('screen-home');
             },
           },
@@ -669,17 +715,31 @@ function handleClosed(reason: string): void {
   } else {
     toast(reason);
   }
+  renderServers();
 }
 
-// -------------------------------------------------------------- 房间会话
+// ------------------------------------------------------- 连接与房间会话
 
-/** 建立到服务器的 WebSocket 连接（页面由服务器提供，因此用当前来源地址） */
-async function openSocket(): Promise<Net> {
+/** 建立到目标服务器的 WebSocket 连接（默认连当前选中的服务器） */
+async function openSocket(addr: ServerAddr | null = S.server): Promise<Net> {
+  if (!addr) throw new Error('尚未选择服务器');
   net?.close();
   const n = new Net({ onMessage: handleMessage, onClosed: handleClosed });
   net = n;
-  await n.connect(`ws://${location.host}/ws`);
+  await n.connect(`ws://${addr.host}:${addr.port}/ws`);
   return n;
+}
+
+/** 确保已有到服务器的连接（有服务器地址时会尝试重连） */
+async function ensureSocket(): Promise<boolean> {
+  if (net?.connected) return true;
+  if (!S.server) return false;
+  try {
+    await openSocket();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 发送一个需要服务端回应的请求（room_joined / auth_ok 成功，error 失败） */
@@ -732,6 +792,8 @@ function applyRoomJoined(msg: Extract<ServerMessage, { type: 'room_joined' }>): 
   S.side = msg.seat ?? 'r';
   S.firstMode = msg.firstMode;
   S.oppName = '';
+  S.offline = false;
+  S.aiMode = false;
   storeSession();
 
   applySnapshot(msg.state);
@@ -746,17 +808,6 @@ function applyRoomJoined(msg: Extract<ServerMessage, { type: 'room_joined' }>): 
   }
 }
 
-/** 取消等待（销毁自己创建的房间）并回首页 */
-async function cancelHost(): Promise<void> {
-  net?.send({ type: 'leave_room' });
-  net?.close();
-  net = null;
-  clearSession();
-  resetLocal();
-  backToIndex();
-  show('screen-home');
-}
-
 /** 重置本地对局视图状态 */
 function resetLocal(): void {
   S.role = null;
@@ -766,6 +817,7 @@ function resetLocal(): void {
   S.isOwner = false;
   S.locked = false;
   S.spectator = false;
+  S.offline = false;
   S.status = 'idle';
   S.selected = null;
   S.moves = [];
@@ -775,17 +827,253 @@ function resetLocal(): void {
   S.oppName = '';
   S.oppAway = false;
   S.pending = null;
+  localGame = null;
+  window.clearTimeout(localAiTimer);
+  localAiTimer = 0;
 }
 
+/** 离开房间回到首页（保留与服务器的连接，便于继续浏览房间列表） */
 function leaveToHome(): void {
-  net?.send({ type: 'leave_room' });
-  net?.close();
-  net = null;
+  if (S.roomId && !S.offline) net?.send({ type: 'leave_room' });
   clearSession();
   closeModal();
   resetLocal();
   backToIndex();
   show('screen-home');
+  renderHomeHint();
+}
+
+// --------------------------------------------------- 服务器选择（连接服务器）
+
+/** 服务器列表条目：failed 表示最近一次连接尝试失败 */
+interface ServerEntry {
+  addr: ServerAddr;
+  failed: boolean;
+}
+
+const serverEntries = new Map<string, ServerEntry>();
+
+/** 把地址加入列表（已存在则返回原条目） */
+function upsertServer(addr: ServerAddr): ServerEntry {
+  const key = serverKey(addr);
+  const existed = serverEntries.get(key);
+  if (existed) return existed;
+  const entry: ServerEntry = { addr, failed: false };
+  serverEntries.set(key, entry);
+  return entry;
+}
+
+/**
+ * 连接成功后以服务器自述地址为准改键：避免同一台服务器因「输入地址」与「自述地址」不同
+ * 而在列表里出现两行（自述地址已存在时直接丢弃重复条目）。
+ */
+function rekeyServer(from: ServerAddr, to: ServerAddr): void {
+  if (serverKey(from) === serverKey(to)) return;
+  const moved = serverEntries.get(serverKey(from));
+  if (!moved) return;
+  serverEntries.delete(serverKey(from));
+  if (serverEntries.has(serverKey(to))) return;
+  moved.addr = to;
+  serverEntries.set(serverKey(to), moved);
+}
+
+/** 该地址是否为当前已连上的服务器 */
+function isConnectedTo(addr: ServerAddr): boolean {
+  return !!S.server && serverKey(S.server) === serverKey(addr) && !!net?.connected;
+}
+
+function setServerMsg(text: string, kind?: 'ok' | 'err'): void {
+  const el = $('server-msg');
+  el.textContent = text;
+  el.className = 'hint' + (kind ? ` ${kind}` : '');
+}
+
+/** 渲染服务器列表：绿=已连接 / 红=连接失败 / 灰=未连接（另加「锁定」态） */
+function renderServers(): void {
+  const list = $('server-list');
+  list.replaceChildren();
+  $('server-panel').classList.toggle('locked', S.serverLocked);
+  const locked = S.serverLocked;
+  $<HTMLInputElement>('server-addr').disabled = locked;
+  $<HTMLButtonElement>('btn-server-connect').disabled = locked;
+  $<HTMLButtonElement>('btn-server-scan').disabled = locked;
+  $<HTMLButtonElement>('btn-server-list').disabled = locked;
+
+  const entries = [...serverEntries.values()].sort(
+    (a, b) => Number(isConnectedTo(b.addr)) - Number(isConnectedTo(a.addr)),
+  );
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'room-empty';
+    empty.textContent = '暂无服务器，请搜索局域网或手动输入地址';
+    list.appendChild(empty);
+  }
+  for (const entry of entries) {
+    const connected = isConnectedTo(entry.addr);
+    const row = document.createElement('div');
+    row.className = 'server-row ' + (connected ? 'ok' : entry.failed ? 'fail' : '');
+    if (locked) row.classList.add('locked');
+    const dot = document.createElement('span');
+    dot.className = 'dot-status';
+    const addr = document.createElement('span');
+    addr.className = 'addr';
+    addr.textContent = `${entry.addr.host}:${entry.addr.port}`;
+    const tag = document.createElement('span');
+    tag.className = 'tag-line';
+    tag.textContent = connected ? '已连接' : entry.failed ? '连接失败' : '未连接';
+    row.append(dot, addr, tag);
+    if (!connected) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn small';
+      btn.textContent = '连接';
+      btn.disabled = locked;
+      btn.addEventListener('click', () => void connectServer(entry.addr));
+      row.appendChild(btn);
+    }
+    list.appendChild(row);
+  }
+  $('btn-server-enter').textContent = net?.connected ? '进入游戏' : '进入游戏（仅本机对弈）';
+}
+
+/** 连接指定服务器：探测成功则切换 WebSocket 目标并标记为已连接 */
+async function connectServer(addr: ServerAddr, silent = false): Promise<boolean> {
+  const entry = upsertServer(addr);
+  if (S.roomId) {
+    setServerMsg('请先离开当前房间再切换服务器', 'err');
+    return false;
+  }
+  entry.failed = false;
+  renderServers();
+  if (!silent) setServerMsg(`正在连接 ${addr.host}:${addr.port} …`);
+
+  let hit: DiscoveredServer | null;
+  try {
+    hit = await probeServer(addr.host, addr.port, { timeoutMs: 1500 });
+  } catch {
+    hit = null;
+  }
+  if (!hit) {
+    entry.failed = true;
+    renderServers();
+    if (!silent) setServerMsg(`无法连接 ${addr.host}:${addr.port}`, 'err');
+    return false;
+  }
+  const target: ServerAddr = { host: hit.ip, port: hit.port };
+  rekeyServer(addr, target);
+  try {
+    await openSocket(target);
+  } catch {
+    upsertServer(target).failed = true;
+    renderServers();
+    if (!silent) setServerMsg(`无法连接 ${target.host}:${target.port}`, 'err');
+    return false;
+  }
+  S.server = target;
+  renderServers();
+  renderHomeHint();
+  if (!silent) setServerMsg(`已连接 ${target.host}:${target.port}`, 'ok');
+  return true;
+}
+
+/** 浏览器打开时锁定为访问地址（不可更改） */
+async function connectLockedServer(): Promise<void> {
+  const addr = S.server;
+  if (!addr) return;
+  try {
+    await openSocket(addr);
+    setServerMsg('浏览器访问：服务器地址与访问地址一致，已锁定', 'ok');
+  } catch {
+    setServerMsg('无法连接本页面所在服务器（浏览器访问时地址已锁定）', 'err');
+  }
+  renderServers();
+  renderHomeHint();
+}
+
+/** 可扫描的 /24 网段前缀（来自启动参数的本机地址与已选服务器地址） */
+function scanPrefixes(): string[] {
+  const out = new Set<string>();
+  const add = (ip: string | null | undefined) => {
+    const prefix = subnetPrefix(ip ?? '');
+    if (prefix) out.add(prefix);
+  };
+  add(pageParams.get('lan'));
+  add(S.server?.host);
+  return [...out];
+}
+
+/** 自动搜索同网段服务器：命中即加入列表（灰色，点击「连接」后变绿） */
+async function scanServers(): Promise<void> {
+  if (S.serverLocked) return;
+  const prefixes = scanPrefixes();
+  if (prefixes.length === 0) {
+    setServerMsg('无法推导网段，请手动输入服务器地址', 'err');
+    return;
+  }
+  const port = S.server?.port ?? DEFAULT_PORT;
+  for (const prefix of prefixes) {
+    setServerMsg(`正在搜索 ${prefix}.0/24 …`);
+    const found = await discoverSubnet(prefix, port, {
+      onProgress: (done, total) => setServerMsg(`正在搜索 ${prefix}.0/24 … ${done}/${total}`),
+    });
+    for (const h of found) upsertServer({ host: h.ip, port: h.port });
+    renderServers();
+  }
+  setServerMsg(
+    serverEntries.size > 1
+      ? '已发现可连接的服务器，点击「连接」即可加入'
+      : '未发现其它服务器，可手动输入地址',
+    serverEntries.size > 1 ? 'ok' : 'err',
+  );
+}
+
+/** 进入连接服务器板块：桌面客户端自动尝试启动参数地址并搜索局域网 */
+let autoScanned = false;
+async function openServersScreen(): Promise<void> {
+  renderServers();
+  show('screen-servers');
+  if (S.serverLocked || autoScanned) return;
+  autoScanned = true;
+  const prefill = S.server ?? { host: '127.0.0.1', port: DEFAULT_PORT };
+  upsertServer(prefill);
+  renderServers();
+  await connectServer(prefill, true);
+  await scanServers();
+}
+
+/** 「进入游戏」：尽力连接，失败也允许进入首页（本机人机对弈仍可用） */
+async function enterFromServerScreen(): Promise<void> {
+  if (S.server && !net?.connected) await connectServer(S.server, true);
+  backToIndex();
+  show('screen-home');
+  updateHomeChips();
+  renderHomeHint();
+  if (net?.connected) await tryResumeSession();
+}
+
+/** 刷新列表：重试当前服务器并重绘 */
+async function refreshServerList(): Promise<void> {
+  if (S.serverLocked) return renderServers();
+  if (S.server && !net?.connected) await connectServer(S.server, true);
+  renderServers();
+  setServerMsg('列表已刷新');
+}
+
+/** 需要服务器才能进行的操作：未连接时提示并引导到连接服务器板块 */
+function requireServer(): boolean {
+  if (net?.connected) return true;
+  if (S.server) {
+    toast('服务器未连接，请先在「连接服务器」中连接');
+  } else {
+    toast('请先连接服务器');
+  }
+  void openServersScreen();
+  return false;
+}
+
+/** 从服务器地址生成 REST 接口基址（桌面客户端的页面来自本机外壳服务，必须显式指向服务器） */
+function apiBase(): string {
+  return S.server ? `http://${S.server.host}:${S.server.port}` : '';
 }
 
 // -------------------------------------------------------------- 首页入口
@@ -796,27 +1084,29 @@ const FIRST_MODE_DEFAULT: FirstMode = 'r';
 function showCreateMenu(): void {
   $('menu-index').hidden = true;
   $('menu-ai').hidden = true;
+  $('menu-acct').hidden = true;
   $('menu-create').hidden = false;
 }
 
 function backToIndex(): void {
   $('menu-ai').hidden = true;
   $('menu-create').hidden = true;
+  $('menu-acct').hidden = true;
   $('menu-index').hidden = false;
 }
 
 /** 创建双人对战房间（口令可选，留空即任何人可加入） */
 async function createRoom(): Promise<void> {
+  if (!requireServer()) return;
   const password = $<HTMLInputElement>('create-pass').value.trim();
   try {
-    await openSocket();
+    await ensureSocket();
     S.aiMode = false;
+    S.offline = false;
     S.firstMode = FIRST_MODE_DEFAULT;
     await request({ type: 'create_room', mode: 'pvp', password: password || null, token: S.account?.token });
     backToIndex();
   } catch (e) {
-    net?.close();
-    net = null;
     toast(e instanceof Error ? e.message : String(e));
     show('screen-home');
   }
@@ -829,62 +1119,273 @@ function aiDepth(): number {
   return Number.isInteger(depth) && depth >= 1 && depth <= 4 ? depth : 3;
 }
 
-/** 人机对战：AI 执黑，创建后直接进入对局 */
-async function createAiRoom(): Promise<void> {
-  try {
-    await openSocket();
-    S.aiMode = true;
-    await request({ type: 'create_room', mode: 'ai', depth: aiDepth(), token: S.account?.token });
-    backToIndex();
-  } catch (e) {
-    net?.close();
-    net = null;
-    S.aiMode = false;
-    toast(e instanceof Error ? e.message : String(e));
-    show('screen-home');
+/** 人机对弈（本地）：不依赖服务器，AI 执黑，规则与搜索都在本机运行 */
+function createAiRoom(): void {
+  net?.close();
+  net = null;
+  window.clearTimeout(localAiTimer);
+  S.offline = true;
+  S.aiMode = true;
+  S.spectator = false;
+  S.role = 'player';
+  S.roomId = '';
+  S.playerId = '';
+  S.name = '你';
+  S.isOwner = false;
+  S.locked = false;
+  S.firstMode = 'r';
+  S.side = 'r';
+  S.oppName = 'AI';
+  localGame = new Game();
+  localGame.reset('playing');
+  clearSession();
+  applySnapshot(localGame.snapshot());
+  backToIndex();
+  enterGame();
+  toast('开始人机对弈（本地，无需服务器）');
+  scheduleLocalAi();
+}
+
+/** 本地走子（offline 模式）：直接走本地状态机，AI 随后应答 */
+function localMove(from: Pos, to: Pos): void {
+  const game = localGame;
+  if (!game) return;
+  const result = game.applyMove(from, to, S.side);
+  if (!result.ok) {
+    toast(result.reason ?? '非法走子');
+    return;
   }
+  playClick();
+  applySnapshot(game.snapshot());
+  scheduleLocalAi();
 }
 
-function showJoin(): void {
-  const msg = $('join-msg');
-  msg.textContent = '';
+/** 本地 AI（黑方）自动应答 */
+function scheduleLocalAi(): void {
+  window.clearTimeout(localAiTimer);
+  localAiTimer = 0;
+  const game = localGame;
+  if (!game || game.status !== 'playing' || game.turn !== 'b') return;
+  localAiTimer = window.setTimeout(() => {
+    localAiTimer = 0;
+    const g = localGame;
+    if (!g || g.status !== 'playing' || g.turn !== 'b') return;
+    const move = pickMove(g.board, 'b', { depth: aiDepth(), timeLimitMs: 1200 });
+    if (!move) return;
+    g.applyMove(move.from, move.to, 'b');
+    playClick();
+    applySnapshot(g.snapshot());
+  }, 350);
+}
+
+// -------------------------------------------------------------- 账号（可选）
+
+/** 首页右上角账号区：未登录显示入口，登录后显示用户名 */
+function updateHomeChips(): void {
+  const chip = $('acct-chip');
+  chip.textContent = S.account ? S.account.username : '登录 / 注册';
+  chip.classList.toggle('on', !!S.account);
+  $('server-chip').textContent = S.server ? `服务器：${S.server.host}:${S.server.port}` : '服务器：未连接';
+}
+
+/** 打开账号面板（登录 / 注册 / 退出登录） */
+function openAccountPanel(): void {
+  $('menu-index').hidden = true;
+  $('menu-create').hidden = true;
+  $('menu-ai').hidden = true;
+  $('menu-acct').hidden = false;
+  renderAccountPanel();
+}
+
+function renderAccountPanel(): void {
+  const msg = $('acct-msg');
   msg.className = 'hint';
-  $('scan-result').hidden = true;
-  renderAccountState();
-  show('screen-join');
+  msg.textContent = S.account ? `已登录：${S.account.username}` : '未登录将以游客身份游玩';
+  $<HTMLButtonElement>('btn-logout').hidden = !S.account;
+  $<HTMLInputElement>('acct-user').value = S.account?.username ?? '';
 }
 
-/** 加入房间（或观战） */
-async function doJoin(asSpectator = false): Promise<void> {
-  const roomId = $<HTMLInputElement>('join-room').value.trim();
-  const pwd = $<HTMLInputElement>('join-pwd').value;
+function renderHomeHint(): void {
+  const who = S.account ? `已登录：${S.account.username}` : '未登录（游客）';
+  const server = S.server ? `${S.server.host}:${S.server.port}` : '未连接';
+  $('home-hint').textContent = `服务器 ${server} · ${who}`;
+}
+
+/** 登录 / 注册（可选：不登录也能以游客身份游玩） */
+async function doAuth(isRegister: boolean): Promise<void> {
+  const username = $<HTMLInputElement>('acct-user').value.trim();
+  const password = $<HTMLInputElement>('acct-pwd').value;
   const setMsg = (t: string, kind?: 'ok' | 'err') => {
-    const msg = $('join-msg');
+    const msg = $('acct-msg');
     msg.textContent = t;
     msg.className = 'hint' + (kind ? ` ${kind}` : '');
   };
-
-  if (!/^\d{4,8}$/.test(roomId)) return setMsg('请输入 4-8 位数字房间号', 'err');
-
-  setMsg(`正在加入房间 ${roomId} …`);
-  S.aiMode = false;
+  if (!username || !password) return setMsg('请输入用户名与密码', 'err');
+  if (!S.server) {
+    setMsg('请先连接服务器', 'err');
+    void openServersScreen();
+    return;
+  }
   try {
-    await openSocket();
+    if (!(await ensureSocket())) return setMsg('无法连接服务器', 'err');
+    await request(
+      isRegister ? { type: 'register', username, password } : { type: 'login', username, password },
+    );
+    $<HTMLInputElement>('acct-pwd').value = '';
+  } catch (e) {
+    setMsg(e instanceof Error ? e.message : '操作失败', 'err');
+  }
+}
+
+/** 退出登录（仅清除本地凭据） */
+function logout(): void {
+  S.account = null;
+  writeStore(TOKEN_KEY, null);
+  writeStore(USER_KEY, null);
+  renderAccountPanel();
+  updateHomeChips();
+  renderHomeHint();
+  toast('已退出登录');
+}
+
+// -------------------------------------------------- 加入房间与房间列表
+
+function setJoinMsg(t: string, kind?: 'ok' | 'err'): void {
+  const msg = $('join-msg');
+  msg.textContent = t;
+  msg.className = 'hint' + (kind ? ` ${kind}` : '');
+}
+
+/** 口令输入行：仅在选中上锁房间时出现 */
+function setPwdVisible(visible: boolean): void {
+  $('join-pwd-label').hidden = !visible;
+  $<HTMLInputElement>('join-pwd').hidden = !visible;
+  if (!visible) $<HTMLInputElement>('join-pwd').value = '';
+}
+
+/** 打开「加入房间」：先确认已连接服务器，再拉取房间列表 */
+function showJoin(): void {
+  setJoinMsg('');
+  setPwdVisible(false);
+  $('room-list').replaceChildren();
+  show('screen-join');
+  if (!net?.connected) {
+    setJoinMsg(S.server ? '服务器未连接，正在尝试连接…' : '尚未连接服务器，请先连接', 'err');
+    if (!S.server) {
+      renderRoomListPrompt();
+      return;
+    }
+  }
+  void refreshRooms();
+}
+
+/** 未连接服务器时在列表区给出「去连接服务器」引导 */
+function renderRoomListPrompt(): void {
+  const box = $('room-list');
+  box.replaceChildren();
+  const tip = document.createElement('div');
+  tip.className = 'room-empty';
+  tip.textContent = '连接服务器后才能查看可加入的房间';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn small';
+  btn.textContent = '去连接服务器';
+  btn.addEventListener('click', () => void openServersScreen());
+  box.append(tip, btn);
+}
+
+/** 拉取房间列表（服务端返回 room_list 后渲染） */
+async function refreshRooms(): Promise<void> {
+  if (!(await ensureSocket())) {
+    setJoinMsg('尚未连接服务器，请先连接', 'err');
+    renderRoomListPrompt();
+    return;
+  }
+  net?.send({ type: 'list_rooms' });
+}
+
+/** 渲染房间列表：点击房间行即加入（上锁房间需先填口令），「观战」无需口令 */
+function renderRoomList(rooms: RoomSummary[]): void {
+  const box = $('room-list');
+  box.replaceChildren();
+  const joinable = rooms.filter((r) => r.mode === 'pvp');
+  if (joinable.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'room-empty';
+    empty.textContent = '当前没有房间，点「创建房间」开一局吧';
+    box.appendChild(empty);
+    setJoinMsg('房间列表已刷新', 'ok');
+    return;
+  }
+  for (const r of joinable) {
+    const row = document.createElement('div');
+    row.className = 'room-row';
+    row.title = `房主 ${r.ownerName}`;
+    const no = document.createElement('span');
+    no.className = 'room-no';
+    no.textContent = r.roomId;
+    const info = document.createElement('span');
+    info.className = 'room-info';
+    const state = r.status === 'playing' ? '对局中' : r.players >= 2 ? '已满' : '等待中';
+    info.textContent = `${r.ownerName} · ${r.players}/2 · ${state}${r.locked ? ' · 需口令' : ''}`;
+    const joinBtn = document.createElement('button');
+    joinBtn.type = 'button';
+    joinBtn.className = 'btn small';
+    joinBtn.textContent = '加入';
+    joinBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      pickRoom(r);
+    });
+    const specBtn = document.createElement('button');
+    specBtn.type = 'button';
+    specBtn.className = 'btn small';
+    specBtn.textContent = '观战';
+    specBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      void joinRoom(r.roomId, 'spectator');
+    });
+    row.append(no, info, joinBtn, specBtn);
+    row.addEventListener('click', () => pickRoom(r));
+    box.appendChild(row);
+  }
+  setJoinMsg(`共 ${joinable.length} 个房间，点击即可加入`, 'ok');
+}
+
+/** 选中某房间：无口令直接加入，有口令则先要求输入 */
+function pickRoom(r: RoomSummary): void {
+  $<HTMLInputElement>('join-room').value = r.roomId;
+  if (r.locked) {
+    setPwdVisible(true);
+    $<HTMLInputElement>('join-pwd').focus();
+    setJoinMsg('该房间已设置口令，请输入口令后点击「加入房间」', 'err');
+  } else {
+    setPwdVisible(false);
+    void joinRoom(r.roomId, 'player');
+  }
+}
+
+/** 加入房间（role='spectator' 时无需口令，只读旁观） */
+async function joinRoom(roomId: string, role: 'player' | 'spectator'): Promise<void> {
+  if (!/^\d{4,8}$/.test(roomId)) return setJoinMsg('请输入 4-8 位数字房间号', 'err');
+  if (!(await ensureSocket())) return setJoinMsg('尚未连接服务器，请先连接', 'err');
+  const pwd = $<HTMLInputElement>('join-pwd').value;
+  setJoinMsg(`正在加入房间 ${roomId} …`);
+  S.aiMode = false;
+  S.offline = false;
+  try {
     const session = readSession();
     const playerId = session && session.roomId === roomId ? session.playerId : undefined;
     await request({
       type: 'join_room',
       roomId,
-      role: asSpectator ? 'spectator' : 'player',
+      role,
       playerId,
       password: pwd || undefined,
       token: S.account?.token,
     });
-    setMsg(asSpectator ? '已进入观战（只读）' : '加入成功', 'ok');
+    setJoinMsg(role === 'spectator' ? '已进入观战（只读）' : '加入成功', 'ok');
   } catch (e) {
-    net?.close();
-    net = null;
-    setMsg(e instanceof Error ? e.message : '加入失败', 'err');
+    setJoinMsg(e instanceof Error ? e.message : '加入失败', 'err');
   }
 }
 
@@ -908,7 +1409,7 @@ async function tryResumeSession(): Promise<boolean> {
   const session = readSession();
   if (!session) return false;
   try {
-    await openSocket();
+    if (!(await ensureSocket())) return false;
     await request(
       {
         type: 'join_room',
@@ -921,149 +1422,84 @@ async function tryResumeSession(): Promise<boolean> {
     );
     return true;
   } catch {
-    net?.close();
-    net = null;
     clearSession();
     return false;
   }
 }
 
-// -------------------------------------------------------------- 账号（可选）
+// ------------------------------------------------------- 邀请在线玩家
 
-function renderAccountState(): void {
-  const user = S.account?.username;
-  $('acct-user').setAttribute('placeholder', user ? `已登录：${user}` : '用户名');
+/** 打开邀请：拉取服务器在线玩家（同房间 / 自己除外） */
+async function openInvite(): Promise<void> {
+  if (!S.roomId) return toast('请先加入房间');
+  if (S.offline) return toast('本地对弈没有可邀请的玩家');
+  if (!(await ensureSocket())) return toast('尚未连接服务器');
+  net?.send({ type: 'list_players' });
+  toast('正在获取在线玩家…');
 }
 
-function renderHomeHint(): void {
-  const who = S.account ? `已登录：${S.account.username}` : '未登录（游客）';
-  $('home-hint').textContent = `服务器 ${location.host} · ${who}`;
-}
-
-/** 登录 / 注册（可选：不登录也能以游客身份游玩） */
-async function doAuth(isRegister: boolean): Promise<void> {
-  const username = $<HTMLInputElement>('acct-user').value.trim();
-  const password = $<HTMLInputElement>('acct-pwd').value;
-  const setMsg = (t: string, kind?: 'ok' | 'err') => {
-    const msg = $('join-msg');
-    msg.textContent = t;
-    msg.className = 'hint' + (kind ? ` ${kind}` : '');
-  };
-  if (!username || !password) return setMsg('请输入用户名与密码', 'err');
-  try {
-    if (!net?.connected) await openSocket();
-    await request(
-      isRegister ? { type: 'register', username, password } : { type: 'login', username, password },
-    );
-    renderAccountState();
-    $<HTMLInputElement>('acct-pwd').value = '';
-  } catch (e) {
-    setMsg(e instanceof Error ? e.message : '操作失败', 'err');
-  }
-}
-
-/** 退出登录（仅清除本地凭据） */
-function logout(): void {
-  S.account = null;
-  writeStore(TOKEN_KEY, null);
-  writeStore(USER_KEY, null);
-  renderAccountState();
-  renderHomeHint();
-  toast('已退出登录');
-}
-
-// -------------------------------------------------------------- 服务器发现与房间列表
-
-/** 把房间列表渲染为可点击按钮（点击后填入房间号） */
-function renderRoomList(rooms: RoomSummary[]): void {
-  const box = $('scan-result');
-  box.replaceChildren();
-  const joinable = rooms.filter((r) => r.mode === 'pvp');
-  box.hidden = joinable.length === 0;
-  for (const r of joinable) {
-    const btn = document.createElement('button');
-    btn.className = 'btn small';
-    const state = r.status === 'playing' ? '对局中' : r.players >= 2 ? '已满' : '等待中';
-    btn.textContent = `${r.roomId} · ${r.players}/2 · ${state}${r.locked ? ' · 🔒' : ''}`;
-    btn.addEventListener('click', () => {
-      $<HTMLInputElement>('join-room').value = r.roomId;
-      if (r.locked) $<HTMLInputElement>('join-pwd').focus();
-      toast(`已选择房间 ${r.roomId}`);
+/** 渲染在线玩家列表：每人两个入口（邀请对局 / 邀请观战） */
+function renderPlayerList(players: OnlinePlayer[]): void {
+  const others = players.filter((p) => p.id !== S.playerId && p.roomId !== S.roomId && p.kind !== 'ai');
+  if (others.length === 0) {
+    showModal({
+      title: '邀请在线玩家',
+      sub: '当前没有其它在线玩家',
+      column: true,
+      buttons: [
+        { label: '刷新', onClick: () => void openInvite() },
+        { label: '关闭', primary: true },
+      ],
     });
-    box.appendChild(btn);
+    return;
   }
-}
-
-/** 刷新房间列表 */
-async function refreshRooms(): Promise<void> {
-  const setMsg = (t: string, kind?: 'ok' | 'err') => {
-    const msg = $('join-msg');
-    msg.textContent = t;
-    msg.className = 'hint' + (kind ? ` ${kind}` : '');
-  };
-  try {
-    if (!net?.connected) await openSocket();
-    net?.send({ type: 'list_rooms' });
-    setMsg('已刷新房间列表', 'ok');
-  } catch (e) {
-    setMsg(e instanceof Error ? e.message : '无法连接服务器', 'err');
-  }
-}
-
-/** 局域网服务器发现：扫描同网段并列出可访问的服务器（点击即跳转） */
-function renderServerList(servers: DiscoveredServer[]): void {
-  const box = $('scan-result');
-  box.replaceChildren();
-  box.hidden = servers.length === 0;
-  for (const s of servers) {
-    const btn = document.createElement('button');
-    btn.className = 'btn small';
-    btn.textContent = `${s.ip}:${s.port}`;
-    btn.addEventListener('click', () => {
-      window.location.href = `http://${s.ip}:${s.port}/`;
+  const buttons: ModalButton[] = [];
+  for (const p of others) {
+    buttons.push({
+      label: `邀请「${p.name}」加入对局`,
+      primary: true,
+      onClick: () => sendInvite(p.id, 'player'),
     });
-    box.appendChild(btn);
+    buttons.push({ label: `邀请「${p.name}」观战`, onClick: () => sendInvite(p.id, 'spectator') });
   }
-}
-
-/** 从 IP 中取前三段作为 /24 网段前缀；不合法返回 null */
-function subnetPrefix(ip: string): string | null {
-  const m = /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/.exec(ip.trim());
-  return m ? m[1] : null;
-}
-
-/** 搜索局域网服务器：先直探当前来源地址，再扫同网段并合并去重 */
-async function scanServers(): Promise<void> {
-  const setMsg = (t: string, kind?: 'ok' | 'err') => {
-    const msg = $('join-msg');
-    msg.textContent = t;
-    msg.className = 'hint' + (kind ? ` ${kind}` : '');
-  };
-  const port = Number(location.port || '7777');
-  const prefix = subnetPrefix(location.hostname);
-  if (!prefix || !Number.isInteger(port)) {
-    return setMsg('请通过服务器地址打开页面后再搜索，或手动输入房间号', 'err');
-  }
-
-  const found = new Map<string, DiscoveredServer>();
-  const add = (h: DiscoveredServer | null) => {
-    if (h) found.set(`${h.ip}:${h.port}`, h);
-  };
-
-  setMsg('正在探测当前服务器…');
-  add(await probeServer(location.hostname, port, { timeoutMs: 800 }));
-
-  const sweep = await discoverSubnet(prefix, port, {
-    onProgress: (done, total) => setMsg(`正在搜索 ${prefix}.0/24 … ${done}/${total}`),
+  buttons.push({ label: '刷新', onClick: () => void openInvite() });
+  buttons.push({ label: '关闭' });
+  showModal({
+    title: '邀请在线玩家',
+    sub: `服务器在线 ${others.length} 人，点击即可发出邀请`,
+    column: true,
+    buttons,
   });
-  for (const h of sweep) add(h);
+}
 
-  const servers = [...found.values()];
-  renderServerList(servers);
-  setMsg(
-    servers.length ? `发现 ${servers.length} 台服务器，点击即可切换` : '未发现其它服务器',
-    servers.length ? 'ok' : 'err',
-  );
+function sendInvite(playerId: string, role: 'player' | 'spectator'): void {
+  net?.send({ type: 'invite_player', playerId, role });
+  toast(role === 'player' ? '已发出对局邀请' : '已发出观战邀请');
+}
+
+/** 收到他人的房间邀请：可直接加入（房间设口令也免口令） */
+function showInviteModal(msg: Extract<ServerMessage, { type: 'invite' }>): void {
+  const roleText = msg.role === 'player' ? '加入对局' : '观战';
+  showModal({
+    title: '房间邀请',
+    sub: `「${msg.from.name}」邀请你${roleText}：房间 ${msg.roomId}${msg.locked ? '（已上锁，邀请可免口令）' : ''}`,
+    buttons: [
+      { label: '接受', primary: true, onClick: () => void acceptInvite(msg.roomId, msg.role) },
+      { label: '拒绝' },
+    ],
+  });
+}
+
+/** 接受邀请并加入房间 */
+async function acceptInvite(roomId: string, role: 'player' | 'spectator'): Promise<void> {
+  if (S.roomId) return toast('你已在房间中');
+  if (!(await ensureSocket())) return toast('尚未连接服务器');
+  try {
+    await request({ type: 'join_room', roomId, role, token: S.account?.token });
+    toast(role === 'player' ? '已加入对局' : '已进入观战');
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '加入失败');
+  }
 }
 
 // -------------------------------------------------------------- 皮肤
@@ -1124,7 +1560,18 @@ function resign(): void {
     title: '确认认输？',
     sub: '认输后本局判负',
     buttons: [
-      { label: '确认认输', primary: true, onClick: () => net?.send({ type: 'resign' }) },
+      {
+        label: '确认认输',
+        primary: true,
+        onClick: () => {
+          if (S.offline && localGame) {
+            localGame.resign('r');
+            applySnapshot(localGame.snapshot());
+          } else {
+            net?.send({ type: 'resign' });
+          }
+        },
+      },
       { label: '取消' },
     ],
   });
@@ -1132,6 +1579,7 @@ function resign(): void {
 
 function offerDraw(): void {
   if (S.status !== 'playing') return toast('对局尚未开始');
+  if (S.offline) return toast('AI 拒绝了和棋请求');
   if (S.pending) return toast('请求已发送，等待对方回应');
   net?.send({ type: 'draw_request' });
   S.pending = 'draw';
@@ -1141,6 +1589,13 @@ function offerDraw(): void {
 
 function requestRestart(): void {
   if (S.status !== 'over') return toast('对局结束后才能重开');
+  if (S.offline) {
+    localGame?.reset('playing');
+    if (localGame) applySnapshot(localGame.snapshot());
+    scheduleLocalAi();
+    toast('已重新开局');
+    return;
+  }
   if (S.pending) return toast('请求已发送，等待对方回应');
   net?.send({ type: 'restart_request' });
   S.pending = 'restart';
@@ -1148,9 +1603,19 @@ function requestRestart(): void {
   toast('已发送重开请求…');
 }
 
-/** 悔棋：请求回退一步（与和棋同构的「请求-回应」） */
+/** 悔棋：请求回退一步（与和棋同构的「请求-回应」）；本地对弈直接回退到本方回合 */
 function offerUndo(): void {
   if (S.status !== 'playing') return toast('对局尚未开始');
+  if (S.offline) {
+    const game = localGame;
+    if (!game) return;
+    if (game.history.length === 0) return toast('当前没有可悔的棋');
+    game.undo();
+    if (game.turn !== 'r' && game.history.length > 0) game.undo();
+    applySnapshot(game.snapshot());
+    toast('已悔棋');
+    return;
+  }
   if (S.pending) return toast('请求已发送，等待对方回应');
   if (S.history.length === 0) return toast('当前没有可悔的棋');
   net?.send({ type: 'undo_request' });
@@ -1180,10 +1645,12 @@ function onCell([r, c]: Pos): void {
 
   if (S.selected) {
     if (S.moves.some(([rr, cc]) => rr === r && cc === c)) {
-      net?.send({ type: 'move', from: S.selected, to: [r, c] });
+      const from = S.selected;
       S.selected = null;
       S.moves = [];
       render();
+      if (S.offline) localMove(from, [r, c]);
+      else net?.send({ type: 'move', from, to: [r, c] });
       return;
     }
     if (p && p.s === S.side) {
@@ -1205,7 +1672,33 @@ function onCell([r, c]: Pos): void {
 
 // -------------------------------------------------------------- 初始化
 
+/** 打开对局回顾（需要服务器提供记录接口） */
+function openHistory(): void {
+  if (!S.server) {
+    toast('请先连接服务器');
+    void openServersScreen();
+    return;
+  }
+  void review?.open();
+}
+
 function bindEvents(): void {
+  // 连接服务器
+  $('btn-server-connect').addEventListener('click', () => {
+    const addr = parseAddress($<HTMLInputElement>('server-addr').value, DEFAULT_PORT);
+    if (!addr) return setServerMsg('地址格式不正确，示例：192.168.1.42:7777', 'err');
+    void connectServer(addr);
+  });
+  $('btn-server-scan').addEventListener('click', () => void scanServers());
+  $('btn-server-list').addEventListener('click', () => void refreshServerList());
+  $('btn-server-enter').addEventListener('click', () => void enterFromServerScreen());
+  $('server-chip').addEventListener('click', () => void openServersScreen());
+  $('acct-chip').addEventListener('click', openAccountPanel);
+  $('server-addr').addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') $('btn-server-connect').click();
+  });
+
+  // 首页
   $('btn-create').addEventListener('click', showCreateMenu);
   $('btn-create-back').addEventListener('click', backToIndex);
   $('btn-create-start').addEventListener('click', () => void createRoom());
@@ -1213,25 +1706,43 @@ function bindEvents(): void {
   $('btn-create-ai').addEventListener('click', () => {
     $('menu-index').hidden = true;
     $('menu-create').hidden = true;
+    $('menu-acct').hidden = true;
     $('menu-ai').hidden = false;
   });
   $('btn-ai-back').addEventListener('click', backToIndex);
-  $('btn-ai-start').addEventListener('click', () => void createAiRoom());
+  $('btn-ai-start').addEventListener('click', createAiRoom);
+  $('btn-acct-back').addEventListener('click', backToIndex);
+  $('btn-login').addEventListener('click', () => void doAuth(false));
+  $('btn-register').addEventListener('click', () => void doAuth(true));
+  $('btn-logout').addEventListener('click', logout);
   $('btn-skin').addEventListener('click', switchSkin);
-  $('btn-history').addEventListener('click', () => void review?.open());
+  $('btn-history').addEventListener('click', openHistory);
+
+  // 等待页
   document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
     btn.addEventListener('click', () => chooseFirst(btn.dataset.mode as FirstMode));
   });
-  $('btn-cancel-host').addEventListener('click', () => void cancelHost());
+  $('btn-cancel-host').addEventListener('click', leaveToHome);
   $('ip-box').addEventListener('click', () => void copyRoomNo());
-  $('btn-connect').addEventListener('click', () => void doJoin());
-  $('btn-spectate').addEventListener('click', () => void doJoin(true));
+
+  // 加入房间
+  $('btn-connect').addEventListener(
+    'click',
+    () => void joinRoom($<HTMLInputElement>('join-room').value.trim(), 'player'),
+  );
+  $('btn-spectate').addEventListener(
+    'click',
+    () => void joinRoom($<HTMLInputElement>('join-room').value.trim(), 'spectator'),
+  );
   $('btn-rooms').addEventListener('click', () => void refreshRooms());
-  $('btn-scan').addEventListener('click', () => void scanServers());
-  $('btn-login').addEventListener('click', () => void doAuth(false));
-  $('btn-register').addEventListener('click', () => void doAuth(true));
-  $('btn-spectate-leave').addEventListener('click', leaveToHome);
   $('btn-join-back').addEventListener('click', () => show('screen-home'));
+
+  // 邀请
+  $('btn-invite').addEventListener('click', () => void openInvite());
+  $('btn-invite-host').addEventListener('click', () => void openInvite());
+
+  // 对局
+  $('btn-spectate-leave').addEventListener('click', leaveToHome);
   $('btn-resign').addEventListener('click', resign);
   $('btn-draw').addEventListener('click', offerDraw);
   $('btn-undo').addEventListener('click', offerUndo);
@@ -1297,11 +1808,11 @@ function bindEvents(): void {
 
   const roomInput = $<HTMLInputElement>('join-room');
   roomInput.addEventListener('keydown', (e) => {
-    if ((e as KeyboardEvent).key === 'Enter') void doJoin();
+    if ((e as KeyboardEvent).key === 'Enter') void joinRoom(roomInput.value.trim(), 'player');
   });
   const pwdInput = $<HTMLInputElement>('join-pwd');
   pwdInput.addEventListener('keydown', (e) => {
-    if ((e as KeyboardEvent).key === 'Enter') void doJoin();
+    if ((e as KeyboardEvent).key === 'Enter') void joinRoom(roomInput.value.trim(), 'player');
   });
 }
 
@@ -1315,6 +1826,7 @@ async function init(): Promise<void> {
     skin,
     images: () => loadedImages[S.skin] ?? {},
     loadImages: ensureSkinImagesLoaded,
+    apiBase,
     show,
     toast,
   });
@@ -1324,21 +1836,32 @@ async function init(): Promise<void> {
   const token = readStore(TOKEN_KEY);
   const username = readStore(USER_KEY);
   if (token && username) S.account = { token, username };
-  renderAccountState();
+  updateHomeChips();
   renderHomeHint();
+
+  // 服务器：浏览器访问时锁定为当前访问地址；桌面客户端由启动参数预填
+  S.serverLocked = !isDesktopClient(window.location.search);
+  S.server = S.serverLocked
+    ? pageServer(window.location.hostname, window.location.port, window.location.protocol)
+    : (parseAddress(pageParams.get('server') ?? '', DEFAULT_PORT) ?? {
+        host: '127.0.0.1',
+        port: DEFAULT_PORT,
+      });
+  upsertServer(S.server);
 
   // 计时读秒（D4）：定时刷新剩余时间显示（未启用计时时几乎零开销）
   window.setInterval(() => {
     if (S.deadline && S.status === 'playing') updatePanel();
   }, 500);
 
-  // 刷新页面后尝试恢复原局（失败静默回首页）
-  await tryResumeSession();
+  // 首个板块：连接服务器
+  show('screen-servers');
+  renderServers();
+  if (S.serverLocked) {
+    await connectLockedServer();
+  } else {
+    await openServersScreen();
+  }
 }
 
 void init();
-
-// 退出登录入口：长按首页提示区（避免占用宝贵的菜单按钮位）
-$('home-hint').addEventListener('dblclick', () => {
-  if (S.account) logout();
-});

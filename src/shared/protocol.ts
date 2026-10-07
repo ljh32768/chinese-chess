@@ -22,6 +22,18 @@ import {
 /** 客户端角色：对局玩家（占席位）/ 观战者（只读，不占席位） */
 export type Role = 'player' | 'spectator';
 
+/** 服务器在线玩家（邀请房间时展示与选择用） */
+export interface OnlinePlayer {
+  /** 玩家稳定标识（account:<用户名> / guest:<随机>） */
+  id: string;
+  name: string;
+  kind: PlayerRef['kind'];
+  /** 所在房间号；null 表示仍在大厅（可被邀请） */
+  roomId: string | null;
+  /** 在房间内的角色；大厅为 null */
+  role: Role | null;
+}
+
 /** 客户端 → 服务端 */
 export type ClientMessage =
   /** 注册账号（用户名唯一，密码 ≥4 位） */
@@ -36,6 +48,10 @@ export type ClientMessage =
   | { type: 'leave_room' }
   /** 请求房间列表 */
   | { type: 'list_rooms' }
+  /** 请求服务器在线玩家列表（房间内邀请用） */
+  | { type: 'list_players' }
+  /** 邀请在线玩家加入本房间：对局或观战（被邀请者可免口令加入） */
+  | { type: 'invite_player'; playerId: string; role: Role }
   /** 走子请求（玩家发起，由服务器校验） */
   | { type: 'move'; from: Pos; to: Pos }
   /** 认输 */
@@ -90,6 +106,10 @@ export type ServerMessage =
     }
   /** 房间列表 */
   | { type: 'room_list'; rooms: RoomSummary[] }
+  /** 服务器在线玩家列表 */
+  | { type: 'player_list'; players: OnlinePlayer[] }
+  /** 收到房间邀请（邀请者 / 房间号 / 角色 / 房间是否设口令） */
+  | { type: 'invite'; from: PlayerRef; roomId: string; role: Role; locked: boolean }
   /** 房间被销毁（终局超时 / 空闲回收 / 房主解散 / 服务器停止） */
   | { type: 'room_closed'; reason: string }
   /** 对局开始（side 为本连接最终阵营，观战者为 null） */

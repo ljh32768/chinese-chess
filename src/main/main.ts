@@ -1,70 +1,43 @@
 /**
- * Electron 客户端主进程：**默认连接中心服务器**（不再默认自建服务）。
+ * Electron 客户端主进程：**启动时不再绑定某个服务器**。
  *
- * 服务器地址来源（按优先级）：
- *   1. 环境变量 `LANSCHESS_SERVER`（形如 `192.168.1.5:7777`）
- *   2. 缺省 `127.0.0.1:7777`
+ * 进程内只起一个「本机外壳服务」（仅监听 127.0.0.1、随机端口、不落盘），
+ * 用于把客户端页面本身交给窗口加载；真正的对局服务器由用户在「连接服务器」板块中选择
+ * （自动搜索局域网 / 手动输入地址），因此服务器切换不需要重启客户端。
  *
- * 连不上时弹窗询问：可选择「本机开服」（便携兜底，进程内起服务器）或退出。
- * 客户端窗口加载的是服务器上的页面，因此与浏览器打开同一地址完全一致。
+ * 通过 URL 参数把初始信息交给渲染层：
+ *   - `client=electron`：标记这是桌面客户端（连接服务器板块可用；浏览器打开时该板块锁定）
+ *   - `server=<host:port>`：优先尝试的服务器（环境变量 `LANSCHESS_SERVER`，缺省 127.0.0.1:7777）
+ *   - `lan=<ip>`：本机局域网地址，供客户端推导要扫描的网段
  */
 
-import { BrowserWindow, app, dialog } from 'electron';
-import { GameServer, listenWithFallback } from '../server/server.js';
+import { BrowserWindow, app } from 'electron';
+import { GameServer, getLanIp } from '../server/server.js';
 
 const DEFAULT_SERVER = '127.0.0.1:7777';
 
-let localServer: GameServer | null = null;
-let localPort = 0;
+/** 本机外壳服务（只提供页面与静态资源；不参与对局） */
+let shellServer: GameServer | null = null;
 
 function targetServer(): string {
   return (process.env.LANSCHESS_SERVER ?? '').trim() || DEFAULT_SERVER;
 }
 
-/** 探测目标地址是否为可用的本游戏服务器（依据 /api/server-info 的版本与端口字段） */
-async function probe(addr: string, timeoutMs = 1500): Promise<boolean> {
-  try {
-    const res = await fetch(`http://${addr}/api/server-info`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res.ok) return false;
-    const info = (await res.json()) as { version?: unknown; port?: unknown };
-    return typeof info.version === 'string' && typeof info.port === 'number';
-  } catch {
-    return false;
-  }
-}
-
-/** 便携兜底：进程内启动服务器并返回可连接的地址 */
-async function ensureLocalServer(): Promise<string> {
-  if (localServer) return `127.0.0.1:${localPort}`;
-  const preferred = Number(process.env.LANSCHESS_PORT ?? 7777);
-  const started = await listenWithFallback(preferred, false);
-  localServer = started.server;
-  localPort = started.port;
-  return `127.0.0.1:${localPort}`;
+/** 起本机外壳服务：仅回环地址 + 随机端口，避免与真实服务器抢占端口或被局域网发现 */
+async function startShellServer(): Promise<number> {
+  const server = new GameServer({ port: 0, host: '127.0.0.1', dataDir: null });
+  const port = await server.listen();
+  shellServer = server;
+  return port;
 }
 
 async function createWindow(): Promise<void> {
-  let addr = targetServer();
-  if (!(await probe(addr))) {
-    const choice = dialog.showMessageBoxSync({
-      type: 'question',
-      buttons: ['本机开服（便携模式）', '退出'],
-      defaultId: 0,
-      cancelId: 1,
-      title: '局域网象棋',
-      message: `无法连接服务器 ${addr}`,
-      detail:
-        '请确认中心服务器已启动、地址正确（可用环境变量 LANSCHESS_SERVER 指定）。\n' +
-        '也可以选择「本机开服」，在本机临时开一局（便携模式）。',
-    });
-    if (choice !== 0) {
-      app.quit();
-      return;
-    }
-    addr = await ensureLocalServer();
-  }
+  const port = await startShellServer();
+  const params = new URLSearchParams({
+    client: 'electron',
+    server: targetServer(),
+    lan: getLanIp(),
+  });
 
   const win = new BrowserWindow({
     width: 1120,
@@ -76,7 +49,7 @@ async function createWindow(): Promise<void> {
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
-  await win.loadURL(`http://${addr}/`);
+  await win.loadURL(`http://127.0.0.1:${port}/?${params.toString()}`);
 }
 
 void app.whenReady().then(createWindow);
@@ -86,7 +59,7 @@ app.on('activate', () => {
 });
 
 app.on('window-all-closed', () => {
-  const s = localServer;
-  localServer = null;
+  const s = shellServer;
+  shellServer = null;
   void (s ? s.close() : Promise.resolve()).finally(() => app.quit());
 });

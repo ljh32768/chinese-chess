@@ -92,7 +92,7 @@ MVP 目标是「局域网内两台设备连上后，能完整、正确地下一�
 | 共享数据结构 | [types.ts](../../src/shared/types.ts) |
 | 共享规则引擎 | [rules.ts](../../src/shared/rules.ts) |
 | 通信协议 | [protocol.ts](../../src/shared/protocol.ts) |
-| 权威状态机 | [game.ts](../../src/server/game.ts#L14-L107) |
+| 权威状态机 | [game.ts](../../src/shared/game.ts#L14-L107) |
 | 主机服务 | [host-server.ts](../../src/server/host-server.ts#L79-L431) |
 | Electron 入口 | [main.ts](../../src/main/main.ts) |
 | CLI 入口 | [cli.ts](../../src/server/cli.ts) |

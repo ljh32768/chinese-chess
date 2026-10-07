@@ -43,7 +43,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 
 消歧约定：同一纵线 ≥2 枚同兵种时位置词前置（前车/后车；3 枚用前中后；≥4 枚首尾用前后、其余按从前序号编号）。
 
-### 3.3 AI 引擎（server/ai.ts）
+### 3.3 AI 引擎（shared/ai.ts）
 
 | 项 | 规格 |
 |---|---|
@@ -128,13 +128,13 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 |---|---|
 | 主机日志 | [log.ts](../../src/server/log.ts) |
 | 中文记谱与吃子 | [notation.ts](../../src/shared/notation.ts) |
-| AI 引擎 | [ai.ts](../../src/server/ai.ts)、[pickMove 调用](../../src/server/host-server.ts) |
+| AI 引擎 | [ai.ts](../../src/shared/ai.ts)、[pickMove 调用](../../src/server/room.ts) |
 | 自动发现 | [discover.ts](../../src/renderer/discover.ts) |
 | 观战/悔棋/人机/计时服务端 | [host-server.ts](../../src/server/host-server.ts)（`handleJoin` / `undo_*` / `startAiGame` / `armTurnTimer`） |
 | 先手方式 / 猜先 / 席位分配 | [host-server.ts `maybeStart()` / `beginFirst()` / `dispatchStart()`](../../src/server/host-server.ts)、[app.ts `chooseFirst()`](../../src/renderer/app.ts) |
 | 对局记录 / AI 推荐服务端 | [host-server.ts `saveRecord()` / `hintFor()`](../../src/server/host-server.ts) |
 | 对局回顾 / 复盘客户端 | [review.ts](../../src/renderer/review.ts) |
-| 状态机扩展 | [game.ts](../../src/server/game.ts)（`history` / `undo` / `timeout` / `deadline`） |
+| 状态机扩展 | [game.ts](../../src/shared/game.ts)（`history` / `undo` / `timeout` / `deadline`） |
 | 渲染层扩展 | [app.ts](../../src/renderer/app.ts)（吃子面板 / 悔棋 / 观战 / 倒计时 / 搜索 / 先手方式）、[review.ts](../../src/renderer/review.ts)（对局回顾 / 复盘 / AI 推荐） |
 | 工程化配置 | [package.json](../../package.json)（dev/lint/format/dist）、[.github/workflows/ci.yml](../../.github/workflows/ci.yml) |
 

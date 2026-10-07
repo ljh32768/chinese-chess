@@ -9,8 +9,32 @@
 <body>
 <div class="app">
 
+  <!-- ========== 连接服务器（客户端启动后的第一个板块；浏览器打开时锁定） ========== -->
+  <section id="screen-servers" class="screen active">
+    <div class="menu_box">
+      <div class="menu_info wide" id="server-panel">
+        <p class="info-title">连接服务器</p>
+        <div class="server-manual">
+          <input type="text" id="server-addr" autocomplete="off" placeholder="192.168.1.42:7777">
+          <button type="button" class="btn small" id="btn-server-connect">连接</button>
+        </div>
+        <div class="scan-actions">
+          <button type="button" class="btn small" id="btn-server-scan">搜索局域网</button>
+          <button type="button" class="btn small" id="btn-server-list">刷新列表</button>
+        </div>
+        <div class="server-list" id="server-list"></div>
+        <p class="hint" id="server-msg"></p>
+      </div>
+      <a id="btn-server-enter">进入游戏</a>
+    </div>
+  </section>
+
   <!-- ========== 首页：木质菜单（参考项目风格） ========== -->
-  <section id="screen-home" class="screen active">
+  <section id="screen-home" class="screen">
+    <div class="home-corner">
+      <button type="button" class="chip" id="server-chip" title="点击查看 / 切换服务器">服务器：—</button>
+      <button type="button" class="chip" id="acct-chip" title="注册 / 登录">登录 / 注册</button>
+    </div>
     <div class="menu_wrap">
       <div class="menu_box">
         <div class="menu_init" id="menu-index">
@@ -35,8 +59,24 @@
             <label><input name="ai-depth" type="radio" value="2"> 菜鸟水平</label>
             <label><input name="ai-depth" type="radio" value="3" checked> 中级水平</label>
             <label><input name="ai-depth" type="radio" value="4"> 高手水平</label>
+            <p class="hint">本地对弈，无需连接服务器</p>
           </div>
           <a id="btn-ai-start">开始对弈</a>
+        </div>
+        <div class="menu_dy" id="menu-acct" hidden>
+          <div class="menu_info">
+            <div class="menu_fh" id="btn-acct-back" title="返回"></div>
+            <label for="acct-user">用户名</label>
+            <input type="text" id="acct-user" autocomplete="username" placeholder="3-16 位字母 / 数字 / 下划线">
+            <label for="acct-pwd">密码</label>
+            <input type="password" id="acct-pwd" autocomplete="current-password" placeholder="至少 4 位">
+            <div class="scan-actions">
+              <button type="button" class="btn small" id="btn-login">登 录</button>
+              <button type="button" class="btn small" id="btn-register">注 册</button>
+            </div>
+            <button type="button" class="btn small danger" id="btn-logout" hidden>退出登录</button>
+            <p class="hint" id="acct-msg"></p>
+          </div>
         </div>
       </div>
       <p class="home-hint" id="home-hint"></p>
@@ -63,36 +103,27 @@
           </div>
           <p class="side_hint" id="side-hint">先手（红方）：房主执红先行</p>
         </div>
+        <button type="button" class="btn small" id="btn-invite-host">邀请在线玩家</button>
         <p class="hint" id="host-wait">让对方在「加入房间」中输入上方房间号</p>
       </div>
     </div>
   </section>
 
-  <!-- ========== 加入房间（面板与挂板内框对齐，见 styles.css .menu_info） ========== -->
+  <!-- ========== 加入房间：房间列表（需先连接服务器） ========== -->
   <section id="screen-join" class="screen">
     <div class="menu_box">
       <div class="menu_info">
         <div class="menu_fh" id="btn-join-back" title="返回"></div>
         <label for="join-room">房间号</label>
         <input type="text" id="join-room" autocomplete="off" placeholder="6 位数字">
-        <label for="join-pwd">口令（如有）</label>
-        <input type="password" id="join-pwd" autocomplete="off" placeholder="无口令可留空">
-        <label for="acct-user">账号（可选）</label>
-        <input type="text" id="acct-user" autocomplete="username" placeholder="用户名">
-        <input type="password" id="acct-pwd" autocomplete="current-password" placeholder="密码">
         <div class="scan-actions">
-          <button class="btn small" id="btn-login">登 录</button>
-          <button class="btn small" id="btn-register">注 册</button>
+          <button type="button" class="btn small" id="btn-rooms">刷新房间</button>
+          <button type="button" class="btn small" id="btn-spectate">观 战</button>
         </div>
-        <div class="scan-actions">
-          <button class="btn small" id="btn-spectate">观 战</button>
-          <button class="btn small" id="btn-rooms">刷新房间</button>
-        </div>
-        <div class="scan-actions">
-          <button class="btn small" id="btn-scan">搜索服务器</button>
-        </div>
+        <div class="room-list" id="room-list"></div>
+        <label for="join-pwd" id="join-pwd-label" hidden>口令（房间已上锁）</label>
+        <input type="password" id="join-pwd" autocomplete="off" placeholder="请输入房间口令" hidden>
         <p class="hint" id="join-msg"></p>
-        <div class="scan-result" id="scan-result" hidden></div>
       </div>
       <a id="btn-connect">加入房间</a>
     </div>
@@ -137,6 +168,7 @@
           <div class="cap-row"><span class="cap-label">黑方吃子</span><span class="cap-list" id="cap-black-list">—</span></div>
         </div>
         <div class="role-hint" id="role-hint"></div>
+        <input type="button" id="btn-invite" value="邀请在线玩家" hidden>
       </aside>
     </div>
   </section>
