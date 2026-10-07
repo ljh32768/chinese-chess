@@ -1,8 +1,9 @@
 /**
  * 主界面（首页 / 等待 / 加入）布局规格测试：
  * 1) 主页背景 init_bg.png 的署名文字已用 cover.bmp 木板条带覆盖（像素级验证，透明区不受影响）；
- * 2) 主界面整体放大：木质挂板与页脚提示按 --ui-scale 等比缩放，对局页 / 对局回顾页不使用缩放；
- * 3) 三个子面板（创建对局 / 加入对局 / 人机对弈）与木板内框对齐（几何常量契约）。
+ * 2) 首页木质挂板按 --ui-scale 等比缩放；点击板块后的界面改用「大面板」（参考对局回顾），不再与木框对齐；
+ * 3) 大面板内的列表行（房间 / 玩家）不会被撑破，离线玩家置灰且不显示邀请按钮；
+ * 4) 底部小字（服务器 / 已登录）已删除，等待页取先方式为下拉框（默认猜先）。
  */
 
 import { readFileSync } from 'node:fs';
@@ -17,6 +18,7 @@ const CSS = readFileSync(path.join(ROOT, 'src', 'renderer', 'styles.css'), 'utf8
   /\/\*[\s\S]*?\*\//g,
   '',
 );
+const HTML = readFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), 'utf8');
 const BG_PNG = path.join(ROOT, 'src', 'renderer', 'assets', 'img', 'init_bg.png');
 
 // ---------------------------------------------------------------- CSS 解析辅助
@@ -61,17 +63,6 @@ function px(selector: string, prop: string): number | undefined {
   if (v === undefined) return undefined;
   const m = /^(-?[\d.]+)px$/.exec(v);
   return m ? Number(m[1]) : undefined;
-}
-
-/** 解析 margin 简写，返回 [top, right, bottom, left]（允许无单位的 0） */
-function margin(selector: string): number[] {
-  const v = decl(selector, 'margin') ?? '';
-  const nums = v.split(/\s+/).map((t) => Number(/^(-?[\d.]+)(?:px)?$/.exec(t)?.[1]));
-  if (nums.length === 1) return [nums[0], nums[0], nums[0], nums[0]];
-  if (nums.length === 2) return [nums[0], nums[1], nums[0], nums[1]];
-  if (nums.length === 3) return [nums[0], nums[1], nums[2], nums[1]];
-  if (nums.length === 4) return nums;
-  throw new Error(`无法解析 margin: "${v}"`);
 }
 
 // ---------------------------------------------------------------- 索引 PNG 解码
@@ -173,19 +164,19 @@ describe('主页背景：署名文字已被 cover.bmp 覆盖', () => {
   });
 });
 
-// ---------------------------------------------------------------- 主界面整体放大
+// ---------------------------------------------------------------- 首页挂板与整体放大
 
-describe('主界面整体放大：--ui-scale', () => {
+describe('首页木质挂板：仅入口，按 --ui-scale 放大', () => {
   it('放大比例大于 1', () => {
     expect(Number(decl(':root', '--ui-scale'))).toBeGreaterThan(1);
   });
 
-  it('仅木质挂板与页脚提示缩放；对局页 / 对局回顾页不受影响', () => {
+  it('仅木质挂板缩放；大面板 / 对局页 / 对局回顾页不受影响', () => {
     const zoomSelectors = RULES.filter((r) => /(?:^|;)\s*zoom\s*:/.test(';' + r.decls))
       .map((r) => r.selectors.join(', '))
       .sort();
-    expect(zoomSelectors).toEqual(['.home-hint', '.menu_box']);
-    for (const sel of ['.game-layout', '.chess-box', '.panel', '.review_box', '.modal']) {
+    expect(zoomSelectors).toEqual(['.menu_box']);
+    for (const sel of ['.game-layout', '.chess-box', '.panel', '.review_box', '.modal', '.panel-lg']) {
       expect(decl(sel, 'zoom')).toBeUndefined();
     }
   });
@@ -194,62 +185,102 @@ describe('主界面整体放大：--ui-scale', () => {
     expect(px('.menu_box', 'width')).toBe(316);
     expect(decl('.menu_box', 'background')).toContain('init_bg.png');
     expect(decl('.menu_box', 'zoom')).toBe('var(--ui-scale)');
+    // 首页挂板只承载 5 个入口按钮，不再嵌套子面板
+    expect(HTML).toMatch(/<div class="menu_box" id="menu-board">[\s\S]*?id="menu-index"/);
   });
 });
 
-// ---------------------------------------------------------------- 面板与木框对齐
+// ---------------------------------------------------------------- 点击板块后的大面板
 
-describe('子面板与木板内框对齐（创建 / 加入 / 人机）', () => {
-  // 素材 316×422；木板内框实测 x≈10..290、y≈158..395
-  const FRAME = { x: 10, y: 158, w: 280, h: 237 };
-
-  it('挂板内容区从内框上沿开始，padding box 完整覆盖 422 高的背景图', () => {
-    expect(px('.menu_box', 'padding-top')).toBe(FRAME.y);
-    expect(px('.menu_box', 'height')).toBe(422 - FRAME.y);
-    // 首页 5 个按钮仍在原位置（y = 190 起），不因对齐调整而位移
-    expect(px('.menu_init', 'padding-top')).toBe(190 - FRAME.y);
+describe('点击板块后的界面：不再与木框对齐，改用大面板（参考对局回顾）', () => {
+  it('大面板与「对局回顾」同款：宽 620、限高可滚动', () => {
+    expect(decl('.panel-lg', 'max-width')).toBe('620px');
+    expect(decl('.review_box', 'max-width')).toBe('620px');
+    expect(decl('.panel-lg', 'overflow-y')).toBe('auto');
+    expect(decl('.panel-lg', 'max-height')).toBe('calc(100vh - 48px)');
   });
 
-  it('面板与内框同宽同左（加入 / 人机共用 .menu_info；等待页铺满内框）', () => {
-    expect(px('.menu_info', 'width')).toBe(FRAME.w);
-    const [mt, , mb, ml] = margin('.menu_info');
-    expect({ mt, ml, mb }).toEqual({ mt: 0, ml: FRAME.x, mb: 8 });
-    // 等待页版块高度 = 内框高度
-    expect(px('.menu_info.wide', 'height')).toBe(FRAME.h);
-    // 面板顶部（158）+ 等待版块高度（237）= 395 = 内框下沿
-    expect(FRAME.y + FRAME.h).toBe(395);
+  it('已删除「与木板内框对齐」的窄面板规则（.menu_info / 280 宽 / 内框几何常量）', () => {
+    expect(RULES.some((r) => r.selectors.some((s) => s.startsWith('.menu_info')))).toBe(false);
+    // 大面板不再出现 280px 宽或 237px 高这类内框尺寸
+    const values = RULES.flatMap((r) => [decl(r.selectors[0], 'width'), decl(r.selectors[0], 'max-height')]);
+    expect(values).not.toContain('280px');
+    expect(values).not.toContain('237px');
   });
 
-  it('面板下方按钮（开始对弈 / 连接）落在内框内：面板限高 + 8px 间距 + 46px 按钮', () => {
-    const BTN = 46;
-    expect(px('#screen-join .menu_info', 'max-height')).toBe(FRAME.h - BTN - 8);
-    expect(px('.menu_dy a', 'margin-top')).toBe(8);
-    expect(px('#btn-connect', 'margin-top')).toBe(8);
-    expect(px('#btn-server-enter', 'margin-top')).toBe(8);
-    expect(px('.menu_box a', 'height')).toBe(BTN);
+  it('三个首页面板 / 连接服务器 / 等待 / 加入 都用大面板承载', () => {
+    for (const id of ['menu-create', 'menu-ai', 'menu-acct', 'server-panel']) {
+      const idx = HTML.indexOf(`id="${id}"`);
+      expect(idx).toBeGreaterThan(-1);
+      // 元素自身带 panel-lg 类
+      expect(HTML.slice(HTML.lastIndexOf('<', idx), HTML.indexOf('>', idx))).toContain('panel-lg');
+    }
+    for (const id of ['screen-host', 'screen-join']) {
+      const idx = HTML.indexOf(`id="${id}"`);
+      expect(idx).toBeGreaterThan(-1);
+      // 整屏承载的大面板
+      expect(HTML.slice(idx, HTML.indexOf('</section>', idx))).toContain('class="panel-lg"');
+    }
+  });
+
+  it('整行按钮只作用于 .btn.block，列表行内的小按钮显式复位外边距', () => {
+    expect(decl('.btn.block', 'width')).toBe('100%');
+    expect(decl('.modal .btn', 'flex')).toBe('1');
+    // 列表行里的并排小按钮不被整行规则影响
+    for (const sel of ['.room-row .btn', '.player-item .btn', '.server-row .btn']) {
+      expect(decl(sel, 'margin-top')).toBe('0');
+      expect(decl(sel, 'width')).toBeUndefined();
+    }
+    // 并排按钮行按 flex 等分，不取整行宽
+    expect(decl('.scan-actions .btn', 'width')).toBe('auto');
   });
 });
 
-// ---------------------------------------------------------------- 面板内列表行
+// ---------------------------------------------------------------- 列表行与邀请玩家
 
-describe('窄面板内的列表行不会被撑破（连接服务器 / 加入房间）', () => {
-  it('整行按钮只作用于直接子元素，不会命中列表行内的并排小按钮', () => {
-    expect(decl('.menu_info > .btn', 'width')).toBe('100%');
-    // 若退回「后代选择器」写法，房间行里的「加入 / 观战」会被撑到整行宽而溢出被裁剪
-    expect(RULES.some((r) => r.selectors.includes('.menu_info .btn'))).toBe(false);
-  });
-
+describe('大面板内的列表行（房间 / 服务器 / 邀请玩家）', () => {
   it('列表行用 flex 排布，信息项 min-width 归零（可省略），按钮不参与拉伸', () => {
     expect(decl('.room-row', 'display')).toBe('flex');
     expect(decl('.room-row .btn', 'flex')).toBe('none');
     expect(decl('.room-row .room-info', 'min-width')).toBe('0');
     expect(decl('.server-row .addr', 'min-width')).toBe('0');
     expect(decl('.server-manual .btn', 'flex')).toBe('none');
-    // 横向裁掉溢出内容，避免出现横向滚动条
-    expect(decl('#screen-join .menu_info', 'overflow-x')).toBe('hidden');
+    expect(decl('.player-item .p-name', 'min-width')).toBe('0');
+    expect(decl('.player-item .btn', 'flex')).toBe('none');
   });
 
-  it('hidden 属性必须生效（需盖过 .menu_info label 等更具体的选择器）', () => {
+  it('邀请玩家：宽版弹层 + 玩家列表；离线 / 对局中的玩家置灰且不显示邀请按钮', () => {
+    expect(decl('.modal.wide', 'max-width')).toBe('520px');
+    expect(decl('.player-item', 'display')).toBe('flex');
+    expect(decl('.player-item.offline', 'opacity')).toBe('0.6');
+    expect(decl('.player-item.busy', 'opacity')).toBe('0.72');
+    expect(RULES.some((r) => r.selectors.includes('.player-item.offline .btn'))).toBe(true);
+    expect(RULES.some((r) => r.selectors.includes('.player-item.busy .btn'))).toBe(true);
+    // 弹层新增富内容容器（玩家列表挂在这里）
+    expect(HTML).toContain('id="modal-body"');
+    expect(decl('.modal-body', 'overflow-y')).toBe('auto');
+  });
+
+  it('hidden 属性必须生效（需盖过 label / .btn 等更具体的选择器）', () => {
     expect(decl('[hidden]', 'display')).toBe('none !important');
+  });
+});
+
+// ---------------------------------------------------------------- 文案与表单
+
+describe('其他界面约定', () => {
+  it('底部小字「服务器 xxx · 已登录 xxx」已删除', () => {
+    expect(HTML).not.toContain('home-hint');
+    expect(CSS).not.toContain('home-hint');
+  });
+
+  it('等待页取先方式改为下拉框，默认猜先', () => {
+    expect(HTML).toMatch(/<select id="first-mode">[\s\S]*?<option value="guess" selected>/);
+    expect(HTML).toContain('<option value="random">');
+    expect(HTML).toContain('<option value="r">');
+    expect(HTML).toContain('<option value="b">');
+    // 原四个先手按钮已移除
+    expect(HTML).not.toContain('side_opts');
+    expect(CSS).not.toContain('side_opt');
   });
 });

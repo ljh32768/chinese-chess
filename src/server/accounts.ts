@@ -61,6 +61,11 @@ export class AccountStore {
     return null;
   }
 
+  /** 已注册用户名（在线状态由服务器结合当前连接判断） */
+  usernames(): string[] {
+    return [...this.users.keys()];
+  }
+
   register(username: unknown, password: unknown): AuthResult {
     if (typeof username !== 'string' || !USERNAME_RE.test(username)) {
       return { ok: false, error: '用户名需为 3-16 位字母、数字或下划线' };

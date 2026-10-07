@@ -22,7 +22,7 @@ import {
 /** 客户端角色：对局玩家（占席位）/ 观战者（只读，不占席位） */
 export type Role = 'player' | 'spectator';
 
-/** 服务器在线玩家（邀请房间时展示与选择用） */
+/** 服务器玩家（邀请房间时展示与选择用）：在线连接 + 已注册但离线的账号 */
 export interface OnlinePlayer {
   /** 玩家稳定标识（account:<用户名> / guest:<随机>） */
   id: string;
@@ -32,6 +32,8 @@ export interface OnlinePlayer {
   roomId: string | null;
   /** 在房间内的角色；大厅为 null */
   role: Role | null;
+  /** 是否在线：false（离线账号）仅作展示置灰，不可邀请 */
+  online: boolean;
 }
 
 /** 客户端 → 服务端 */

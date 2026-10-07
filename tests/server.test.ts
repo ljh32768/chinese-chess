@@ -781,6 +781,20 @@ describe('服务器 · 对局回顾与 AI 推荐', () => {
     };
     expect(list.games).toHaveLength(0);
   });
+
+  it('人机对局终局不计入对局回顾', async () => {
+    const s = await startServer({ aiDelayMs: 1000 });
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const { c: host } = await createRoom(s, { mode: 'ai' });
+    await host.waitType('start');
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    await host.waitType('move_applied');
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+
+    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: unknown[] };
+    expect(list.games).toHaveLength(0);
+  }, 10000);
 });
 
 describe('服务器 · HTTP 接口与账号', () => {
@@ -1127,7 +1141,28 @@ describe('服务器 · 在线玩家与房间邀请', () => {
     expect(list.players).toHaveLength(3);
     expect(list.players.filter((p) => p.roomId === roomId)).toHaveLength(2);
     expect(list.players.filter((p) => p.roomId === null)).toHaveLength(1);
+    expect(list.players.every((p) => p.online)).toBe(true);
     expect(lobby).toBeDefined();
+  });
+
+  it('list_players 包含已注册但离线的账号（online=false，不可邀请）', async () => {
+    const s = await startServer();
+    const { c: host } = await createRoom(s);
+    // 注册后用 REST 直接落盘账号：没有 WebSocket 连接 → 视为离线
+    await fetch(`http://127.0.0.1:${s.address.port}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'offline_user', password: 'pass1234' }),
+    });
+
+    host.send({ type: 'list_players' });
+    const list = await host.waitType('player_list');
+    const offline = list.players.find((p) => p.id === 'account:offline_user');
+    expect(offline).toBeDefined();
+    expect(offline).toMatchObject({ name: 'offline_user', kind: 'account', online: false, roomId: null });
+
+    host.send({ type: 'invite_player', playerId: 'account:offline_user', role: 'player' });
+    expect((await host.waitType('error')).message).toBe('该玩家不在线');
   });
 
   it('邀请大厅玩家：对方收到 invite（含邀请者 / 房间号 / 角色 / 是否上锁）', async () => {

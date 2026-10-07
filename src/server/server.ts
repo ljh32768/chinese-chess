@@ -354,7 +354,7 @@ export class GameServer {
       case 'list_rooms':
         return wsSend(conn, { type: 'room_list', rooms: this.listRooms() });
       case 'list_players':
-        return wsSend(conn, { type: 'player_list', players: this.onlinePlayers() });
+        return wsSend(conn, { type: 'player_list', players: this.playerList() });
       case 'invite_player':
         return this.handleInvite(conn, msg);
       case 'ping':
@@ -457,9 +457,14 @@ export class GameServer {
     room.afterJoin(result === 'rejoined', player.id);
   }
 
-  /** 在线玩家列表（房间邀请用）：每个已识别身份的连接一条 */
-  private onlinePlayers(): OnlinePlayer[] {
+  /**
+   * 玩家列表（房间邀请用）：
+   * - 在线：每个已识别身份的连接一条（携带房间归属，供客户端判断是否可邀请）；
+   * - 离线：已注册但当前未连接的账号（仅作展示置灰，不可邀请）。
+   */
+  private playerList(): OnlinePlayer[] {
     const out: OnlinePlayer[] = [];
+    const seen = new Set<string>();
     for (const c of this.conns) {
       if (!c.player) continue;
       out.push({
@@ -468,7 +473,14 @@ export class GameServer {
         kind: c.player.kind,
         roomId: c.roomId,
         role: c.role,
+        online: true,
       });
+      seen.add(c.player.id);
+    }
+    for (const username of this.accounts.usernames()) {
+      const id = `account:${username}`;
+      if (seen.has(id)) continue;
+      out.push({ id, name: username, kind: 'account', roomId: null, role: null, online: false });
     }
     return out;
   }

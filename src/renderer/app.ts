@@ -118,8 +118,10 @@ const S = {
   skin: DEFAULT_SKIN as SkinId,
   /** 鼠标悬停的交叉点（仅用于预高亮） */
   hover: null as Pos | null,
-  /** 房主在等待页选择的先手（红方）方式 */
-  firstMode: 'r' as FirstMode,
+  /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
+  firstMode: 'guess' as FirstMode,
+  /** 猜先阶段：双方到齐后先进入棋盘界面，再在棋盘上抓子 / 猜单双 */
+  guessPhase: null as null | 'grasp' | 'waitGrasp' | 'waitGuess',
   /** 当前账号（可选）：登录后对局记录归属账号，并支持跨设备恢复席位 */
   account: null as { token: string; username: string } | null,
 };
@@ -162,9 +164,22 @@ interface ModalButton {
   onClick?: () => void;
 }
 
-function showModal(o: { title: string; sub?: string; buttons: ModalButton[]; column?: boolean }): void {
+function showModal(o: {
+  title: string;
+  sub?: string;
+  buttons: ModalButton[];
+  column?: boolean;
+  /** 富内容（如玩家列表），置于标题与按钮之间 */
+  body?: HTMLElement;
+  /** 更宽的弹层（列表类内容） */
+  wide?: boolean;
+}): void {
   $('modal-title').textContent = o.title;
   $('modal-sub').textContent = o.sub ?? '';
+  const body = $('modal-body');
+  body.replaceChildren();
+  if (o.body) body.appendChild(o.body);
+  $('modal-card').classList.toggle('wide', !!o.wide);
   const box = $('modal-btns');
   box.className = 'btns' + (o.column ? ' col' : '');
   box.replaceChildren();
@@ -290,9 +305,27 @@ function updateRoleHint(): void {
     $('role-hint').textContent = `房间 ${S.roomId} · 人机对战 · AI 执黑`;
     return;
   }
+  if (S.guessPhase) {
+    $('role-hint').textContent = `房间 ${S.roomId} · 猜先`;
+    return;
+  }
   $('role-hint').textContent = `房间 ${S.roomId} · 你执${S.side === 'r' ? '红' : '黑'}${
     S.isOwner ? ' · 房主' : ''
   }`;
+}
+
+/** 猜先阶段的状态文案（未在猜先中返回 null） */
+function guessStatusText(): string | null {
+  switch (S.guessPhase) {
+    case 'grasp':
+      return '猜先：请抓单或抓双';
+    case 'waitGuess':
+      return '猜先：等待对手猜单双…';
+    case 'waitGrasp':
+      return '猜先：等待房主抓子…';
+    default:
+      return null;
+  }
 }
 
 /** 计时读秒剩余时间文案（未启用计时返回空串） */
@@ -302,14 +335,18 @@ function remainText(): string {
   return `（剩余 ${sec}s）`;
 }
 
-/** 房间内的「邀请在线玩家」入口：仅联机且在房间内时可用 */
+/** 房间内的「邀请玩家 / 邀请观战」入口：仅联机且在房间内时可用（开局后转为邀请观战） */
 function renderInviteButtons(): void {
   const can = !!S.roomId && !S.offline;
-  $('btn-invite').hidden = !can;
+  const label = inviteRole() === 'spectator' ? '邀请观战' : '邀请玩家';
+  $<HTMLInputElement>('btn-invite').hidden = !can;
+  $<HTMLInputElement>('btn-invite').value = label;
   $('btn-invite-host').hidden = !can;
+  $('btn-invite-host').textContent = label;
 }
 
 function updatePanel(): void {
+  updateRoleHint();
   const opp: Side = S.side === 'r' ? 'b' : 'r';
   const rowTop = $('p-top');
   const rowBottom = $('p-bottom');
@@ -355,7 +392,7 @@ function updatePanel(): void {
         ? '轮到你走棋'
         : '对方思考中…';
   } else {
-    statusText = S.spectator ? '等待对局开始' : '准备开始';
+    statusText = S.spectator ? '等待对局开始' : (guessStatusText() ?? '准备开始');
   }
   st.textContent = active ? `${statusText}${remainText()}` : statusText;
 
@@ -398,7 +435,6 @@ function applySnapshot(s: GameSnapshot): void {
   S.hover = null;
   S.history = s.history ?? [];
   S.deadline = s.deadline ?? null;
-  updateRoleHint();
   if ($('screen-game').classList.contains('active')) render();
 }
 
@@ -407,7 +443,7 @@ function enterGame(): void {
   render();
 }
 
-/** 等待页：展示房间号 / 口令状态 / 先手方式 */
+/** 等待页：展示房间号 / 口令状态 / 取先方式 */
 function showWaiting(): void {
   $('host-ip').textContent = S.roomId || '—';
   $('room-pass-hint').textContent = S.locked
@@ -423,18 +459,16 @@ const FIRST_HINT: Record<FirstMode, string> = {
   r: '先手（红方）：房主执红先行',
   b: '先手（红方）：房主执黑，对手执红先行',
   random: '先手（红方）：开局时随机分配红黑',
-  guess: '先手（红方）：房主抓单双、对手猜，猜中者执红',
+  guess: '先手（红方）：房主抓单双、对手猜，猜中者执红；对手加入后双方直接进入棋盘再猜',
 };
 
-/** 等待页：渲染先手（红方）方式的选择状态 */
+/** 等待页：渲染取先方式下拉框（默认「猜先」）与说明 */
 function renderSidePick(): void {
-  document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.mode === S.firstMode);
-  });
+  $<HTMLSelectElement>('first-mode').value = S.firstMode;
   $('side-hint').textContent = FIRST_HINT[S.firstMode];
 }
 
-/** 等待页：选择先手方式（仅等待阶段有效，开赛后服务端会拒绝） */
+/** 等待页：选择取先方式（仅等待阶段有效，开赛后服务端会拒绝） */
 function chooseFirst(mode: FirstMode): void {
   if (S.firstMode === mode) return;
   S.firstMode = mode;
@@ -456,7 +490,6 @@ function handleMessage(msg: ServerMessage): void {
       writeStore(USER_KEY, msg.username);
       renderAccountPanel();
       updateHomeChips();
-      renderHomeHint();
       toast(`已登录：${msg.username}`);
       settlePending(true);
       return;
@@ -494,14 +527,16 @@ function handleMessage(msg: ServerMessage): void {
     }
     case 'start':
       closeModal(); // 猜先弹层（若在等待应答时开局）
+      S.guessPhase = null;
       if (msg.side !== null) S.side = msg.side;
       applySnapshot(msg.state);
       enterGame();
       toast('对局开始，红方先行');
       return;
     case 'grasp_request':
-      // 猜先第一步：房主自己抓单 / 抓双
-      $('host-wait').textContent = '猜先：请选择抓单或抓双…';
+      // 猜先第一步：房主自己抓单 / 抓双（双方已在对局界面，弹层盖在棋盘上）
+      S.guessPhase = 'grasp';
+      enterGame();
       showModal({
         title: '猜 先',
         sub: '请抓子（藏好，让对方猜单双）',
@@ -512,10 +547,14 @@ function handleMessage(msg: ServerMessage): void {
       });
       return;
     case 'guess_request':
-      // 猜先第二步：对手弹层应答，房主在等待页看到进度
+      // 猜先第二步：对手弹层应答，房主在对局界面看进度
+      enterGame();
       if (S.isOwner) {
-        $('host-wait').textContent = '进入猜先：等待对手猜单双…';
+        S.guessPhase = 'waitGuess';
+        updatePanel();
       } else {
+        S.guessPhase = null;
+        updatePanel();
         showModal({
           title: '猜 先',
           sub: '房主已抓子，请猜单双 —— 猜中者执红',
@@ -531,6 +570,8 @@ function handleMessage(msg: ServerMessage): void {
       }
       return;
     case 'first_result': {
+      S.guessPhase = null;
+      updatePanel();
       const ownerRed = msg.ownerSide === 'r';
       if (msg.mode === 'guess' && msg.guess) {
         const cn = (c: GuessChoice) => (c === 'odd' ? '单' : '双');
@@ -567,6 +608,7 @@ function handleMessage(msg: ServerMessage): void {
       applySnapshot(msg.state);
       // 对手离开 / 放弃等待后回到等待页；顺带关闭断线弹层
       if (S.role === 'player' && S.status === 'waiting' && !S.aiMode) {
+        S.guessPhase = null;
         closeModal();
         $('host-wait').textContent = '对手已离开，等待新对手加入…';
         show('screen-host');
@@ -626,6 +668,9 @@ function handleMessage(msg: ServerMessage): void {
       S.oppName = msg.player.name;
       if (S.status === 'playing') {
         toast('对手已重新连接');
+      } else if (S.firstMode === 'guess') {
+        // 猜先：有人加入后直接进入棋盘界面，再在棋盘上抓子 / 猜单双
+        enterGame();
       } else {
         $('host-wait').textContent = `对手（${msg.player.name}）已加入，正在开局…`;
       }
@@ -794,6 +839,7 @@ function applyRoomJoined(msg: Extract<ServerMessage, { type: 'room_joined' }>): 
   S.oppName = '';
   S.offline = false;
   S.aiMode = false;
+  S.guessPhase = null;
   storeSession();
 
   applySnapshot(msg.state);
@@ -803,6 +849,10 @@ function applyRoomJoined(msg: Extract<ServerMessage, { type: 'room_joined' }>): 
   } else if (msg.state.status === 'playing') {
     enterGame();
     toast('已恢复对局');
+  } else if (S.firstMode === 'guess' && !S.isOwner) {
+    // 猜先：有人加入后直接进入棋盘界面，再在棋盘上抓子 / 猜单双
+    S.guessPhase = 'waitGrasp';
+    enterGame();
   } else {
     showWaiting();
   }
@@ -827,6 +877,7 @@ function resetLocal(): void {
   S.oppName = '';
   S.oppAway = false;
   S.pending = null;
+  S.guessPhase = null;
   localGame = null;
   window.clearTimeout(localAiTimer);
   localAiTimer = 0;
@@ -840,7 +891,6 @@ function leaveToHome(): void {
   resetLocal();
   backToIndex();
   show('screen-home');
-  renderHomeHint();
 }
 
 // --------------------------------------------------- 服务器选择（连接服务器）
@@ -933,7 +983,7 @@ function renderServers(): void {
     }
     list.appendChild(row);
   }
-  $('btn-server-enter').textContent = net?.connected ? '进入游戏' : '进入游戏（仅本机对弈）';
+  $('btn-server-enter').textContent = net?.connected ? '进入游戏' : '进入（本机对弈）';
 }
 
 /** 连接指定服务器：探测成功则切换 WebSocket 目标并标记为已连接 */
@@ -971,7 +1021,7 @@ async function connectServer(addr: ServerAddr, silent = false): Promise<boolean>
   }
   S.server = target;
   renderServers();
-  renderHomeHint();
+  updateHomeChips();
   if (!silent) setServerMsg(`已连接 ${target.host}:${target.port}`, 'ok');
   return true;
 }
@@ -987,7 +1037,7 @@ async function connectLockedServer(): Promise<void> {
     setServerMsg('无法连接本页面所在服务器（浏览器访问时地址已锁定）', 'err');
   }
   renderServers();
-  renderHomeHint();
+  updateHomeChips();
 }
 
 /** 可扫描的 /24 网段前缀（来自启动参数的本机地址与已选服务器地址） */
@@ -1047,7 +1097,6 @@ async function enterFromServerScreen(): Promise<void> {
   backToIndex();
   show('screen-home');
   updateHomeChips();
-  renderHomeHint();
   if (net?.connected) await tryResumeSession();
 }
 
@@ -1078,33 +1127,40 @@ function apiBase(): string {
 
 // -------------------------------------------------------------- 首页入口
 
-const FIRST_MODE_DEFAULT: FirstMode = 'r';
+/** 默认取先方式：猜先（双方进入棋盘后再抓子 / 猜单双） */
+const FIRST_MODE_DEFAULT: FirstMode = 'guess';
 
-/** 首页「创建房间」子菜单 */
-function showCreateMenu(): void {
-  $('menu-index').hidden = true;
-  $('menu-ai').hidden = true;
-  $('menu-acct').hidden = true;
-  $('menu-create').hidden = false;
+/** 首页板块：木质挂板（入口）与三个大面板互斥显示 */
+type HomePanel = 'index' | 'create' | 'ai' | 'acct';
+
+function showHomePanel(panel: HomePanel): void {
+  $('menu-board').hidden = panel !== 'index';
+  $('menu-index').hidden = panel !== 'index';
+  $('menu-create').hidden = panel !== 'create';
+  $('menu-ai').hidden = panel !== 'ai';
+  $('menu-acct').hidden = panel !== 'acct';
 }
 
 function backToIndex(): void {
-  $('menu-ai').hidden = true;
-  $('menu-create').hidden = true;
-  $('menu-acct').hidden = true;
-  $('menu-index').hidden = false;
+  showHomePanel('index');
 }
 
 /** 创建双人对战房间（口令可选，留空即任何人可加入） */
 async function createRoom(): Promise<void> {
   if (!requireServer()) return;
   const password = $<HTMLInputElement>('create-pass').value.trim();
+  // 服务端房间的缺省取先方式是「房主执红」，客户端缺省是「猜先」：
+  // 建房成功后立即把本端默认同步给服务器，并回写本端状态（否则会被 room_joined 覆盖成服务端缺省值）
+  const firstMode = FIRST_MODE_DEFAULT;
   try {
     await ensureSocket();
     S.aiMode = false;
     S.offline = false;
-    S.firstMode = FIRST_MODE_DEFAULT;
+    S.guessPhase = null;
     await request({ type: 'create_room', mode: 'pvp', password: password || null, token: S.account?.token });
+    S.firstMode = firstMode;
+    renderSidePick();
+    net?.send({ type: 'choose_first', mode: firstMode });
     backToIndex();
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
@@ -1190,10 +1246,7 @@ function updateHomeChips(): void {
 
 /** 打开账号面板（登录 / 注册 / 退出登录） */
 function openAccountPanel(): void {
-  $('menu-index').hidden = true;
-  $('menu-create').hidden = true;
-  $('menu-ai').hidden = true;
-  $('menu-acct').hidden = false;
+  showHomePanel('acct');
   renderAccountPanel();
 }
 
@@ -1203,12 +1256,6 @@ function renderAccountPanel(): void {
   msg.textContent = S.account ? `已登录：${S.account.username}` : '未登录将以游客身份游玩';
   $<HTMLButtonElement>('btn-logout').hidden = !S.account;
   $<HTMLInputElement>('acct-user').value = S.account?.username ?? '';
-}
-
-function renderHomeHint(): void {
-  const who = S.account ? `已登录：${S.account.username}` : '未登录（游客）';
-  const server = S.server ? `${S.server.host}:${S.server.port}` : '未连接';
-  $('home-hint').textContent = `服务器 ${server} · ${who}`;
 }
 
 /** 登录 / 注册（可选：不登录也能以游客身份游玩） */
@@ -1244,7 +1291,6 @@ function logout(): void {
   writeStore(USER_KEY, null);
   renderAccountPanel();
   updateHomeChips();
-  renderHomeHint();
   toast('已退出登录');
 }
 
@@ -1427,48 +1473,93 @@ async function tryResumeSession(): Promise<boolean> {
   }
 }
 
-// ------------------------------------------------------- 邀请在线玩家
+// ------------------------------------------------------- 邀请玩家 / 观战
 
-/** 打开邀请：拉取服务器在线玩家（同房间 / 自己除外） */
+/** 邀请角色：等待阶段只邀请「加入对局」；对局开始后才提供「邀请观战」 */
+function inviteRole(): 'player' | 'spectator' {
+  return S.status === 'playing' || S.status === 'over' ? 'spectator' : 'player';
+}
+
+/** 打开邀请面板：拉取服务器玩家列表（自己 / 本房间内的玩家除外） */
 async function openInvite(): Promise<void> {
   if (!S.roomId) return toast('请先加入房间');
   if (S.offline) return toast('本地对弈没有可邀请的玩家');
   if (!(await ensureSocket())) return toast('尚未连接服务器');
   net?.send({ type: 'list_players' });
-  toast('正在获取在线玩家…');
+  toast('正在获取玩家列表…');
 }
 
-/** 渲染在线玩家列表：每人两个入口（邀请对局 / 邀请观战） */
+/**
+ * 渲染玩家列表（大面板风格）：
+ * 在线且在大厅的玩家排在最前并可一键邀请；在别处对局中与离线的玩家置灰、不显示邀请按钮。
+ */
 function renderPlayerList(players: OnlinePlayer[]): void {
-  const others = players.filter((p) => p.id !== S.playerId && p.roomId !== S.roomId && p.kind !== 'ai');
-  if (others.length === 0) {
-    showModal({
-      title: '邀请在线玩家',
-      sub: '当前没有其它在线玩家',
-      column: true,
-      buttons: [
-        { label: '刷新', onClick: () => void openInvite() },
-        { label: '关闭', primary: true },
-      ],
-    });
-    return;
+  const role = inviteRole();
+  const rows = players
+    .filter((p) => p.id !== S.playerId && p.roomId !== S.roomId && p.kind !== 'ai')
+    .sort(
+      (a, b) =>
+        Number(b.online && b.roomId === null) - Number(a.online && a.roomId === null) ||
+        a.name.localeCompare(b.name),
+    );
+
+  const body = document.createElement('div');
+  body.className = 'player-list';
+  if (rows.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'room-empty';
+    empty.textContent = '当前没有其它玩家，可让对方打开本服务器地址后等待其上线';
+    body.appendChild(empty);
   }
-  const buttons: ModalButton[] = [];
-  for (const p of others) {
-    buttons.push({
-      label: `邀请「${p.name}」加入对局`,
-      primary: true,
-      onClick: () => sendInvite(p.id, 'player'),
-    });
-    buttons.push({ label: `邀请「${p.name}」观战`, onClick: () => sendInvite(p.id, 'spectator') });
+  for (const p of rows) {
+    // 只有「在线且不在其它房间」的玩家能被邀请
+    const inviteable = p.online && p.roomId === null;
+    const item = document.createElement('div');
+    item.className = 'player-item ' + (inviteable ? 'online' : p.online ? 'busy' : 'offline');
+
+    const dot = document.createElement('span');
+    dot.className = 'p-dot';
+    const name = document.createElement('span');
+    name.className = 'p-name';
+    name.textContent = p.name;
+    const state = document.createElement('span');
+    state.className = 'p-state';
+    state.textContent = !p.online ? '离线' : p.roomId === null ? '在线' : '对局中';
+    item.append(dot, name);
+    if (p.kind === 'account') {
+      const kind = document.createElement('span');
+      kind.className = 'p-kind';
+      kind.textContent = '账号';
+      item.appendChild(kind);
+    }
+    item.appendChild(state);
+
+    if (inviteable) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn small';
+      btn.textContent = '邀请';
+      btn.addEventListener('click', () => {
+        closeModal();
+        sendInvite(p.id, role);
+      });
+      item.appendChild(btn);
+    }
+    body.appendChild(item);
   }
-  buttons.push({ label: '刷新', onClick: () => void openInvite() });
-  buttons.push({ label: '关闭' });
+
   showModal({
-    title: '邀请在线玩家',
-    sub: `服务器在线 ${others.length} 人，点击即可发出邀请`,
-    column: true,
-    buttons,
+    title: role === 'player' ? '邀请加入对局' : '邀请观战',
+    sub:
+      role === 'player'
+        ? '点击玩家右侧「邀请」，对方接受后即可加入本局'
+        : '本局已开始：点击玩家右侧「邀请」，对方接受后可只读观战',
+    body,
+    wide: true,
+    buttons: [
+      { label: '刷新', onClick: () => void openInvite() },
+      { label: '关闭', primary: true },
+    ],
   });
 }
 
@@ -1699,16 +1790,11 @@ function bindEvents(): void {
   });
 
   // 首页
-  $('btn-create').addEventListener('click', showCreateMenu);
+  $('btn-create').addEventListener('click', () => showHomePanel('create'));
   $('btn-create-back').addEventListener('click', backToIndex);
   $('btn-create-start').addEventListener('click', () => void createRoom());
   $('btn-show-join').addEventListener('click', showJoin);
-  $('btn-create-ai').addEventListener('click', () => {
-    $('menu-index').hidden = true;
-    $('menu-create').hidden = true;
-    $('menu-acct').hidden = true;
-    $('menu-ai').hidden = false;
-  });
+  $('btn-create-ai').addEventListener('click', () => showHomePanel('ai'));
   $('btn-ai-back').addEventListener('click', backToIndex);
   $('btn-ai-start').addEventListener('click', createAiRoom);
   $('btn-acct-back').addEventListener('click', backToIndex);
@@ -1718,9 +1804,9 @@ function bindEvents(): void {
   $('btn-skin').addEventListener('click', switchSkin);
   $('btn-history').addEventListener('click', openHistory);
 
-  // 等待页
-  document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
-    btn.addEventListener('click', () => chooseFirst(btn.dataset.mode as FirstMode));
+  // 等待页：取先方式下拉框（默认猜先；仅等待阶段有效）
+  $('first-mode').addEventListener('change', (e) => {
+    chooseFirst((e.target as HTMLSelectElement).value as FirstMode);
   });
   $('btn-cancel-host').addEventListener('click', leaveToHome);
   $('ip-box').addEventListener('click', () => void copyRoomNo());
@@ -1837,7 +1923,6 @@ async function init(): Promise<void> {
   const username = readStore(USER_KEY);
   if (token && username) S.account = { token, username };
   updateHomeChips();
-  renderHomeHint();
 
   // 服务器：浏览器访问时锁定为当前访问地址；桌面客户端由启动参数预填
   S.serverLocked = !isDesktopClient(window.location.search);

@@ -637,11 +637,15 @@ export class Room {
     this.armOverTimer();
   }
 
-  /** 终局落库（同一局只写一次） */
+  /** 终局落库（同一局只写一次；人机对战不计入对局回顾） */
   private saveRecord(): void {
     const cur = this.currentRecord;
     this.currentRecord = null;
     if (!cur) return;
+    if (cur.ai) {
+      logInfo(`房间 ${this.id}：人机对战不计入对局回顾，跳过落库`);
+      return;
+    }
     const s = this.game.snapshot();
     const ownerPlayer: PlayerRef = this.a?.player ?? { id: this.ownerId, name: '—', kind: 'guest' };
     const oppPlayer: PlayerRef = this.b?.player ?? AI_PLAYER;

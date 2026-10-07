@@ -5,8 +5,8 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.1（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**）
-- 状态：v2.1 完成；209 项自动化测试通过，lint / format / build / CI 全绿
+- 版本：v2.2（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**）
+- 状态：v2.2 完成；217 项自动化测试通过，lint / format / build / CI 全绿
 - 更新日期：2026-10-07
 
 版本里程碑：
@@ -22,6 +22,7 @@
 | v1.6 | 界面调整：主界面整体放大 1.25 倍、三个子面板与木板内框对齐、用 cover.bmp 覆盖主页署名 | commit `6e9fb40` |
 | v2.0 | 架构迁移：主机权威（P2P 星型）→ 局域网中心服务器 + 多房间并发；新增最简账号系统、房间口令、终局房间自动销毁、对局记录持久化、服务器发现重构；Electron 默认改为「连接服务器」 | 见 [ADR-0010](./adr/0010-room-server.md) |
 | **v2.1** | **客户端不再于启动时绑定地址：新增「连接服务器」板块（自动搜索局域网 + 手动输入，绿/红/灰状态；浏览器访问时锁定）；账号入口移到主页右上角；「加入房间」改为房间列表（点击即入 / 上锁房间填口令 / 无需口令观战）；房间内可邀请在线玩家加入对局或观战；人机对弈改由客户端本地 AI 运行（未连接服务器也可用）** | 见 [ADR-0010 §9](./adr/0010-room-server.md) |
+| **v2.2** | **点击板块后的界面改用「大面板」（参考对局回顾，不再与木质内框对齐）；「邀请玩家」改为宽版玩家列表（在线在前可一键邀请、离线 / 对局中置灰；等待阶段只邀请对局，开局后为邀请观战）；等待页取先方式改为下拉框（默认猜先），对手加入后双方直接进入棋盘再猜单双；删除首页底部「服务器 / 已登录」小字；人机对局不计入对局回顾** | 见 [ADR-0010 §10](./adr/0010-room-server.md) |
 
 ---
 
@@ -63,15 +64,16 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
    浏览器打开页面时该板块**锁定**为访问地址（灰色不可改）——因为浏览器访问的地址就是服务器地址。
 3. 进入首页后点「创建房间」（可选设置房间口令）→ 进入等待页并得到 **6 位房间号**；
    对手点「加入房间」从**房间列表**中点击该房间即可加入（房间有口令时需输入口令），
-   点「观战」无需口令即可只读旁观；等待页与对局页都可点「邀请在线玩家」把服务器上线的玩家
-   拉进对局或观战（被邀请者免口令加入）。
-4. 双方到齐自动开局；开赛前房主可在等待页选择先手方式：红 / 黑 / 随机黑红 / 猜先
-   （猜先由房主抓单双、对手猜，猜中者执红）。
+   点「观战」无需口令即可只读旁观；等待页与对局页都可点「邀请玩家」（开局后变为「邀请观战」）
+   打开玩家列表，把服务器上线的玩家一键拉进对局或观战（被邀请者免口令加入）。
+4. 双方到齐自动开局；开赛前房主可在等待页用**下拉框**选择取先方式：猜先（默认）/ 随机黑红 / 房主执红 / 房主执黑
+   （猜先由房主抓单双、对手猜，猜中者执红；**对手加入后双方直接进入棋盘界面，再在棋盘上抓子/猜单双**）。
 5. 第三方观众从房间列表点「观战」即可只读旁观（不占席位）。
 6. 单人可点首页「人机对弈」选择难度（菜鸟/中级/高手）后与 AI（执黑）对弈——**该模式在客户端本地运行，
    不需要连接服务器**。
 7. 对局结束后：若无人点「再来一局」，房间会自动销毁并释放房间号；首页「对局回顾」可查看历史对局
    （红黑方 / 取先方式 / 时间 / 胜负），点进某一局即可「下一步 ▶」逐步复盘并查看每个局面的 AI 推荐着法。
+   **人机对局（本地或服务器 AI 房间）不计入对局回顾。**
 
 账号（可选）：点首页**右上角**的账号按钮（未登录时显示「登录 / 注册」，登录后显示用户名），
 在弹出的面板中填写用户名与密码点「登 录」或「注 册」；登录后对局记录会归属账号，
@@ -183,10 +185,10 @@ main / server-main（进程入口，装配 server 与页面）
 | 房间口令（可选） | 创建房间子面板的「房间口令（可选）」 | [app.ts `createRoom()`](../src/renderer/app.ts)（随 `create_room.password` 提交）→ [server.ts](../src/server/server.ts#L383-L392)；等待页可用 `set_password` 修改 | [ADR-0010 §3.3](./adr/0010-room-server.md) |
 | 加入房间（房间列表） | 首页「加入房间」→ 房间列表 | [app.ts `showJoin()` / `refreshRooms()` / `renderRoomList()` / `pickRoom()`](../src/renderer/app.ts) → WS `list_rooms` → [server.ts `listRooms()`](../src/server/server.ts)；无口令点击即入，有口令先填口令再「加入房间」 | [ADR-0010 §3.3 / §9.3](./adr/0010-room-server.md) |
 | 观战（只读） | 房间列表每行「观战」（**无需口令**）或手填房间号后「观 战」 | `join_room{role:'spectator'}` → [room.ts `joinSpectator()`](../src/server/room.ts) → [app.ts `joinRoom()`](../src/renderer/app.ts) | [ADR-0009 §3.5](./adr/0009-c-d-extensions.md)、[ADR-0010](./adr/0010-room-server.md) |
-| 邀请在线玩家 | 等待页 / 对局页「邀请在线玩家」→ 弹层选「邀请加入对局 / 邀请观战」 | [app.ts `openInvite()` / `renderPlayerList()` / `sendInvite()`](../src/renderer/app.ts) → WS `list_players` / `invite_player` → [server.ts `onlinePlayers()` / `handleInvite()`](../src/server/server.ts) → 被邀请者弹层接受 → `join_room`（[room.ts `isInvited()`](../src/server/room.ts) 免口令） | [ADR-0010 §9.4](./adr/0010-room-server.md) |
+| 邀请玩家 / 邀请观战 | 等待页 / 对局页「邀请玩家」（开局后按钮变为「邀请观战」）→ 弹层内的玩家列表（在线在前） | [app.ts `openInvite()` / `renderPlayerList()` / `sendInvite()`](../src/renderer/app.ts) → WS `list_players` / `invite_player` → [server.ts `playerList()` / `handleInvite()`](../src/server/server.ts) → 被邀请者弹层接受 → `join_room`（[room.ts `isInvited()`](../src/server/room.ts) 免口令） | [ADR-0010 §9.4 / §10](./adr/0010-room-server.md) |
 | 账号注册 / 登录（可选） | 首页**右上角**账号按钮 → 面板用户名 + 密码 →「登 录」/「注 册」（登录后按钮显示用户名） | [app.ts `openAccountPanel()` / `doAuth()`](../src/renderer/app.ts) → WS `register` / `login` 或 `POST /api/auth/*` → [accounts.ts](../src/server/accounts.ts) | [ADR-0010 §3.10](./adr/0010-room-server.md) |
-| 先手方式（红/黑/随机/猜先） | 等待页「先手（红方）」四个选项 | [app.ts `chooseFirst()`](../src/renderer/app.ts) → `choose_first` → [room.ts `maybeStart()` / `beginFirst()`](../src/server/room.ts) | [ADR-0009 §3.9](./adr/0009-c-d-extensions.md)、[ADR-0010](./adr/0010-room-server.md) |
-| 猜先（房主抓、对手猜） | 房主弹层「抓单 / 抓双」→ 对手弹层「猜单 / 猜双」 | `grasp` → `guess` → [room.ts `beginFirst()`](../src/server/room.ts) → 广播 `first_result`（猜中者执红）→ 逐连接 `start{side}` | [ADR-0009 §3.9](./adr/0009-c-d-extensions.md) |
+| 取先方式（下拉框，默认猜先） | 等待页「取先方式」下拉框（猜先 / 随机黑红 / 房主执红 / 房主执黑） | [app.ts `chooseFirst()` / `renderSidePick()`](../src/renderer/app.ts) → `choose_first` → [room.ts `maybeStart()` / `beginFirst()`](../src/server/room.ts) | [ADR-0009 §3.9](./adr/0009-c-d-extensions.md)、[ADR-0010 §10](./adr/0010-room-server.md) |
+| 猜先（房主抓、对手猜） | 双方加入后**直接进入棋盘界面**：房主弹层「抓单 / 抓双」→ 对手弹层「猜单 / 猜双」 | `grasp` → `guess` → [room.ts `beginFirst()`](../src/server/room.ts) → 广播 `first_result`（猜中者执红）→ 逐连接 `start{side}` | [ADR-0009 §3.9](./adr/0009-c-d-extensions.md) |
 | 自动开局 | 双方到齐后由服务器触发 | [room.ts `afterJoin()` / `maybeStart()` / `startGame()`](../src/server/room.ts) → 广播 `start` | [ADR-0010](./adr/0010-room-server.md) |
 | 复制房间号 | 等待页点击房间号块（`ip-box`） | [app.ts `copyRoomNo()`](../src/renderer/app.ts)（非安全上下文降级 `execCommand`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 走子（选子/落点/发送） | 点击棋盘 | 联机：[app.ts `onCell()`](../src/renderer/app.ts) → `move` → [room.ts `applyAndBroadcast()`](../src/server/room.ts) → [game.ts `applyMove()`](../src/shared/game.ts)；本地人机：`localMove()` → [shared/game.ts](../src/shared/game.ts) | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
@@ -200,10 +202,10 @@ main / server-main（进程入口，装配 server 与页面）
 | 终局销毁房间 | 对局结束后无人「再来一局」时自动 | [room.ts `armOverTimer()`](../src/server/room.ts) → 广播 `room_closed` → [app.ts `handleMessage()`](../src/renderer/app.ts) | [ADR-0010 §3.3](./adr/0010-room-server.md) |
 | 认输 / 和棋 / 再来一局 | 对局页按钮 | [app.ts `resign()` / `offerDraw()` / `requestRestart()`](../src/renderer/app.ts) → [room.ts](../src/server/room.ts) → `game_over` / `start`（本地人机走本地状态机） | [ADR-0003](./adr/0003-wire-protocol.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
 | 离开房间 | 棋盘下「离开」/ 结果卡「返回首页」/「离开观战」 | [app.ts `leaveToHome()`](../src/renderer/app.ts) → `leave_room` → [room.ts `leave()`](../src/server/room.ts)（房主离开会销毁房间；保留与服务器的连接） | [ADR-0010 §3.3](./adr/0010-room-server.md) |
-| 对局回顾（列表） | 首页「对局回顾」 | [review.ts `open()`](../src/renderer/review.ts) → `GET /api/history`（基址取当前服务器）→ [history.ts](../src/server/history.ts) | [ADR-0009 §3.10](./adr/0009-c-d-extensions.md) |
+| 对局回顾（列表） | 首页「对局回顾」（**不含人机对局**） | [review.ts `open()`](../src/renderer/review.ts) → `GET /api/history`（基址取当前服务器）→ [history.ts](../src/server/history.ts) | [ADR-0009 §3.10](./adr/0009-c-d-extensions.md)、[ADR-0010 §10](./adr/0010-room-server.md) |
 | 复盘（逐步 + AI 推荐） | 列表点击某局 → 「下一步 ▶」/ → 键 | [review.ts](../src/renderer/review.ts) → `GET /api/history/:id` + `GET /api/ai/hint?id&index` | [ADR-0009 §3.10](./adr/0009-c-d-extensions.md) |
-| 人机对弈（本地） | 首页「人机对弈」→ 选难度 →「开始对弈」 | [app.ts `createAiRoom()` / `localMove()` / `scheduleLocalAi()`](../src/renderer/app.ts) → [shared/game.ts](../src/shared/game.ts) + [shared/ai.ts `pickMove()`](../src/shared/ai.ts)；**不需要连接服务器** | [ADR-0009 §3.7](./adr/0009-c-d-extensions.md)、[ADR-0010 §9.5](./adr/0010-room-server.md) |
-| 人机对弈（服务器 AI 房间，协议保留） | 可由 `create_room{mode:'ai'}` 触发 | [room.ts `startAiGame()` / `scheduleAiMove()`](../src/server/room.ts) → [shared/ai.ts](../src/shared/ai.ts) | [ADR-0010](./adr/0010-room-server.md) |
+| 人机对弈（本地） | 首页「人机对弈」→ 选难度 →「开始对弈」（**不计入对局回顾**） | [app.ts `createAiRoom()` / `localMove()` / `scheduleLocalAi()`](../src/renderer/app.ts) → [shared/game.ts](../src/shared/game.ts) + [shared/ai.ts `pickMove()`](../src/shared/ai.ts)；**不需要连接服务器** | [ADR-0009 §3.7](./adr/0009-c-d-extensions.md)、[ADR-0010 §9.5 / §10](./adr/0010-room-server.md) |
+| 人机对弈（服务器 AI 房间，协议保留；**不计入对局回顾**） | 可由 `create_room{mode:'ai'}` 触发 | [room.ts `startAiGame()` / `scheduleAiMove()`](../src/server/room.ts) → [shared/ai.ts](../src/shared/ai.ts) | [ADR-0010 §10](./adr/0010-room-server.md) |
 | 更换皮肤 | 首页「更换皮肤」 | [app.ts `switchSkin()`](../src/renderer/app.ts) → [board.ts `nextSkin()` / `loadSkinImages()`](../src/renderer/board.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 选子 / 走子音效 | 点击棋子 / 收到走子广播时自动 | [sound.ts](../src/renderer/sound.ts)（`select.wav` / `click.wav`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 心跳保活 | 后台自动运行（5s 间隔） | [net.ts `startPing()`](../src/renderer/net.ts) → `ping` / `pong`（`pong` 携带服务器声明地址） | [ADR-0007](./adr/0007-renderer-ui.md) |
@@ -296,12 +298,12 @@ Chinese_chess/
 | [ai.test.ts](../tests/ai.test.ts) | 一步杀、白吃子、无着法返回 null、开局着法合法与耗时 |
 | [net.test.ts](../tests/net.test.ts) | 连接建立与消息分发、pong 内部消化、心跳 5s、16s 无 pong 判离线、主动关闭不提示 |
 | [fullgame.test.ts](../tests/fullgame.test.ts) | 完整一盘棋 WS 回放：双方棋盘一致、seq 单调、history 一致、`game_over`「将死」、重开 |
-| [server.test.ts](../tests/server.test.ts) | 建房/加入/口令/房间列表/满员；走子与拒绝；认输/和棋/重开/悔棋/离开；观战；宽限重连与房间销毁；终局销毁；空闲回收；两房间隔离；先手方式与猜先；账号与记录归属；在线玩家列表与房间邀请（免口令加入、邀请校验）；人机；计时；日志与端口回退；静态资源安全与 MIME |
+| [server.test.ts](../tests/server.test.ts) | 建房/加入/口令/房间列表/满员；走子与拒绝；认输/和棋/重开/悔棋/离开；观战；宽限重连与房间销毁；终局销毁；空闲回收；两房间隔离；先手方式与猜先；账号与记录归属；玩家列表与房间邀请（在线玩家、**离线账号 online=false 与不可邀请**、免口令加入、邀请校验）；**人机对局不计入对局回顾**；人机；计时；日志与端口回退；静态资源安全与 MIME |
 | [persistence.test.ts](../tests/persistence.test.ts) | 账号注册/登录/token 轮换、账号与对局记录落盘与重启读回、容量上限、损坏文件降级 |
 | [discover.test.ts](../tests/discover.test.ts) | 服务器探测、无服务端口返回 null、网段扫描聚合去重与进度 |
 | [servers.test.ts](../tests/servers.test.ts) | 服务器地址解析、网段推导、服务器键、页面地址回退与「浏览器 / 桌面客户端」判定 |
 | [lan-ip.test.ts](../tests/lan-ip.test.ts) | pickLanIp 网段优先级与虚拟网卡跳过 |
-| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、整体放大仅作用于木质挂板/页脚、三个子面板与木框对齐几何常量、列表行不被按钮撑破（整行按钮仅直接子元素 / min-width 归零 / hidden 生效） |
+| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先） |
 
 验收标准见 [Product-plan.md 第 14 节](./Product-plan.md)、[ADR-0008](./adr/0008-testing-strategy.md)
 与 [ADR-0010 §6](./adr/0010-room-server.md)。
@@ -318,9 +320,9 @@ Chinese_chess/
 | 连接列表里出现「连接失败」的红色条目 | 该地址没有可用的本局服务器（未启动 / 端口不对 / 被防火墙拦截）；改点其它条目或重新输入地址 |
 | 搜索服务器时连接偶发失败 | 搜索会并发探测 254 个地址，探测超时较短；稍后点「刷新列表」或「连接」重试即可 |
 | 加入时提示「房间不存在」 | 房间号输错，或该房间已被销毁（房主离开 / 终局后无人再来一局 / 空闲超时）；点「刷新房间」查看当前可加入的房间 |
-| 加入时提示「房间口令错误」 | 该房间设置了口令：从房间列表点击该房间后填入「口令（房间已上锁）」输入框，或让房内玩家用「邀请在线玩家」邀请你（被邀请者免口令） |
+| 加入时提示「房间口令错误」 | 该房间设置了口令：从房间列表点击该房间后填入「口令（房间已上锁）」输入框，或让房内玩家用「邀请玩家」邀请你（被邀请者免口令） |
 | 加入时提示「房间已满」 | 该房间两席已满（人机房里对手席由 AI 占用）；可点「观战」只读旁观，或另开一间 |
-| 邀请在线玩家时提示「该玩家不在线 / 已在房间中」 | 对方已断开或已进入其它房间；只可邀请「大厅中空闲」的在线玩家 |
+| 邀请玩家时提示「该玩家不在线 / 已在房间中」 | 对方已断开（列表里显示为「离线」置灰）或已进入其它房间（显示为「对局中」）；只可邀请列表里「在线」且有「邀请」按钮的玩家 |
 | 没连服务器还能玩吗 | 可以：首页「人机对弈」在**客户端本地**运行（规则与 AI 都在本机），无需连接服务器；创建 / 加入房间、对局回顾才需要服务器 |
 | 端口被占用 | 服务器未显式指定 `LANSCHESS_PORT` 时自动回退随机端口；显式指定则提示更换端口 |
 | 对方意外断线 | 进入 30 秒宽限期：对方重新打开页面会自动凭 `playerId` 恢复原局；房主也可选择「等待新对手」 |

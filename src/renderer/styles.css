@@ -1,13 +1,12 @@
 /*
  * 界面样式：沿用参考项目 Reference/Chess 的经典木质风格（MIT，见 assets/LICENSE-ReferenceChess.txt）。
- * 菜单为木质挂板 + 金框按钮，对局为木质棋盘 + 图片棋子，信息面板为深棕木纹底。
+ * 首页为木质挂板入口；点击板块后的界面不再与木框对齐，改用「大面板」（参考对局回顾）展示，
+ * 避免把内容挤进 280px 的窄框里。对局为木质棋盘 + 图片棋子，信息面板为深棕木纹底。
  */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* 主界面（首页 / 等待 / 加入）整体放大比例：木质挂板与其内所有元素等比缩放（含背景图），
-   对局页与对局回顾页不引用该变量，保持原尺寸。
-   取 1.25：放大后首页总高约 629px，仍能放进 Electron 窗口最小高度（640）与常见浏览器视口 */
+/* 首页木质挂板整体放大比例（仅挂板与其内元素，含背景图）：对局页与大面板不引用该变量 */
 :root { --ui-scale: 1.25; }
 
 /* 只固定 html 高度：body 用 min-height，内容高于视口时随内容撑开，避免 flex 垂直居中裁剪 */
@@ -16,7 +15,7 @@ body {
   min-height: 100%;
   padding: 16px;
   color: #fff;
-  font: 13px/160% "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font: 14px/170% "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
   text-align: center;
   background: #2b2016;
   display: flex;
@@ -24,148 +23,69 @@ body {
   justify-content: center;
   -webkit-tap-highlight-color: transparent;
 }
-/* hidden 必须生效：需要盖过 .menu_info label 这类更具体的选择器（否则隐藏不彻底） */
+/* hidden 必须生效：需要盖过 label / .btn 这类选择器（否则隐藏不彻底） */
 [hidden] { display: none !important; }
 
 .app { width: 100%; max-width: 1180px; }
 .screen { display: none; }
 .screen.active { display: block; }
+.menu_wrap { width: 100%; }
 
-/* ---------- 首页 / 等待 / 加入：木质挂板菜单 ---------- */
-.menu_box {
-  /* 参考项目的挂板是 content-box：背景图 init_bg.png 为 316×422，
-     padding-top 158 + height 264 = 422（padding box 完整覆盖背景图，含底框）。
-     内框实测：木板内表面 x≈10..290、y≈158..395（外围约 10px 深色边框），
-     内容区从 y=158 开始，即可与内框上沿对齐 */
-  box-sizing: content-box;
-  width: 316px;
-  height: 264px;
-  padding-top: 158px;
-  margin: 24px auto 12px;
-  background: url(./assets/img/init_bg.png) center 0 no-repeat;
-  /* 主界面整体放大（背景图随 zoom 等比放大），面板与内框的相对对齐关系保持不变 */
-  zoom: var(--ui-scale);
-}
-.menu_box a {
-  display: block;
-  width: 214px;
-  height: 46px;
-  margin: 0 0 0 45px;
-  text-align: center;
-  font: normal 18px/46px "Microsoft YaHei", "PingFang SC", sans-serif;
-  color: #ff8a00;
-  background: url(./assets/img/btn_bg.png) center 0 no-repeat;
-  cursor: pointer;
-  user-select: none;
-}
-.menu_box a:hover { color: #ffa433; background-position: center -46px; }
-.menu_box a:active { color: #ffc266; }
-/* 首页 5 个入口正好铺满挂板按钮区（原位置：从 y=190 开始，5×46 = 230） */
-.menu_init { padding-top: 32px; }
-/* 面板下方的挂板按钮（人机「开始对弈」/ 加入「连接」/ 服务器「进入游戏」）：与面板间隔 8px */
-.menu_dy a,
-#btn-connect,
-#btn-server-enter { margin-top: 8px; }
-
-.menu_info {
-  position: relative;
-  /* 与木板内框同宽、左/上对齐内框（x=10、y=158），底边留 8px 给下方按钮 */
-  width: 280px;
-  margin: 0 0 8px 10px;
-  padding: 8px 10px;
-  text-align: left;
-  line-height: 190%;
-  color: #fff;
-  background: #463521;
-  border: 1px solid #6b4f2a;
-  border-radius: 3px;
-}
-.menu_info .info-title { color: #ffcf7a; letter-spacing: 2px; }
-/* 主机等待页版块：铺满木板内框（280×237 = 内表面 x10..290 / y158..395） */
-.menu_info.wide {
-  height: 237px;
-  padding: 10px 12px;
-  overflow: hidden;
-  background: linear-gradient(180deg, rgba(84, 64, 40, 0.96), rgba(63, 47, 29, 0.96));
-  border-color: #8a6b3f;
-  box-shadow: inset 0 0 0 1px rgba(255, 214, 150, 0.18);
-}
-.menu_info.wide .info-title { line-height: 1.5; }
-.menu_info.wide .ip-box {
-  margin: 6px 0 0;
-  padding: 6px 8px;
-  cursor: pointer;
-  transition: 0.15s;
-}
-.menu_info.wide .ip-box:hover { border-color: #c9963c; background: #2f2015; }
-.menu_info.wide .ip-label { font-size: 11px; line-height: 1.4; }
-.menu_info.wide .ip-value { font-size: 18px; line-height: 1.35; letter-spacing: 0.5px; }
-.side_pick { margin-top: 8px; }
-.side_opts { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 3px; }
-.side_opt {
-  padding: 5px 0;
-  font: 500 12px/1.4 inherit;
-  color: #ffcf7a;
-  white-space: nowrap;
-  background: #2b1d12;
-  border: 1px solid #6b4f2a;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: 0.15s;
-}
-.side_opt:hover { border-color: #c9963c; color: #ffd98a; }
-.side_opt.active {
-  color: #5b3a12;
-  background: linear-gradient(180deg, #f7e3bd, #e2c288);
-  border-color: #8a6b3f;
-}
-.menu_info.wide .side_hint { margin-top: 4px; font-size: 11px; line-height: 1.5; color: #e8dcc8; }
-.menu_info.wide .hint { margin-top: 6px; font-size: 11.5px; line-height: 1.5; }
-.menu_fh {
-  float: right;
-  width: 14px;
-  height: 14px;
-  margin-top: 3px;
-  background: url(./assets/img/btn_fh.png) no-repeat;
-  cursor: pointer;
-}
-.menu_info label { display: block; line-height: 1.6; cursor: pointer; }
-.menu_info .hint { line-height: 1.6; }
-/* 加入页：面板限高，保证面板 +「连接」按钮都落在木板内框内（237 - 46 - 8 = 183） */
-#screen-join .menu_info {
-  max-height: 183px;
+/* ---------- 大面板（点击板块之后 / 连接服务器 / 等待 / 加入；与对局回顾同款） ---------- */
+.panel-lg,
+.review_box {
+  width: 100%;
+  max-width: 620px;
+  max-height: calc(100vh - 48px);
+  margin: 12px auto;
+  padding: 14px 18px 16px;
   overflow-y: auto;
   overflow-x: hidden;
+  text-align: left;
+  background: linear-gradient(180deg, rgba(84, 64, 40, 0.96), rgba(63, 47, 29, 0.96));
+  border: 1px solid #8a6b3f;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 150, 0.18), 0 12px 30px rgba(0, 0, 0, 0.4);
 }
-/* 等待页与连接服务器页：内容可能超出一屏，允许面板内滚动（尺寸与内框仍不变） */
-#screen-host .menu_info.wide,
-#server-panel {
-  overflow-y: auto;
-}
-#server-panel { overflow-x: hidden; }
-.home-hint {
-  margin-top: 8px;
-  min-height: 18px;
-  color: #ffe0a8;
-  font-size: 12px;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
-  /* 与木质挂板同一放大比例 */
-  zoom: var(--ui-scale);
-}
+.panel-lg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.panel-lg-title { flex: 1; font-size: 17px; letter-spacing: 2px; color: #ffcf7a; }
+.panel-lg-title .spinner { margin-left: 8px; vertical-align: -2px; }
 
-.menu_info input[type="text"],
-.menu_info input[type="password"] {
+/* 面板内的整行按钮（创建房间 / 开始对弈 / 邀请玩家 / 退出登录） */
+.btn.block { display: block; width: 100%; margin-top: 12px; padding: 10px; font-size: 14px; }
+
+.panel-lg label { display: block; margin-top: 8px; line-height: 1.7; cursor: pointer; }
+.panel-lg .hint { margin-top: 8px; }
+.panel-lg .radio-row { display: flex; align-items: center; gap: 8px; }
+.panel-lg .radio-row input { width: auto; }
+
+/* 表单行：左标签 + 右控件（取先方式下拉框 / 房间号 + 按钮） */
+.form-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.form-row label { flex: none; margin-top: 0; color: #ffcf7a; letter-spacing: 1px; }
+.form-row input[type="text"],
+.form-row input[type="password"] { flex: 1; width: auto; min-width: 0; }
+
+.panel-lg input[type="text"],
+.panel-lg input[type="password"],
+.panel-lg select {
   width: 100%;
-  padding: 5px 8px;
-  font: 13px/1.5 inherit;
+  padding: 8px 10px;
+  font: 14px/1.5 inherit;
   color: #ffe9c9;
   background: #2b1d12;
   border: 1px solid #6b4f2a;
-  border-radius: 3px;
+  border-radius: 4px;
   outline: none;
 }
-.menu_info input[type="text"]:focus,
-.menu_info input[type="password"]:focus { border-color: #c9963c; }
+.panel-lg select { cursor: pointer; }
+.panel-lg input[type="text"]:focus,
+.panel-lg input[type="password"]:focus,
+.panel-lg select:focus { border-color: #c9963c; }
+
+.hint { margin-top: 6px; min-height: 18px; font-size: 12.5px; color: #e8dcc8; }
+.hint.ok { color: #9fdc9f; }
+.hint.err { color: #ff9d8a; }
+.side_hint { margin-top: 6px; font-size: 12px; line-height: 1.6; color: #e8dcc8; }
 
 .ip-box {
   margin: 6px 0;
@@ -173,11 +93,15 @@ body {
   background: #2b1d12;
   border: 1px dashed #8a6b3f;
   border-radius: 3px;
+  cursor: pointer;
+  transition: 0.15s;
 }
+.ip-box:hover { border-color: #c9963c; }
 .ip-label { font-size: 11px; letter-spacing: 2px; color: #e8c98c; }
 .ip-value {
   font-family: Consolas, Menlo, monospace;
-  font-size: 15px;
+  font-size: 18px;
+  letter-spacing: 1px;
   color: #ffd98a;
   word-break: break-all;
 }
@@ -195,29 +119,63 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.hint { margin-top: 6px; min-height: 18px; font-size: 12px; color: #e8dcc8; }
-.hint.ok { color: #9fdc9f; }
-.hint.err { color: #ff9d8a; }
+.scan-actions { display: flex; gap: 8px; margin-top: 10px; }
+.scan-actions .btn { flex: 1; width: auto; margin-top: 0; padding: 8px 4px; font-size: 12px; font-weight: 500; }
 
-.scan-actions { display: flex; gap: 6px; margin-top: 8px; }
-.scan-actions .btn { flex: 1; width: auto; margin-top: 0; padding: 6px 4px; font-size: 11px; font-weight: 500; }
-.scan-result { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* ---------- 首页木质挂板（仅首页入口；点击板块后隐藏） ---------- */
+.menu_box {
+  /* 参考项目的挂板是 content-box：背景图 init_bg.png 为 316×422，
+     padding-top 158 + height 264 = 422（padding box 完整覆盖背景图，含底框） */
+  box-sizing: content-box;
+  width: 316px;
+  height: 264px;
+  padding-top: 158px;
+  margin: 24px auto 12px;
+  background: url(./assets/img/init_bg.png) center 0 no-repeat;
+  zoom: var(--ui-scale);
+}
+.menu_box a {
+  display: block;
+  width: 214px;
+  height: 46px;
+  margin: 0 0 0 45px;
+  text-align: center;
+  font: normal 18px/46px "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: #ff8a00;
+  background: url(./assets/img/btn_bg.png) center 0 no-repeat;
+  cursor: pointer;
+  user-select: none;
+}
+.menu_box a:hover { color: #ffa433; background-position: center -46px; }
+.menu_box a:active { color: #ffc266; }
+/* 首页 5 个入口正好铺满挂板按钮区 */
+.menu_init { padding-top: 32px; }
+
+.menu_fh {
+  float: right;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  background: url(./assets/img/btn_fh.png) no-repeat;
+  cursor: pointer;
+}
+.panel-lg-head .menu_fh { float: none; flex: none; margin-top: 0; }
 
 /* ---------- 连接服务器：手动地址 + 服务器列表（绿=已连接 / 红=连接失败 / 灰=未连接） ---------- */
-.server-manual { display: flex; gap: 6px; margin-top: 8px; }
+.server-manual { display: flex; gap: 8px; margin-top: 10px; }
 .server-manual input[type="text"] { flex: 1; width: auto; min-width: 0; }
-.server-manual .btn { flex: none; margin-top: 0; padding: 6px 10px; font-size: 11px; font-weight: 500; }
-.server-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.server-manual .btn { flex: none; margin-top: 0; padding: 8px 14px; font-size: 12px; font-weight: 500; }
+.server-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .server-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  font: 500 12px/1.4 inherit;
+  gap: 8px;
+  padding: 8px 10px;
+  font: 500 13px/1.4 inherit;
   color: #e8dcc8;
   background: #2b1d12;
   border: 1px solid #6b4f2a;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 .server-row .dot-status {
   flex: none;
@@ -228,20 +186,20 @@ body {
 }
 .server-row .addr {
   flex: 1;
-  /* flex 项默认 min-width:auto 会撑破窄面板，必须显式归零才能换行/省略 */
+  /* flex 项默认 min-width:auto 会撑破面板，必须显式归零才能换行/省略 */
   min-width: 0;
   text-align: left;
   font-family: Consolas, Menlo, monospace;
   word-break: break-all;
 }
-.server-row .tag-line { flex: none; font-size: 11px; letter-spacing: 1px; }
+.server-row .tag-line { flex: none; font-size: 12px; letter-spacing: 1px; }
 .server-row.ok { border-color: #4c8a4c; }
 .server-row.ok .dot-status { background: #4fd24f; box-shadow: 0 0 8px rgba(79, 210, 79, 0.7); }
 .server-row.ok .tag-line { color: #9fdc9f; }
 .server-row.fail { border-color: #8a4a3a; }
 .server-row.fail .dot-status { background: #e2503f; box-shadow: 0 0 8px rgba(226, 80, 63, 0.7); }
 .server-row.fail .tag-line { color: #ff9d8a; }
-.server-row .btn { flex: none; margin-top: 0; padding: 4px 8px; font-size: 11px; }
+.server-row .btn { flex: none; margin-top: 0; padding: 5px 12px; font-size: 12px; }
 .server-row.locked { opacity: 0.72; }
 #server-panel.locked { opacity: 0.85; }
 
@@ -269,40 +227,67 @@ body {
 .chip.on { color: #5b3a12; background: linear-gradient(180deg, #f7e3bd, #e2c288); border-color: #8a6b3f; }
 
 /* ---------- 加入房间：房间列表 ---------- */
-.room-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.room-list { display: flex; flex-direction: column; gap: 6px; }
 .room-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  font: 500 12px/1.4 inherit;
+  gap: 10px;
+  padding: 9px 12px;
+  font: 500 13px/1.5 inherit;
   color: #ffe9c9;
   background: #2b1d12;
   border: 1px solid #6b4f2a;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
   transition: 0.15s;
 }
 .room-row:hover { border-color: #c9963c; background: #35261a; }
-.room-row .room-no { flex: none; font-family: Consolas, Menlo, monospace; color: #ffd98a; }
+.room-row .room-no { flex: none; font-family: Consolas, Menlo, monospace; font-size: 15px; color: #ffd98a; }
 .room-row .room-info {
   flex: 1;
-  /* 同上：不归零 min-width 会让「加入 / 观战」被挤出面板并被裁剪 */
+  /* 同上：不归零 min-width 会把按钮挤出面板并被裁剪 */
   min-width: 0;
   text-align: left;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: #e0cba6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.room-row .btn { flex: none; margin-top: 0; padding: 4px 8px; font-size: 11px; }
-.room-empty { color: #e8dcc8; font-size: 12px; padding: 4px 0; }
+.room-row .btn { flex: none; margin-top: 0; padding: 6px 12px; font-size: 12px; }
+.room-empty { color: #e8dcc8; font-size: 13px; padding: 8px 0; }
+.room-manual { margin-top: 12px; }
 
-/* 对局面板内的「邀请在线玩家」按钮 */
+/* ---------- 邀请玩家：列表行（在线在前 / 离线置灰） ---------- */
+.player-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; }
+.player-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font: 500 13px/1.4 inherit;
+  color: #ffe9c9;
+  background: #2b1d12;
+  border: 1px solid #6b4f2a;
+  border-radius: 4px;
+  text-align: left;
+}
+.player-item .p-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #4fd24f; }
+.player-item .p-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-item .p-kind,
+.player-item .p-state { flex: none; font-size: 12px; color: #e0cba6; }
+.player-item .btn { flex: none; margin-top: 0; padding: 5px 14px; font-size: 12px; }
+.player-item.busy .p-dot,
+.player-item.offline .p-dot { background: #8b8073; }
+.player-item.busy { opacity: 0.72; }
+.player-item.offline { opacity: 0.6; }
+.player-item.busy .btn,
+.player-item.offline .btn { display: none; }
+
+/* 对局面板内的「邀请玩家 / 邀请观战」按钮 */
 #btn-invite {
-  padding: 6px 10px;
-  font: 500 12px/1.4 inherit;
+  padding: 8px 10px;
+  font: 500 13px/1.4 inherit;
   color: #ffcf7a;
   background: #2f2418;
   border: 1px solid #6b4f2a;
@@ -327,12 +312,8 @@ body {
 .btn:hover { filter: brightness(1.06); }
 .btn:active { transform: scale(0.98); }
 .btn.ghost { color: #ffcf7a; background: #2f2418; }
-.btn.small { padding: 6px 10px; font-size: 12px; font-weight: 500; }
+.btn.small { padding: 6px 12px; font-size: 12px; font-weight: 500; }
 .btn.small.danger { color: #ff9d8a; }
-/* 面板内的整行按钮（如账号「退出登录」/「邀请在线玩家」）：仅限直接子元素，
-   避免命中 .scan-actions / .room-row / .server-row / .server-manual 里的并排小按钮 */
-.menu_info > .btn { width: 100%; margin-top: 6px; }
-.scan-result .btn { width: auto; margin-top: 0; }
 
 /* ---------- 对局 ---------- */
 .game-layout {
@@ -455,17 +436,6 @@ body {
 .replay-hint { color: #ffd98a; line-height: 1.7; word-break: break-all; }
 
 /* ---------- 对局回顾（列表） ---------- */
-.review_box {
-  width: 100%;
-  max-width: 560px;
-  margin: 12px auto;
-  padding: 14px 16px 8px;
-  text-align: left;
-  background: linear-gradient(180deg, rgba(84, 64, 40, 0.96), rgba(63, 47, 29, 0.96));
-  border: 1px solid #8a6b3f;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px rgba(255, 214, 150, 0.18), 0 12px 30px rgba(0, 0, 0, 0.4);
-}
 .review_head { display: flex; align-items: center; gap: 8px; }
 .review_title { flex: 1; font-size: 16px; letter-spacing: 2px; color: #ffcf7a; }
 .review_refresh { width: auto; margin-top: 0; }
@@ -528,7 +498,7 @@ body {
 .modal {
   width: 100%;
   max-width: 330px;
-  max-height: 80vh;
+  max-height: 84vh;
   overflow-y: auto;
   padding: 20px 18px;
   background: #463521;
@@ -536,8 +506,11 @@ body {
   border-radius: 6px;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.65);
 }
+/* 富内容弹层（邀请玩家列表等）：更宽，便于把列表铺开 */
+.modal.wide { max-width: 520px; }
 .modal-title { font-size: 18px; letter-spacing: 2px; color: #ffcf7a; margin-bottom: 6px; }
-.modal-sub { min-height: 16px; font-size: 12px; color: #e8dcc8; margin-bottom: 16px; }
+.modal-sub { min-height: 16px; font-size: 12px; color: #e8dcc8; margin-bottom: 14px; }
+.modal-body { max-height: 46vh; overflow-y: auto; }
 .modal .btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .modal .btns.col { flex-direction: column; }
 .modal .btns.col .btn { width: 100%; }
@@ -571,7 +544,7 @@ body {
   #board { max-height: calc(100vh - 260px); }
 }
 
-/* 小屏（手机浏览器入局）：主界面回退原始尺寸，避免水平溢出 */
+/* 小屏（手机浏览器入局）：首页挂板回退原始尺寸，避免水平溢出 */
 @media (max-width: 480px) {
   :root { --ui-scale: 1; }
 }
