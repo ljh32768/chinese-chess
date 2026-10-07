@@ -5,6 +5,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* 主界面（首页 / 等待 / 加入）整体放大比例：木质挂板与其内所有元素等比缩放（含背景图），
+   对局页与对局回顾页不引用该变量，保持原尺寸。
+   取 1.25：放大后首页总高约 629px，仍能放进 Electron 窗口最小高度（640）与常见浏览器视口 */
+:root { --ui-scale: 1.25; }
+
 /* 只固定 html 高度：body 用 min-height，内容高于视口时随内容撑开，避免 flex 垂直居中裁剪 */
 html { height: 100%; }
 body {
@@ -27,19 +32,23 @@ body {
 
 /* ---------- 首页 / 等待 / 加入：木质挂板菜单 ---------- */
 .menu_box {
-  /* 参考项目的挂板是 content-box：高度 232 为按钮区，padding-top 190 让素材标题不被遮挡 */
+  /* 参考项目的挂板是 content-box：背景图 init_bg.png 为 316×422，
+     padding-top 158 + height 264 = 422（padding box 完整覆盖背景图，含底框）。
+     内框实测：木板内表面 x≈10..290、y≈158..395（外围约 10px 深色边框），
+     内容区从 y=158 开始，即可与内框上沿对齐 */
   box-sizing: content-box;
   width: 316px;
-  height: 232px;
-  padding-top: 190px;
+  height: 264px;
+  padding-top: 158px;
   margin: 24px auto 12px;
   background: url(./assets/img/init_bg.png) center 0 no-repeat;
+  /* 主界面整体放大（背景图随 zoom 等比放大），面板与内框的相对对齐关系保持不变 */
+  zoom: var(--ui-scale);
 }
 .menu_box a {
   display: block;
   width: 214px;
   height: 46px;
-  /* 首页 5 个入口正好铺满挂板按钮区（5×46 = 230 ≤ 232） */
   margin: 0 0 0 45px;
   text-align: center;
   font: normal 18px/46px "Microsoft YaHei", "PingFang SC", sans-serif;
@@ -50,14 +59,17 @@ body {
 }
 .menu_box a:hover { color: #ffa433; background-position: center -46px; }
 .menu_box a:active { color: #ffc266; }
-/* 内容较多的页面（加入对局 / 主机等待）：高度随内容撑开，木质挂板仍从顶部对齐 */
-.menu_box.tall,
-.menu_box.host_box { height: auto; }
+/* 首页 5 个入口正好铺满挂板按钮区（原位置：从 y=190 开始，5×46 = 230） */
+.menu_init { padding-top: 32px; }
+/* 面板下方的挂板按钮（人机「开始对弈」/ 加入「连接」）：与面板间隔 8px */
+.menu_dy a,
+#btn-connect { margin-top: 8px; }
 
 .menu_info {
   position: relative;
-  width: 192px;
-  margin: 10px 0 10px 45px;
+  /* 与木板内框同宽、左/上对齐内框（x=10、y=158），底边留 8px 给下方按钮 */
+  width: 280px;
+  margin: 0 0 8px 10px;
   padding: 8px 10px;
   text-align: left;
   line-height: 190%;
@@ -67,16 +79,9 @@ body {
   border-radius: 3px;
 }
 .menu_info .info-title { color: #ffcf7a; letter-spacing: 2px; }
-/* 主机等待页：版块与挂板内框对齐
-   （实测 init_bg.png：木板内表面 x≈10..290、y≈158..395，外围约 10px 深色边框） */
-.menu_box.host_box {
-  height: auto;
-  padding-top: 158px;
-}
+/* 主机等待页版块：铺满木板内框（280×237 = 内表面 x10..290 / y158..395） */
 .menu_info.wide {
-  width: 280px;
   height: 237px;
-  margin: 0 0 0 10px;
   padding: 10px 12px;
   overflow: hidden;
   background: linear-gradient(180deg, rgba(84, 64, 40, 0.96), rgba(63, 47, 29, 0.96));
@@ -124,12 +129,19 @@ body {
 }
 .menu_info label { display: block; line-height: 1.6; cursor: pointer; }
 .menu_info .hint { line-height: 1.6; }
+/* 加入页：面板限高，保证面板 +「连接」按钮都落在木板内框内（237 - 46 - 8 = 183） */
+#screen-join .menu_info {
+  max-height: 183px;
+  overflow-y: auto;
+}
 .home-hint {
   margin-top: 8px;
   min-height: 18px;
   color: #ffe0a8;
   font-size: 12px;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+  /* 与木质挂板同一放大比例 */
+  zoom: var(--ui-scale);
 }
 
 .menu_info input[type="text"] {
@@ -431,4 +443,9 @@ body {
   .player-row { flex: 1 1 45%; }
   .status-box, .req-hint, .panel-box, .role-hint { flex: 1 1 100%; }
   #board { max-height: calc(100vh - 260px); }
+}
+
+/* 小屏（手机浏览器入局）：主界面回退原始尺寸，避免水平溢出 */
+@media (max-width: 480px) {
+  :root { --ui-scale: 1; }
 }
