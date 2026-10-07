@@ -123,6 +123,9 @@ main / server-main（进程入口：Electron 客户端 / 常驻服务器）
 | 超时 | 宽限超时：该席位置空；`playing` 且一方席位为空 → 房间回到 `waiting`；房主席位超时且未开局 → 销毁房间 |
 | 观战者 | 不签发 `playerId`，断线即移除，不触发宽限 |
 
+> **已知限制**：同一浏览器内多个标签共享 `localStorage`，因此第二个标签会带上同一 `playerId` 被服务器判定为「房主重连」。
+> 同一台机器上模拟两名玩家需使用不同来源（如 `127.0.0.1` 与 `localhost`）或不同浏览器；跨设备真实联机不受影响。
+
 ### 3.5 通信协议
 
 **新增（Client → Server）**
@@ -135,6 +138,7 @@ main / server-main（进程入口：Electron 客户端 / 常驻服务器）
 | `join_room` | `roomId`、`role: 'player' \| 'spectator'`、`playerId?`、`password?` | 加入房间；带 `playerId` 则尝试恢复席位 |
 | `leave_room` | — | 离开房间（主动，不走宽限） |
 | `list_rooms` | — | 请求房间列表 |
+| `set_password` | `password: string \| null` | 房主在等待阶段设置 / 取消口令（null 或空串表示点击即可加入） |
 
 **新增（Server → Client）**
 
@@ -330,11 +334,17 @@ main / server-main（进程入口：Electron 客户端 / 常驻服务器）
 | 终局房间 | **无人「再来一局」即销毁**（`overTtlMs` 倒计时） |
 | 账号系统 | **做最简版本**（用户名 + 密码 + token，可选使用） |
 
-## 8. 实施记录
+## 8. 实施记录（2026-10-07 完成）
 
-| 阶段 | 内容 | 提交 |
+四阶段在同一次实施中落地（阶段 1「抽取 Room」与阶段 2「多房间」合并为一次重构，测试同步更新）：
+
+| 阶段 | 内容 | 落点 |
 |---|---|---|
-| 1 | 共享层改造（`PlayerRef` / 协议新增房间与账号消息） | 见 Git 提交记录 |
-| 2 | 服务端拆分（`Room` + `GameServer` 多房间）、账号与历史落盘 | 同上 |
-| 3 | 进程入口（常驻服务器 + Electron 默认连服务器）与客户端房间/账号 UI | 同上 |
-| 4 | 服务器发现改造与文档同步 | 同上 |
+| 1+2 | 共享层与协议改造；`HostServer` 拆分为 `GameServer` + `Room`；多房间、房间号、口令、终局销毁、空闲回收、按席位宽限 | `shared/types.ts`、`shared/protocol.ts`、`server/server.ts`、`server/room.ts`、`server/conn.ts` |
+| 2 | 最简账号系统与对局记录持久化 | `server/accounts.ts`、`server/history.ts`（落盘 `data/users.json`、`data/history.json`） |
+| 3 | 常驻服务器入口；Electron 默认「连接服务器」并保留便携兜底 | `server/server-main.ts`、`main/main.ts`、`package.json`、`scripts/dev.mjs` |
+| 3+4 | 客户端房间 / 账号 UI 与会话自动重连；服务器发现改为探测服务器 | `renderer/app.ts`、`renderer/index.html`、`renderer/styles.css`、`renderer/net.ts`、`renderer/discover.ts` |
+| 4 | 文档同步（本 ADR + 0001/0003/0005/0006/0008 + README + 索引） | `docs/` |
+
+验证：`npm test`（196 项）／`npm run lint`／`npm run format:check`／`npm run build` 全绿；
+另用真实浏览器完成「创建房间 → 对手加入 → 开局」的双人端到端验证，两标签页控制台无报错。

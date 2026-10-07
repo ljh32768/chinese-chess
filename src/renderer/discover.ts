@@ -1,14 +1,14 @@
 /**
- * 局域网主机发现（D1）。
+ * 局域网服务器发现。
  *
  * 浏览器无法使用 mDNS / UDP 广播，因此采用「同网段 WebSocket 探测」：
- * 逐个连接 `ws://<ip>:<port>/ws` 后发送 `ping`，收到带主机自我声明地址的 `pong`
- * 即判定该地址存在主机；同一主机经多个地址命中时按声明地址去重。
+ * 逐个连接 `ws://<ip>:<port>/ws` 后发送 `ping`，收到带服务器自我声明地址的 `pong`
+ * 即判定该地址是本游戏服务器；同一服务器经多个地址命中时按声明地址去重。
  */
 
 import { decode, encode, ServerMessage } from '../shared/protocol.js';
 
-export interface DiscoveredHost {
+export interface DiscoveredServer {
   ip: string;
   port: number;
 }
@@ -32,15 +32,19 @@ export interface ProbeOptions {
   createSocket?: SocketFactory;
 }
 
-/** 探测单个地址是否为局域网象棋主机；是则返回其声明的地址 */
-export function probeHost(ip: string, port: number, opts: ProbeOptions = {}): Promise<DiscoveredHost | null> {
+/** 探测单个地址是否为本游戏服务器；是则返回其声明的地址 */
+export function probeServer(
+  ip: string,
+  port: number,
+  opts: ProbeOptions = {},
+): Promise<DiscoveredServer | null> {
   const timeoutMs = opts.timeoutMs ?? 300;
   const create = opts.createSocket ?? defaultSocket;
   return new Promise((resolve) => {
     let settled = false;
     let socket: DiscoverSocketLike | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const finish = (result: DiscoveredHost | null) => {
+    const finish = (result: DiscoveredServer | null) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
@@ -84,23 +88,23 @@ export interface DiscoverOptions extends ProbeOptions {
   onProgress?: (done: number, total: number) => void;
 }
 
-/** 扫描 `<prefix>.1` ~ `<prefix>.254` 的同网段主机（按声明地址去重） */
+/** 扫描 `<prefix>.1` ~ `<prefix>.254` 的同网段服务器（按声明地址去重） */
 export async function discoverSubnet(
   prefix: string,
   port: number,
   opts: DiscoverOptions = {},
-): Promise<DiscoveredHost[]> {
+): Promise<DiscoveredServer[]> {
   const timeoutMs = opts.timeoutMs ?? 400;
   const concurrency = Math.max(1, opts.concurrency ?? 24);
   const ips = Array.from({ length: 254 }, (_, i) => `${prefix}.${i + 1}`);
-  const found = new Map<string, DiscoveredHost>();
+  const found = new Map<string, DiscoveredServer>();
   let index = 0;
   let done = 0;
 
   const worker = async (): Promise<void> => {
     while (index < ips.length) {
       const ip = ips[index++];
-      const hit = await probeHost(ip, port, { timeoutMs, createSocket: opts.createSocket });
+      const hit = await probeServer(ip, port, { timeoutMs, createSocket: opts.createSocket });
       done += 1;
       opts.onProgress?.(done, ips.length);
       if (hit) {

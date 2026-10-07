@@ -1,8 +1,8 @@
 /**
- * 开发脚本（C2）：tsc watch + 主机端自动重启。
+ * 开发脚本（C2）：tsc watch + 服务端自动重启。
  *
  * - 首次完整构建（tsc + 复制静态资源）
- * - 此后监听 dist 变化自动重启 Node 主机端，监听 src/renderer 的 html/css 变化自动复制资源
+ * - 此后监听 dist 变化自动重启 Node 服务端，监听 src/renderer 的 html/css 变化自动复制资源
  * - Ctrl+C 退出并清理子进程
  */
 
@@ -20,7 +20,7 @@ runOnce(process.execPath, ['scripts/copy-assets.mjs']);
 let child = null;
 const startServer = () => {
   if (child) child.kill();
-  child = spawn(process.execPath, ['dist/server/cli.js'], { stdio: 'inherit' });
+  child = spawn(process.execPath, ['dist/server/server-main.js'], { stdio: 'inherit' });
 };
 
 startServer();
@@ -36,7 +36,7 @@ fs.watch('dist', { recursive: true }, (_event, file) => {
   if (!file || !file.endsWith('.js')) return;
   clearTimeout(restartTimer);
   restartTimer = setTimeout(() => {
-    console.log('[dev] 检测到编译产物变化，重启主机端…');
+    console.log('[dev] 检测到编译产物变化，重启服务端…');
     startServer();
   }, 250);
 });

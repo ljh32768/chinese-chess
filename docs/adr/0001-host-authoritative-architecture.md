@@ -1,8 +1,9 @@
 # ADR-0001：主机权威 + WebSocket + 纯 TS 规则引擎的总体架构
 
-- 状态：已接受（记录现状实现）
+- 状态：**部分被取代** —— 权威边界与分层原则仍有效；「主机即服务器 / 无房间系统」已被
+  [ADR-0010 局域网中心服务器与多房间架构](./0010-room-server.md) 取代（2026-10-07）
 - 日期：2026-10-03
-- 关联文档：[Technical-solution.md](../Technical-solution.md)、[Product-plan.md](../Product-plan.md)、[docs/README.md](../README.md)
+- 关联文档：[Technical-solution.md](../Technical-solution.md)、[Product-plan.md](../Product-plan.md)、[docs/README.md](../README.md)、[ADR-0010](./0010-room-server.md)
 
 ---
 
@@ -27,6 +28,8 @@ MVP 目标是「局域网内两台设备连上后，能完整、正确地下一�
 5. **单一页面复用**：Electron 主机窗口与加入者浏览器加载同一个 `renderer/index.html`，
    仅以 `role`（host / guest）与 `side`（红 / 黑）区分行为。
 6. **无房间系统**：连接本身就是对局；底层不存在 `roomId`（与产品文档 4.6 一致）。
+   > 该条已被 [ADR-0010](./0010-room-server.md) 取代：服务器引入房间层，`roomId` 成为一等概念；
+   > 权威边界（唯一真实棋盘在服务器进程内）保持不变。
 
 ## 3. 详细规格
 

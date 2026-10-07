@@ -15,7 +15,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "host": "node dist/server/cli.js",
+    "serve": "node dist/server/server-main.js",
+    "host": "node dist/server/server-main.js",
     "start": "npm run build && electron .",
     "dist": "npm run build && electron-builder --win"
   },

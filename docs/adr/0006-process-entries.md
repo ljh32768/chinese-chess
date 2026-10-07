@@ -1,9 +1,10 @@
-# ADR-0006：进程入口与构建规格（main/main.ts、server/cli.ts、scripts/）
+# ADR-0006：进程入口与构建规格（main/main.ts、server/server-main.ts、scripts/）
 
-- 状态：已接受（记录现状实现）
+- 状态：**入口已调整** —— 新增常驻服务器入口 `server-main.ts`；Electron 默认「连接服务器」，
+  便携模式为兜底；构建与端口策略不变，见 [ADR-0010](./0010-room-server.md)（2026-10-07）
 - 日期：2026-10-03
-- 关联入口：`npm start`（Electron 桌面）、`npm run host`（Node CLI）、`npm run build`
-- 关联文档：[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0007 渲染层](./0007-renderer-ui.md)
+- 关联入口：`npm start`（Electron 客户端）、`npm run serve`（常驻服务器，`npm run host` 为别名）、`npm run build`
+- 关联文档：[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0007 渲染层](./0007-renderer-ui.md)、[ADR-0010](./0010-room-server.md)
 
 ---
 
@@ -35,8 +36,9 @@
 | `npm run dev` | `node scripts/dev.mjs` | 开发模式：首次构建 → tsc watch → dist 变化自动重启主机端，渲染层 html/css 变化自动同步 |
 | `npm test` | `vitest run` | 全量测试 |
 | `npm run lint` / `format:check` | `eslint .` / `prettier --check .` | 规范与格式门禁（CI 依赖） |
-| `npm run host` | `node dist/server/cli.js` | 无界面主机（**需先 build**） |
-| `npm start` | `npm run build && electron .` | 桌面端（自动先构建） |
+| `npm run serve` | `node dist/server/server-main.js` | 常驻中心服务器（**需先 build**） |
+| `npm run host` | `node dist/server/server-main.js` | 同上（历史别名） |
+| `npm start` | `npm run build && electron .` | Electron 客户端（自动先构建；默认连接服务器） |
 | `npm run dist` | `npm run build && electron-builder --win` | 产出 Windows 安装包到 `release/`（NSIS，可改安装目录） |
 
 ### 3.2 构建配置

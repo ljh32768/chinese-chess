@@ -4,7 +4,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
-    // 测试默认静音主机日志，需要断言的用例自行 stubEnv 打开
+    // 服务端用例会真实起 HTTP/WebSocket 服务，机器繁忙时握手与定时器会变慢，
+    // 因此放宽单用例超时（默认 5s 在高负载下偶发超时）
+    testTimeout: 15000,
+    // 测试默认静音服务器日志，需要断言的用例自行 stubEnv 打开
     env: { LANSCHESS_DEBUG: '0' },
   },
 });

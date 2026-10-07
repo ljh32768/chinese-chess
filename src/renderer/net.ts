@@ -1,22 +1,13 @@
 /**
  * 浏览器端 WebSocket 客户端：连接、心跳、消息分发。
+ *
+ * 只负责「连接已建立」与「消息收发」；创建 / 加入房间由调用方在连接后发送
+ * `create_room` / `join_room`（见 shared/protocol.ts），因此这里不再有握手角色概念。
  */
 
-import { ClientMessage, Role, ServerMessage, decode, encode } from '../shared/protocol.js';
-import { FirstMode, GameSnapshot, Side } from '../shared/types.js';
-
-export interface WelcomeInfo {
-  /** 分配阵营；观战者为 null */
-  side: Side | null;
-  hostIp: string;
-  port: number;
-  state: GameSnapshot;
-  /** 主机选择的先手（红方）方式（随机 / 猜先时开赛前才最终确定席位） */
-  firstMode: FirstMode;
-}
+import { ClientMessage, ServerMessage, decode, encode } from '../shared/protocol.js';
 
 export interface NetHandlers {
-  onWelcome(info: WelcomeInfo): void;
   onMessage(msg: ServerMessage): void;
   /** 非主动关闭（对端断开 / 网络异常） */
   onClosed(reason: string): void;
@@ -37,8 +28,8 @@ export class Net {
     return !!this.ws && this.ws.readyState === WebSocket.OPEN;
   }
 
-  /** 建立连接并发送 join；收到 welcome 或错误后 resolve / reject */
-  connect(url: string, role: Role): Promise<void> {
+  /** 建立连接（open 即 resolve；连接失败 reject） */
+  connect(url: string): Promise<void> {
     this.closing = false;
     return new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -52,36 +43,19 @@ export class Net {
       this.ws = ws;
 
       ws.onopen = () => {
-        ws.send(encode({ type: 'join', role }));
+        settled = true;
+        this.lastPongAt = Date.now();
+        this.startPing();
+        resolve();
       };
 
       ws.onmessage = (ev) => {
         const raw = typeof ev.data === 'string' ? ev.data : '';
         const msg = decode(raw) as ServerMessage | null;
         if (!msg) return;
-
-        if (msg.type === 'welcome') {
-          settled = true;
-          this.lastPongAt = Date.now();
-          this.startPing();
-          this.handlers.onWelcome({
-            side: msg.side,
-            hostIp: msg.hostIp,
-            port: msg.port,
-            state: msg.state,
-            firstMode: msg.firstMode,
-          });
-          resolve();
-          return;
-        }
+        // 心跳回应由客户端内部消化，不打扰上层
         if (msg.type === 'pong') {
           this.lastPongAt = Date.now();
-          return;
-        }
-        if (msg.type === 'error' && !settled) {
-          settled = true;
-          reject(new Error(msg.message));
-          ws.close();
           return;
         }
         this.handlers.onMessage(msg);
@@ -91,7 +65,7 @@ export class Net {
         this.stopPing();
         if (!settled) {
           settled = true;
-          reject(new Error('无法连接到主机'));
+          reject(new Error('无法连接到服务器'));
           return;
         }
         if (!this.closing) this.handlers.onClosed('连接已断开');
@@ -100,7 +74,7 @@ export class Net {
       ws.onerror = () => {
         if (!settled) {
           settled = true;
-          reject(new Error('无法连接到主机'));
+          reject(new Error('无法连接到服务器'));
         }
       };
     });

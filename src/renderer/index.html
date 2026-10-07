@@ -14,11 +14,20 @@
     <div class="menu_wrap">
       <div class="menu_box">
         <div class="menu_init" id="menu-index">
-          <a id="btn-create">创建对局</a>
-          <a id="btn-show-join">加入对局</a>
+          <a id="btn-create">创建房间</a>
+          <a id="btn-show-join">加入房间</a>
           <a id="btn-create-ai">人机对弈</a>
           <a id="btn-history">对局回顾</a>
           <a id="btn-skin">更换皮肤</a>
+        </div>
+        <div class="menu_dy" id="menu-create" hidden>
+          <div class="menu_info">
+            <div class="menu_fh" id="btn-create-back" title="返回"></div>
+            <label for="create-pass">房间口令（可选）</label>
+            <input type="password" id="create-pass" autocomplete="off" placeholder="留空即任何人可加入">
+            <p class="hint">设置口令后，对手需输入口令才能加入</p>
+          </div>
+          <a id="btn-create-start">创建房间</a>
         </div>
         <div class="menu_dy" id="menu-ai" hidden>
           <div class="menu_info">
@@ -34,16 +43,17 @@
     </div>
   </section>
 
-  <!-- ========== 主机等待（版块与挂板内框对齐：实测素材内框 x10..290 / y158..395） ========== -->
+  <!-- ========== 等待对手（版块与挂板内框对齐：实测素材内框 x10..290 / y158..395） ========== -->
   <section id="screen-host" class="screen">
     <div class="menu_box">
       <div class="menu_info wide">
         <div class="menu_fh" id="btn-cancel-host" title="取消"></div>
         <p class="info-title">等待对手加入<i class="spinner" aria-hidden="true"></i></p>
-        <div class="ip-box" id="ip-box" title="点击复制地址">
-          <div class="ip-label">本机地址（点击复制）</div>
+        <div class="ip-box" id="ip-box" title="点击复制房间号">
+          <div class="ip-label">房间号（点击复制）</div>
           <div class="ip-value" id="host-ip">—</div>
         </div>
+        <p class="hint" id="room-pass-hint"></p>
         <div class="side_pick">
           <div class="side_opts" id="side-opts">
             <button type="button" class="side_opt" data-mode="random">随机黑红</button>
@@ -51,30 +61,40 @@
             <button type="button" class="side_opt" data-mode="b">黑</button>
             <button type="button" class="side_opt" data-mode="r">红</button>
           </div>
-          <p class="side_hint" id="side-hint">先手（红方）：主机执红先行</p>
+          <p class="side_hint" id="side-hint">先手（红方）：房主执红先行</p>
         </div>
-        <p class="hint" id="host-wait">让对方在「加入对局」中输入上方地址</p>
+        <p class="hint" id="host-wait">让对方在「加入房间」中输入上方房间号</p>
       </div>
     </div>
   </section>
 
-  <!-- ========== 加入（面板与挂板内框对齐，见 styles.css .menu_info） ========== -->
+  <!-- ========== 加入房间（面板与挂板内框对齐，见 styles.css .menu_info） ========== -->
   <section id="screen-join" class="screen">
     <div class="menu_box">
       <div class="menu_info">
         <div class="menu_fh" id="btn-join-back" title="返回"></div>
-        <label for="join-ip">主机地址</label>
-        <input type="text" id="join-ip" autocomplete="off" placeholder="192.168.1.42">
-        <label for="join-port">端口</label>
-        <input type="text" id="join-port" autocomplete="off" placeholder="7777" value="7777">
+        <label for="join-room">房间号</label>
+        <input type="text" id="join-room" autocomplete="off" placeholder="6 位数字">
+        <label for="join-pwd">口令（如有）</label>
+        <input type="password" id="join-pwd" autocomplete="off" placeholder="无口令可留空">
+        <label for="acct-user">账号（可选）</label>
+        <input type="text" id="acct-user" autocomplete="username" placeholder="用户名">
+        <input type="password" id="acct-pwd" autocomplete="current-password" placeholder="密码">
+        <div class="scan-actions">
+          <button class="btn small" id="btn-login">登 录</button>
+          <button class="btn small" id="btn-register">注 册</button>
+        </div>
         <div class="scan-actions">
           <button class="btn small" id="btn-spectate">观 战</button>
-          <button class="btn small" id="btn-scan">搜索主机</button>
+          <button class="btn small" id="btn-rooms">刷新房间</button>
+        </div>
+        <div class="scan-actions">
+          <button class="btn small" id="btn-scan">搜索服务器</button>
         </div>
         <p class="hint" id="join-msg"></p>
         <div class="scan-result" id="scan-result" hidden></div>
       </div>
-      <a id="btn-connect">连 接</a>
+      <a id="btn-connect">加入房间</a>
     </div>
   </section>
 

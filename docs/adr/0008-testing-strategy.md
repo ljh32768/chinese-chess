@@ -17,11 +17,11 @@ MVP 的交付底线是「能完整、正确地下一盘棋」。
 
 - 测试框架：**vitest**（node 环境），配置见 [vitest.config.ts](../../vitest.config.ts)：`include: ['tests/**/*.test.ts']`。
 - 测试分层：
-  1. **单元层**：纯函数与状态机（rules、game、lan-ip），不启服务；
-  2. **集成层**：真实 `HostServer` + 真实 WebSocket 客户端（server.test.ts）；
+  1. **单元层**：纯函数与状态机（rules、game、lan-ip、accounts、history），不启服务；
+  2. **集成层**：真实 `GameServer` + 真实 WebSocket 客户端（server.test.ts）；
   3. **端到端层**：完整一盘棋回放（fullgame.test.ts），逐步断言双方一致性与终局。
 - 测试客户端复用 [tests/ws-client.ts](../../tests/ws-client.ts)：封装 `open/send/waitType/close`，等待指定类型消息。
-- 服务端测试使用**随机高位端口 + `staticDir: null`**，避免端口冲突与静态资源干扰。
+- 服务端测试使用**随机高位端口 + `staticDir: null` + `dataDir: null`**，避免端口冲突、静态资源与磁盘写入干扰。
 
 ## 3. 详细规格
 
@@ -34,11 +34,12 @@ MVP 的交付底线是「能完整、正确地下一盘棋」。
 | [board.test.ts](../../tests/board.test.ts) | 单元 | 三套皮肤几何参数与素材路径；坐标换算与点击命中（含响应式缩放）；绘制计划：棋子贴图/上一步落点框/选中压暗/合法落点提示点与可吃子环/将军脉冲环/悬停预高亮/AI 推荐高亮；视角翻转 |
 | [notation.test.ts](../../tests/notation.test.ts) | 单元 | 传统中文记谱（炮二平五/马八进七/卒3进1/前后消歧/斜走目标列）；describeHistory 回放；capturedPieces 吃子统计 |
 | [ai.test.ts](../../tests/ai.test.ts) | 单元 | 一步杀、白吃子、无着法返回 null、开局着法合法且 depth=2 耗时 < 1500ms |
-| [net.test.ts](../../tests/net.test.ts) | 单元 | 连接握手（join/welcome/error）；心跳 5s 与 16s 无 pong 判离线（假定时器 + 假 WebSocket）；主动关闭不提示 |
-| [fullgame.test.ts](../../tests/fullgame.test.ts) | 端到端 | 35 步将杀线回放：双方每步棋盘一致且与主机权威一致；`seq` 单调 +1；终局 `game_over` 原因=`将死`；history 与着法线一致；结束后可重开回到初始局面 |
-| [server.test.ts](../../tests/server.test.ts) | 集成 | 加入/开局/走子广播/拒绝；非整数坐标；认输/和棋/重开（含拒绝分支）/悔棋/离开；断线宽限与重连恢复；宽限超时；观战只读；人机对战（AI 自动应招/自动同意悔棋/拒绝和棋/`depth` 难度参数）；**先手方式（主机执黑、随机黑红、猜先猜中归属、对局中禁止改）与对局回顾（记录字段/明细/404/AI 推荐合法性）**；计时超时判负；日志打点与端口回退；静态资源 MIME（含 png/jpg/wav）与路径穿越 |
-| [review.test.ts](../../tests/review.test.ts) | 单元 | 复盘局面还原（逐步 / 越界收敛 / 行棋方交替）；列表文案（红黑方 / 取先方式 / 时间 / 胜负 / 席位与四种方式的文案） |
-| [discover.test.ts](../../tests/discover.test.ts) | 单元/集成 | 真实主机探测；无服务端口返回 null；网段扫描聚合、按声明地址去重与进度回调 |
+| [net.test.ts](../../tests/net.test.ts) | 单元 | 连接建立与消息分发；pong 内部消化；心跳 5s 与 16s 无 pong 判离线（假定时器 + 假 WebSocket）；主动关闭不提示；连接失败 reject |
+| [fullgame.test.ts](../../tests/fullgame.test.ts) | 端到端 | 35 步将杀线回放：双方每步棋盘一致且与**服务器权威**棋盘一致；`seq` 单调 +1；终局 `game_over` 原因=`将死`；history 与着法线一致；结束后可重开回到初始局面 |
+| [server.test.ts](../../tests/server.test.ts) | 集成 | 建房/加入/房号校验/房间不存在/满员/口令（无口令点击即入）；房间列表；走子广播与拒绝；非整数坐标；认输/和棋/重开（含拒绝分支）/悔棋/离开；观战只读与人数上限；断线宽限与 **playerId 重连恢复**；房主离开/宽限超时销毁房间；**终局无人「再来一局」销毁房间**；空闲回收；建房数上限；**两房间并发隔离**；先手方式（房主执黑、随机黑红、猜先猜中归属、非房主与对局中禁止改）与对局回顾（记录字段/明细/404/AI 推荐合法性）；注册登录与账号 token 归属；人机对战（AI 自动应招/自动同意悔棋/拒绝和棋/`depth` 难度）；计时超时判负；日志打点与端口回退；静态资源 MIME（含 png/jpg/wav）与路径穿越 |
+| [review.test.ts](../../tests/review.test.ts) | 单元 | 复盘局面还原（逐步 / 越界收敛 / 行棋方交替）；列表文案（玩家名 / 取先方式 / 时间 / 胜负 / 四种取先方式） |
+| [discover.test.ts](../../tests/discover.test.ts) | 单元/集成 | 真实服务器探测；无服务端口返回 null；网段扫描聚合、按声明地址去重与进度回调 |
+| [persistence.test.ts](../../tests/persistence.test.ts) | 单元 | 账号注册/登录/token 轮换与校验；账号与对局记录落盘、重建实例后读回；容量上限；文件损坏降级为空表 |
 | [lan-ip.test.ts](../../tests/lan-ip.test.ts) | 单元 | 无候选返回 null；192.168 优先；虚拟网卡降权；忽略 IPv6 |
 
 ### 3.2 执行方式

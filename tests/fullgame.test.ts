@@ -1,7 +1,7 @@
 /**
  * 完整一盘棋的端到端回放测试：
  * 双方通过 WebSocket 轮流走子，直到红方将死黑方，验证：
- * 1. 每一步双方广播的棋盘一致，且与主机权威棋盘一致；
+ * 1. 每一步双方广播的棋盘一致，且与服务器权威棋盘一致；
  * 2. seq 单调递增，防乱序；
  * 3. 终局广播 game_over，原因为「将死」；
  * 4. 结束后可重开，回到初始局面。
@@ -10,7 +10,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { HostServer } from '../src/server/host-server.js';
+import { GameServer } from '../src/server/server.js';
 import { Board, Pos } from '../src/shared/types.js';
 import { TestClient } from './ws-client.js';
 
@@ -55,7 +55,7 @@ const MATE_LINE: Array<{ from: Pos; to: Pos }> = [
   { from: [8, 0], to: [8, 5] },
 ];
 
-let server: HostServer | null = null;
+let server: GameServer | null = null;
 const clients: TestClient[] = [];
 
 afterEach(async () => {
@@ -65,13 +65,14 @@ afterEach(async () => {
 });
 
 /** 随机取一个高位端口并启动服务，避开 fetch 屏蔽的端口与端口占用 */
-async function startServer(): Promise<HostServer> {
+async function startServer(): Promise<GameServer> {
   let lastErr: unknown = null;
   for (let i = 0; i < 5; i++) {
-    const candidate = new HostServer({
+    const candidate = new GameServer({
       port: 20000 + Math.floor(Math.random() * 30000),
       staticDir: null,
       host: '127.0.0.1',
+      dataDir: null,
     });
     try {
       await candidate.listen();
@@ -86,23 +87,26 @@ async function startServer(): Promise<HostServer> {
 
 const boardKey = (b: Board) => JSON.stringify(b);
 
-async function connect(port: number, role: 'host' | 'guest'): Promise<TestClient> {
+async function open(port: number): Promise<TestClient> {
   const c = new TestClient(port);
   clients.push(c);
   await c.open();
-  c.send({ type: 'join', role });
   return c;
 }
 
 describe('完整对局回放', () => {
   it('双方走完一整盘棋，红方将死黑方，棋盘始终一致', async () => {
-    server = await startServer();
-    server.setHosting(true);
+    const s = await startServer();
 
-    const host = await connect(server.address.port, 'host'); // 红方
-    await host.waitType('welcome');
-    const guest = await connect(server.address.port, 'guest'); // 黑方
-    await guest.waitType('welcome');
+    // 房主建房（默认执红），对手加入后自动开局
+    const host = await open(s.address.port);
+    host.send({ type: 'create_room', mode: 'pvp' });
+    const roomId = (await host.waitType('room_joined')).roomId;
+
+    const guest = await open(s.address.port);
+    guest.send({ type: 'join_room', roomId, role: 'player' });
+    const gJoined = await guest.waitType('room_joined');
+    expect(gJoined.seat).toBe('b');
     await host.waitType('start');
     await guest.waitType('start');
 
@@ -124,11 +128,11 @@ describe('完整对局回放', () => {
       expect(theirs.seq).toBe(mine.seq);
       expectedSeq = mine.seq;
 
-      // 双方收到的棋盘完全一致，且与主机权威棋盘一致
+      // 双方收到的棋盘完全一致，且与服务器权威棋盘一致
       expect(boardKey(theirs.board)).toBe(boardKey(mine.board));
-      expect(boardKey(server.game.board)).toBe(boardKey(mine.board));
+      expect(boardKey(s.room(roomId)!.game.board)).toBe(boardKey(mine.board));
 
-      // 走子在主机权威棋盘上确实生效
+      // 走子在服务器权威棋盘上确实生效
       expect(mine.board[step.to[0]][step.to[1]]).not.toBeNull();
       expect(mine.board[step.from[0]][step.from[1]]).toBeNull();
 
@@ -173,6 +177,6 @@ describe('完整对局回放', () => {
     expect(restarted.state.moveSeq).toBe(0);
     expect(restarted.state.turn).toBe('r');
     expect(restarted.state.status).toBe('playing');
-    expect(boardKey(restarted.state.board)).toBe(boardKey(server.game.board));
+    expect(boardKey(restarted.state.board)).toBe(boardKey(s.room(roomId)!.game.board));
   }, 30000);
 });

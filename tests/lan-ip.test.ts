@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NetworkInterfaceInfo } from 'node:os';
-import { pickLanIp } from '../src/server/host-server.js';
+import { pickLanIp } from '../src/server/server.js';
 
 /** 构造网卡信息 */
 function iface(address: string, family: 'IPv4' | 'IPv6' = 'IPv4'): NetworkInterfaceInfo {

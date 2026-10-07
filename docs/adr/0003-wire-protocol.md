@@ -1,6 +1,8 @@
 # ADR-0003：通信协议模块规格（shared/protocol.ts）
 
-- 状态：已接受（记录现状实现）
+- 状态：**协议已更新** —— 消息类型与字段约束以下文为准的部分仍然有效；
+  `join` / `welcome` / `leave` 已被 [ADR-0010 §3.5](./0010-room-server.md) 改为
+  `create_room` / `join_room` / `leave_room` / `room_joined` 等（2026-10-07）
 - 日期：2026-10-03
 - 关联入口：加入对局、开局、走子同步、认输/和棋/重开/离开、断线重连宽限、心跳
 - 关联文档：[ADR-0004 对局状态机](./0004-game-state-machine.md)、[ADR-0005 主机服务](./0005-host-server.md)

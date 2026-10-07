@@ -16,13 +16,9 @@ import {
   GameRecordSummary,
   Move,
   Pos,
-  Seat,
   Side,
 } from '../shared/types.js';
 import { Skin, renderBoard } from './board.js';
-
-/** 席位显示名（主机 / 加入者 / AI） */
-export const SEAT_LABEL: Record<Seat, string> = { host: '主机', guest: '加入者', ai: 'AI' };
 
 /** 复盘第 index 步（0 = 开局）后的棋盘 */
 export function replayBoard(moves: Move[], index: number): Board {
@@ -58,7 +54,7 @@ export function recordLine(rec: GameRecordSummary): {
   result: string;
 } {
   return {
-    vs: `${SEAT_LABEL[rec.red]}（红） vs ${SEAT_LABEL[rec.black]}（黑）`,
+    vs: `${rec.red.name}（红） vs ${rec.black.name}（黑）`,
     first: FIRST_MODE_LABEL[rec.firstMode],
     time: formatTime(rec.startedAt),
     result: resultText(rec),
@@ -200,7 +196,7 @@ export function initReview(deps: ReviewDeps): ReviewController {
     if (!record) return;
     const line = recordLine(record);
     const guess = record.guess
-      ? `<div>猜先：主机抓「${record.guess.actual === 'odd' ? '单' : '双'}」，加入者猜「${record.guess.choice === 'odd' ? '单' : '双'}」（${record.guess.guestWon ? '猜中' : '未中'}）</div>`
+      ? `<div>猜先：房主抓「${record.guess.actual === 'odd' ? '单' : '双'}」，对手猜「${record.guess.choice === 'odd' ? '单' : '双'}」（${record.guess.guestWon ? '猜中' : '未中'}）</div>`
       : '';
     $('replay-info').innerHTML =
       `<div>${line.vs}</div><div>取先方式：${line.first}</div>` +

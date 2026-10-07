@@ -1,11 +1,12 @@
 /**
- * 渲染层 WebSocket 客户端（net.ts）单元测试（C3）。
- * 覆盖：连接握手、心跳发送、pong 超时判定为断线、主动关闭不触发断线提示、error 拒绝。
+ * 渲染层 WebSocket 客户端（net.ts）单元测试。
+ * 覆盖：连接建立、消息分发、pong 内部消化、心跳发送、pong 超时判定为断线、
+ * 主动关闭不触发断线提示、连接失败拒绝。
  * 使用假定时器 + 假 WebSocket，不依赖真实网络。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Net, WelcomeInfo } from '../src/renderer/net.js';
+import { Net } from '../src/renderer/net.js';
 
 /** 假 WebSocket：记录发送内容，支持手动触发 open / message / close */
 class FakeSocket {
@@ -51,30 +52,11 @@ class FakeSocket {
   }
 }
 
-const welcome = (): WelcomeInfo => ({
-  side: 'b',
-  hostIp: '192.168.1.2',
-  port: 7777,
-  state: {
-    board: [],
-    turn: 'r',
-    moveSeq: 0,
-    status: 'waiting',
-    winner: null,
-    reason: '',
-    lastMove: null,
-    check: false,
-    history: [],
-    deadline: null,
-  },
-});
-
 const makeNet = () => {
-  const onWelcome = vi.fn();
   const onMessage = vi.fn();
   const onClosed = vi.fn();
-  const net = new Net({ onWelcome, onMessage, onClosed });
-  return { net, onWelcome, onMessage, onClosed };
+  const net = new Net({ onMessage, onClosed });
+  return { net, onMessage, onClosed };
 };
 
 const lastSocket = (): FakeSocket => FakeSocket.instances[FakeSocket.instances.length - 1];
@@ -96,27 +78,36 @@ afterEach(() => {
 });
 
 describe('渲染层 WebSocket 客户端 Net', () => {
-  it('连接后发送 join，收到 welcome 后 resolve 并回调', async () => {
-    const { net, onWelcome } = makeNet();
-    const promise = net.connect('ws://192.168.1.2:7777/ws', 'guest');
+  it('连接建立后 resolve，并转发非心跳消息', async () => {
+    const { net, onMessage } = makeNet();
+    const promise = net.connect('ws://192.168.1.2:7777/ws');
     const s = lastSocket();
-
     s.open();
-    expect(s.types()).toEqual(['join']);
-    expect(JSON.parse(s.sent[0])).toMatchObject({ type: 'join', role: 'guest' });
-
-    s.receive({ type: 'welcome', ...welcome() });
     await expect(promise).resolves.toBeUndefined();
-    expect(onWelcome).toHaveBeenCalledTimes(1);
-    expect(onWelcome.mock.calls[0][0]).toMatchObject({ side: 'b', port: 7777 });
+    expect(net.connected).toBe(true);
+
+    s.receive({ type: 'room_joined', roomId: '123456', seat: 'b' });
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'room_joined', roomId: '123456' }),
+    );
+  });
+
+  it('pong 由内部消化，不转发给上层', async () => {
+    const { net, onMessage } = makeNet();
+    const promise = net.connect('ws://x/ws');
+    const s = lastSocket();
+    s.open();
+    await promise;
+
+    s.receive({ type: 'pong', t: 1 });
+    expect(onMessage).not.toHaveBeenCalled();
   });
 
   it('心跳每 5s 发送 ping；16s 未收到 pong 判定断线并回调 onClosed', async () => {
     const { net, onClosed } = makeNet();
-    const promise = net.connect('ws://x/ws', 'guest');
+    const promise = net.connect('ws://x/ws');
     const s = lastSocket();
     s.open();
-    s.receive({ type: 'welcome', ...welcome() });
     await promise;
 
     vi.advanceTimersByTime(5000);
@@ -135,10 +126,9 @@ describe('渲染层 WebSocket 客户端 Net', () => {
 
   it('主动 close 不触发断线提示', async () => {
     const { net, onClosed } = makeNet();
-    const promise = net.connect('ws://x/ws', 'guest');
+    const promise = net.connect('ws://x/ws');
     const s = lastSocket();
     s.open();
-    s.receive({ type: 'welcome', ...welcome() });
     await promise;
 
     net.close();
@@ -146,22 +136,11 @@ describe('渲染层 WebSocket 客户端 Net', () => {
     expect(onClosed).not.toHaveBeenCalled();
   });
 
-  it('未完成握手时收到 error 会 reject；其它消息转发给 onMessage', async () => {
+  it('连接失败时 reject', async () => {
     const { net } = makeNet();
-    const promise = net.connect('ws://x/ws', 'guest');
+    const promise = net.connect('ws://x/ws');
     const s = lastSocket();
-    s.open();
-    s.receive({ type: 'error', message: '主机尚未创建对局' });
-    await expect(promise).rejects.toThrow('主机尚未创建对局');
-
-    const { net: net2, onWelcome, onMessage: onMessage2 } = makeNet();
-    const promise2 = net2.connect('ws://x/ws', 'guest');
-    const s2 = lastSocket();
-    s2.open();
-    s2.receive({ type: 'welcome', ...welcome() });
-    await promise2;
-    expect(onWelcome).toHaveBeenCalled();
-    s2.receive({ type: 'move_applied', seq: 1 });
-    expect(onMessage2).toHaveBeenCalledWith(expect.objectContaining({ type: 'move_applied', seq: 1 }));
+    s.onerror?.();
+    await expect(promise).rejects.toThrow('无法连接到服务器');
   });
 });

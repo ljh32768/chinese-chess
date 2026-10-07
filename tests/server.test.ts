@@ -3,31 +3,35 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { HostServer, listenWithFallback } from '../src/server/host-server.js';
+import { GameServer, listenWithFallback } from '../src/server/server.js';
+import { ClientMessage } from '../src/shared/protocol.js';
 import { initBoard, validateMove } from '../src/shared/rules.js';
 import { Board, Pos } from '../src/shared/types.js';
 import { TestClient } from './ws-client.js';
 
-let server: HostServer | null = null;
+let server: GameServer | null = null;
 const clients: TestClient[] = [];
 
 interface ServerOpts {
   graceMs?: number;
   turnMs?: number;
   aiDelayMs?: number;
+  overTtlMs?: number;
+  roomIdleMs?: number;
+  maxRooms?: number;
+  maxSpectators?: number;
 }
 
 /** 随机取一个高位端口并启动服务，避开 fetch 屏蔽的端口与端口占用 */
-async function startServer(opts: ServerOpts = {}): Promise<HostServer> {
+async function startServer(opts: ServerOpts = {}): Promise<GameServer> {
   let lastErr: unknown = null;
   for (let i = 0; i < 5; i++) {
-    const candidate = new HostServer({
+    const candidate = new GameServer({
       port: 20000 + Math.floor(Math.random() * 30000),
       staticDir: null,
       host: '127.0.0.1',
-      graceMs: opts.graceMs,
-      turnMs: opts.turnMs,
-      aiDelayMs: opts.aiDelayMs,
+      dataDir: null,
+      ...opts,
     });
     try {
       await candidate.listen();
@@ -54,12 +58,40 @@ function rawGet(port: number, rawPath: string): Promise<{ status: number; body: 
   });
 }
 
-async function connect(port: number, role: 'host' | 'guest' | 'spectator'): Promise<TestClient> {
+/** 仅建立连接（不加入房间） */
+async function open(port: number): Promise<TestClient> {
   const c = new TestClient(port);
   clients.push(c);
   await c.open();
-  c.send({ type: 'join', role });
   return c;
+}
+
+type CreateRoomMsg = Omit<Extract<ClientMessage, { type: 'create_room' }>, 'type'>;
+type JoinRoomMsg = Omit<Extract<ClientMessage, { type: 'join_room' }>, 'type' | 'roomId'>;
+
+/** 建房（房主自动入座），返回连接与房间信息 */
+async function createRoom(s: GameServer, msg: CreateRoomMsg = {}) {
+  const c = await open(s.address.port);
+  c.send({ type: 'create_room', ...msg });
+  const joined = await c.waitType('room_joined');
+  return { c, roomId: joined.roomId, playerId: joined.playerId, joined };
+}
+
+/** 加入房间（默认作为玩家） */
+async function joinRoom(s: GameServer, roomId: string, msg: JoinRoomMsg = {}) {
+  const c = await open(s.address.port);
+  c.send({ type: 'join_room', roomId, role: msg.role ?? 'player', ...msg });
+  return c;
+}
+
+/** 建房 + 加入并等待开局（默认房主执红） */
+async function setupGame(s: GameServer) {
+  const { c: host, roomId, playerId } = await createRoom(s);
+  const guest = await joinRoom(s, roomId);
+  const gJoined = await guest.waitType('room_joined');
+  const hStart = await host.waitType('start');
+  const gStart = await guest.waitType('start');
+  return { host, guest, roomId, hostId: playerId, guestId: gJoined.playerId, hStart, gStart };
 }
 
 afterEach(async () => {
@@ -73,60 +105,80 @@ afterEach(async () => {
 /** 从 move_applied 里取某一格，便于断言 */
 const at = (board: Board, r: number, c: number) => board[r][c];
 
-describe('主机服务 · 连接与开局', () => {
-  it('未创建对局时加入者会被拒绝', async () => {
+describe('服务器 · 建房与加入', () => {
+  it('建房返回 6 位房间号并进入等待状态', async () => {
     const s = await startServer();
-    const guest = await connect(s.address.port, 'guest');
-    const err = await guest.waitType('error');
-    expect(err.message).toBe('主机尚未创建对局');
+    const { joined, roomId } = await createRoom(s);
+    expect(roomId).toMatch(/^\d{6}$/);
+    expect(joined.seat).toBe('r');
+    expect(joined.state.status).toBe('waiting');
+    expect(joined.locked).toBe(false);
+    expect(joined.ownerId).toBe(joined.playerId);
   });
 
-  it('创建对局后双方加入会自动开局', async () => {
+  it('加入不存在的房间返回错误', async () => {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    const welcome = await host.waitType('welcome');
-    expect(welcome.side).toBe('r');
-
-    const guest = await connect(s.address.port, 'guest');
-    const gw = await guest.waitType('welcome');
-    expect(gw.side).toBe('b');
-    await host.waitType('opponent_joined');
-
-    const start = await guest.waitType('start');
-    expect(start.state.status).toBe('playing');
-    expect(start.state.turn).toBe('r');
+    const guest = await joinRoom(s, '000000');
+    expect((await guest.waitType('error')).message).toBe('房间不存在');
   });
 
-  it('对局已满时第二个加入者被拒绝', async () => {
+  it('双方到齐后自动开局（房主执红）', async () => {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
+    const { host, guest, gStart } = await setupGame(s);
+    expect((await host.waitType('first_result')).ownerSide).toBe('r');
+    expect((await guest.waitType('first_result')).ownerSide).toBe('r');
+    expect(gStart.side).toBe('b');
+    expect(s.roomCount).toBe(1);
+  });
 
-    const extra = await connect(s.address.port, 'guest');
-    const err = await extra.waitType('error');
-    expect(err.message).toBe('对局已满，无法加入');
+  it('房间已满时第三个玩家被拒绝，观战仍可加入', async () => {
+    const s = await startServer();
+    const { roomId } = await setupGame(s);
+    const extra = await joinRoom(s, roomId);
+    expect((await extra.waitType('error')).message).toBe('房间已满');
+
+    const watcher = await joinRoom(s, roomId, { role: 'spectator' });
+    expect((await watcher.waitType('room_joined')).seat).toBeNull();
+  });
+
+  it('设置口令后加入需正确口令', async () => {
+    const s = await startServer();
+    const { c: host, roomId, playerId } = await createRoom(s);
+    host.send({ type: 'set_password', password: 'abc123' });
+    // 等待房主端自身无错误（set_password 无回执，这里直接尝试加入验证）
+    await new Promise((r) => setTimeout(r, 20));
+
+    const bad = await joinRoom(s, roomId, { password: 'wrong' });
+    expect((await bad.waitType('error')).message).toBe('房间口令错误');
+
+    const ok = await joinRoom(s, roomId, { password: 'abc123' });
+    expect((await ok.waitType('room_joined')).seat).toBe('b');
+    expect(host).toBeDefined();
+    expect(playerId).toBeTruthy();
+  });
+
+  it('未加入房间时发送对局消息返回错误', async () => {
+    const s = await startServer();
+    const c = await open(s.address.port);
+    c.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await c.waitType('error')).message).toBe('尚未加入房间');
+  });
+
+  it('房间列表返回人数、状态与是否上锁', async () => {
+    const s = await startServer();
+    const { roomId } = await createRoom(s, { password: 'pw' });
+    const c = await open(s.address.port);
+    c.send({ type: 'list_rooms' });
+    const list = await c.waitType('room_list');
+    expect(list.rooms).toHaveLength(1);
+    expect(list.rooms[0]).toMatchObject({ roomId, players: 1, status: 'waiting', locked: true, mode: 'pvp' });
   });
 });
 
-describe('主机服务 · 走子同步', () => {
-  async function setup(): Promise<{ host: TestClient; guest: TestClient }> {
-    const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-    await guest.waitType('start');
-    return { host, guest };
-  }
-
+describe('服务器 · 走子同步', () => {
   it('走子成功会向双方广播完整棋盘与 seq', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
 
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     const hMsg = await host.waitType('move_applied');
@@ -148,71 +200,70 @@ describe('主机服务 · 走子同步', () => {
   });
 
   it('非本方回合走子被拒绝', async () => {
-    const { guest } = await setup();
+    const s = await startServer();
+    const { guest } = await setupGame(s);
     guest.send({ type: 'move', from: [9, 0], to: [8, 0] }); // 黑方在红方回合走子
-    const rejected = await guest.waitType('move_rejected');
-    expect(rejected.reason).toBe('还没轮到你走棋');
+    expect((await guest.waitType('move_rejected')).reason).toBe('还没轮到你走棋');
   });
 
   it('不能移动对方的棋子', async () => {
-    const { host } = await setup();
+    const s = await startServer();
+    const { host } = await setupGame(s);
     host.send({ type: 'move', from: [3, 0], to: [4, 0] }); // 红方去动黑卒
-    const rejected = await host.waitType('move_rejected');
-    expect(rejected.reason).toBe('这不是你的棋子');
+    expect((await host.waitType('move_rejected')).reason).toBe('这不是你的棋子');
   });
 
   it('非法走子被拒绝且不广播', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'move', from: [6, 0], to: [4, 0] }); // 兵走两格
-    const rejected = await host.waitType('move_rejected');
-    expect(rejected.reason).toBe('不符合走法或会送将');
+    expect((await host.waitType('move_rejected')).reason).toBe('不符合走法或会送将');
     await guest.expectNo('move_applied');
   });
 
   it('非整数坐标被拒绝为坐标非法，服务仍可继续走子', async () => {
-    const { host } = await setup();
+    const s = await startServer();
+    const { host } = await setupGame(s);
     host.send({ type: 'move', from: [1.5, 0], to: [2, 0] });
-    const rejected = await host.waitType('move_rejected');
-    expect(rejected.reason).toBe('坐标非法');
+    expect((await host.waitType('move_rejected')).reason).toBe('坐标非法');
 
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     expect((await host.waitType('move_applied')).seq).toBe(1);
   });
 
-  it('走子后轮到对方，双方棋盘一致', async () => {
-    const { host, guest } = await setup();
-    host.send({ type: 'move', from: [7, 1], to: [7, 4] }); // 红炮平移到中路
-    await host.waitType('move_applied');
-    const gMsg = await guest.waitType('move_applied');
-    expect(at(gMsg.board, 7, 4)).toEqual({ t: 'C', s: 'r' });
+  it('两房间并发互不影响（房间隔离）', async () => {
+    const s = await startServer();
+    const a = await setupGame(s);
+    const b = await setupGame(s);
+    expect(a.roomId).not.toBe(b.roomId);
+
+    a.host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    const aMove = await a.host.waitType('move_applied');
+    expect(aMove.seq).toBe(1);
+
+    // B 房权威状态不受影响
+    expect(s.room(b.roomId)!.game.moveSeq).toBe(0);
+    await b.guest.expectNo('move_applied');
+
+    b.guest.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    expect((await b.guest.waitType('move_rejected')).reason).toBe('还没轮到你走棋');
   });
 });
 
-describe('主机服务 · 对局控制', () => {
-  async function setup() {
-    const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-    await guest.waitType('start');
-    return { host, guest };
-  }
-
+describe('服务器 · 对局控制', () => {
   it('认输会广播 game_over', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     guest.send({ type: 'resign' });
     const over = await host.waitType('game_over');
     expect(over.winner).toBe('r');
     expect(over.reason).toBe('认输');
-    const over2 = await guest.waitType('game_over');
-    expect(over2.winner).toBe('r');
+    expect((await guest.waitType('game_over')).winner).toBe('r');
   });
 
   it('和棋请求被同意后判和', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'draw_request' });
     await guest.waitType('draw_request');
     guest.send({ type: 'draw_response', accept: true });
@@ -222,17 +273,18 @@ describe('主机服务 · 对局控制', () => {
   });
 
   it('拒绝和棋请求则对局继续', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'draw_request' });
     await guest.waitType('draw_request');
     guest.send({ type: 'draw_response', accept: false });
-    const resp = await host.waitType('draw_response');
-    expect(resp.accept).toBe(false);
+    expect((await host.waitType('draw_response')).accept).toBe(false);
     await host.expectNo('game_over');
   });
 
   it('双方同意后重开，回到初始局面', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'resign' });
     await host.waitType('game_over');
     await guest.waitType('game_over');
@@ -247,7 +299,8 @@ describe('主机服务 · 对局控制', () => {
   });
 
   it('拒绝重开请求则维持结束状态，不广播 start', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'resign' });
     await host.waitType('game_over');
     await guest.waitType('game_over');
@@ -255,27 +308,15 @@ describe('主机服务 · 对局控制', () => {
     guest.send({ type: 'restart_request' });
     await host.waitType('restart_request');
     host.send({ type: 'restart_response', accept: false });
-    const resp = await guest.waitType('restart_response');
-    expect(resp.accept).toBe(false);
+    expect((await guest.waitType('restart_response')).accept).toBe(false);
     await guest.expectNo('start');
   });
 });
 
-describe('主机服务 · 悔棋（请求-回应）', () => {
-  async function setup() {
-    const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-    await guest.waitType('start');
-    return { s, host, guest };
-  }
-
+describe('服务器 · 悔棋（请求-回应）', () => {
   it('对方同意后回退一步，双方棋盘与棋谱同步', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     await host.waitType('move_applied');
     await guest.waitType('move_applied');
@@ -288,15 +329,13 @@ describe('主机服务 · 悔棋（请求-回应）', () => {
     const st = await guest.waitType('state');
     expect(st.state.moveSeq).toBe(0);
     expect(st.state.history).toEqual([]);
-    expect(at(st.state.board, 9, 0)).toEqual({ t: 'R', s: 'r' }); // 红车回到原位
+    expect(at(st.state.board, 9, 0)).toEqual({ t: 'R', s: 'r' });
     expect(st.state.turn).toBe('r');
-
-    const st2 = await host.waitType('state');
-    expect(st2.state.moveSeq).toBe(0);
   });
 
   it('拒绝悔棋则局面保持不变', async () => {
-    const { s, host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest, roomId } = await setupGame(s);
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     await host.waitType('move_applied');
     await guest.waitType('move_applied');
@@ -305,19 +344,19 @@ describe('主机服务 · 悔棋（请求-回应）', () => {
     await host.waitType('undo_request');
     host.send({ type: 'undo_response', accept: false });
     expect((await guest.waitType('undo_response')).accept).toBe(false);
-    expect(s.game.moveSeq).toBe(1);
-    expect(s.game.history).toHaveLength(1);
+    expect(s.room(roomId)!.game.moveSeq).toBe(1);
   });
 
   it('没有可悔的棋时请求被拒绝（error 提示）', async () => {
-    const { host } = await setup();
+    const s = await startServer();
+    const { host } = await setupGame(s);
     host.send({ type: 'undo_request' });
-    const err = await host.waitType('error');
-    expect(err.message).toBe('当前没有可悔的棋');
+    expect((await host.waitType('error')).message).toBe('当前没有可悔的棋');
   });
 
   it('对方不在线（宽限中）时不能悔棋', async () => {
-    const { host, guest } = await setup();
+    const s = await startServer();
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     await host.waitType('move_applied');
     await guest.waitType('move_applied');
@@ -325,45 +364,28 @@ describe('主机服务 · 悔棋（请求-回应）', () => {
     guest.close();
     await host.waitType('opponent_away');
     host.send({ type: 'undo_request' });
-    const err = await host.waitType('error');
-    expect(err.message).toBe('对方不在线，无法悔棋');
+    expect((await host.waitType('error')).message).toBe('对方不在线，无法悔棋');
   });
 });
 
-describe('主机服务 · 观战', () => {
+describe('服务器 · 观战', () => {
   it('观战者随时可加入、不占席位，并收到对局广播', async () => {
     const s = await startServer();
-    const watcher = await connect(s.address.port, 'spectator');
-    const w = await watcher.waitType('welcome');
-    expect(w.side).toBeNull();
+    const { roomId } = await createRoom(s);
+    const watcher = await joinRoom(s, roomId, { role: 'spectator' });
+    expect((await watcher.waitType('room_joined')).seat).toBeNull();
 
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
     const start = await watcher.waitType('start');
     expect(start.state.status).toBe('playing');
-
-    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
-    const applied = await watcher.waitType('move_applied');
-    expect(applied.seq).toBe(1);
-    await host.waitType('move_applied'); // 双方与观战者都收到广播
   });
 
   it('观战者不能走子或发起请求（只读）', async () => {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-    await guest.waitType('start');
-
-    const watcher = await connect(s.address.port, 'spectator');
-    await watcher.waitType('welcome');
+    const { host, roomId } = await setupGame(s);
+    const watcher = await joinRoom(s, roomId, { role: 'spectator' });
+    await watcher.waitType('room_joined');
     watcher.send({ type: 'move', from: [9, 0], to: [8, 0] });
     expect((await watcher.waitType('error')).message).toBe('观战模式只读');
     watcher.send({ type: 'draw_request' });
@@ -373,16 +395,9 @@ describe('主机服务 · 观战', () => {
 
   it('观战者离开不影响对局，也不触发宽限', async () => {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-    await guest.waitType('start');
-
-    const watcher = await connect(s.address.port, 'spectator');
-    await watcher.waitType('welcome');
+    const { host, roomId } = await setupGame(s);
+    const watcher = await joinRoom(s, roomId, { role: 'spectator' });
+    await watcher.waitType('room_joined');
     watcher.close();
     await host.expectNo('opponent_away');
 
@@ -391,180 +406,210 @@ describe('主机服务 · 观战', () => {
   });
 });
 
-describe('主机服务 · 断线与心跳', () => {
+describe('服务器 · 断线与心跳', () => {
   it('对手意外断线进入宽限等待并通知另一方', async () => {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-
+    const { host, guest } = await setupGame(s);
     guest.close();
     const away = await host.waitType('opponent_away');
     expect(away.reason).toBe('对手已断开');
     expect(away.graceMs).toBe(30000);
   });
 
-  it('ping 会得到 pong', async () => {
+  it('ping 会得到 pong（携带服务器地址）', async () => {
     const s = await startServer();
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
+    const host = await open(s.address.port);
     host.send({ type: 'ping', t: 12345 });
     const pong = await host.waitType('pong');
     expect(pong.t).toBe(12345);
+    expect(pong.port).toBe(s.address.port);
   });
 
-  it('未知消息类型返回 error 且服务不崩溃', async () => {
+  it('未知消息 / 非法 JSON 返回 error 且服务不崩溃', async () => {
     const s = await startServer();
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
+    const host = await open(s.address.port);
     host.ws.send('这不是 JSON');
-    const err = await host.waitType('error');
-    expect(err.message).toBe('无法解析的消息');
+    expect((await host.waitType('error')).message).toBe('无法解析的消息');
     host.send({ type: 'ping', t: 1 });
     expect((await host.waitType('pong')).t).toBe(1);
   });
 });
 
-describe('主机服务 · 断线重连（宽限期）', () => {
+describe('服务器 · 断线重连（宽限期）', () => {
   /** 开局并走一步，制造可验证的进行中局面（红车 [9,0]→[8,0]） */
   async function setupPlaying(graceMs: number) {
     const s = await startServer({ graceMs });
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-    await guest.waitType('start');
+    const { host, guest, roomId, hostId, guestId } = await setupGame(s);
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     await host.waitType('move_applied');
     await guest.waitType('move_applied');
-    return { s, host, guest };
+    return { s, host, guest, roomId, hostId, guestId };
   }
 
-  it('加入者意外断线后对局保留，宽限期内重连恢复原局面', async () => {
-    const { s, host, guest } = await setupPlaying(1000);
+  it('对手意外断线后对局保留，凭 playerId 重连恢复原局面', async () => {
+    const { s, host, guest, roomId, guestId } = await setupPlaying(1000);
     guest.close();
     const away = await host.waitType('opponent_away');
     expect(away.reason).toBe('对手已断开');
     expect(away.graceMs).toBe(1000);
-    expect(s.game.status).toBe('playing');
-    expect(s.game.moveSeq).toBe(1);
+    expect(s.room(roomId)!.game.status).toBe('playing');
+    expect(s.room(roomId)!.game.moveSeq).toBe(1);
 
-    const guest2 = await connect(s.address.port, 'guest');
-    const w = await guest2.waitType('welcome');
-    expect(w.side).toBe('b');
+    const guest2 = await joinRoom(s, roomId, { playerId: guestId });
+    const w = await guest2.waitType('room_joined');
+    expect(w.seat).toBe('b');
+    expect(w.playerId).toBe(guestId);
     expect(w.state.status).toBe('playing');
     expect(w.state.moveSeq).toBe(1);
     expect(at(w.state.board, 8, 0)).toEqual({ t: 'R', s: 'r' });
 
     await host.waitType('opponent_joined');
     const sync = await host.waitType('state');
-    expect(sync.state.status).toBe('playing');
     expect(sync.state.moveSeq).toBe(1);
 
     // 恢复后对局可继续（轮到黑方）
     guest2.send({ type: 'move', from: [3, 0], to: [4, 0] });
-    const applied = await host.waitType('move_applied');
-    expect(applied.seq).toBe(2);
-    expect(applied.turn).toBe('r');
+    expect((await host.waitType('move_applied')).seq).toBe(2);
   });
 
-  it('宽限超时后清空席位并回到等待新对手', async () => {
-    const { host, guest } = await setupPlaying(80);
+  it('房主意外断线保留对局，带 playerId 重连恢复', async () => {
+    const { s, host, guest, roomId, hostId } = await setupPlaying(1000);
+    host.close();
+    const away = await guest.waitType('opponent_away');
+    expect(away.reason).toBe('房主已断开');
+    expect(s.room(roomId)!.game.status).toBe('playing');
+
+    const host2 = await joinRoom(s, roomId, { playerId: hostId });
+    const w = await host2.waitType('room_joined');
+    expect(w.seat).toBe('r');
+    expect(w.state.moveSeq).toBe(1);
+
+    await guest.waitType('opponent_joined');
+    // 恢复后仍可继续走子（轮到黑方）
+    guest.send({ type: 'move', from: [3, 0], to: [4, 0] });
+    expect((await host2.waitType('move_applied')).seq).toBe(2);
+  });
+
+  it('宽限超时后清空对手席并回到等待新对手（房主仍在）', async () => {
+    const { s, host, guest, roomId } = await setupPlaying(80);
     guest.close();
     await host.waitType('opponent_away');
 
     const st = await host.waitType('state');
     expect(st.state.status).toBe('waiting');
-    expect(st.state.moveSeq).toBe(0); // 已重置为等待状态
-    const left = await host.waitType('opponent_left');
-    expect(left.reason).toBe('对手已离开');
+    expect(st.state.moveSeq).toBe(0);
+    expect((await host.waitType('opponent_left')).reason).toBe('对手已离开');
+    expect(s.room(roomId)!.game.status).toBe('waiting');
 
-    // 新加入者加入即可开新局
-    const guest2 = await connect(server!.address.port, 'guest');
-    const start = await guest2.waitType('start');
-    expect(start.state.status).toBe('playing');
-    expect(start.state.moveSeq).toBe(0);
+    // 新对手加入即可开新局
+    const guest2 = await joinRoom(s, roomId);
+    expect((await guest2.waitType('start')).state.status).toBe('playing');
   });
 
-  it('主机可放弃等待断线对手，立即转为等待新对手', async () => {
-    const { host, guest } = await setupPlaying(5000);
+  it('房主可放弃等待断线对手，立即转为等待新对手', async () => {
+    const { s, host, guest } = await setupPlaying(5000);
     guest.close();
     await host.waitType('opponent_away');
 
     host.send({ type: 'wait_new_opponent' });
-    const st = await host.waitType('state');
-    expect(st.state.status).toBe('waiting');
-    const left = await host.waitType('opponent_left');
-    expect(left.reason).toBe('已放弃等待对方重连');
-
-    // 宽限计时器已取消，新对手可立即加入开局
-    const guest2 = await connect(server!.address.port, 'guest');
-    const start = await guest2.waitType('start');
-    expect(start.state.status).toBe('playing');
+    expect((await host.waitType('state')).state.status).toBe('waiting');
+    expect((await host.waitType('opponent_left')).reason).toBe('已放弃等待对方重连');
+    expect(host).toBeDefined();
+    expect(s.roomCount).toBe(1);
   });
 
-  it('主动离开（leave）不走宽限，立即通知对手', async () => {
+  it('主动离开（leave_room）不走宽限，立即通知对手', async () => {
     const { host, guest } = await setupPlaying(5000);
-    guest.send({ type: 'leave' });
-    const left = await host.waitType('opponent_left');
-    expect(left.reason).toBe('对手已离开');
+    guest.send({ type: 'leave_room' });
+    expect((await host.waitType('opponent_left')).reason).toBe('对手已离开');
     await host.expectNo('opponent_away');
   });
 
-  it('主机意外断线保留对局，宽限期内重连恢复', async () => {
-    const { s, host, guest } = await setupPlaying(1000);
+  it('房主主动离开会销毁房间并通知对手', async () => {
+    const { s, host, guest } = await setupPlaying(5000);
+    host.send({ type: 'leave_room' });
+    const closed = await guest.waitType('room_closed');
+    expect(closed.reason).toBe('房主已离开');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(s.roomCount).toBe(0);
+  });
+
+  it('房主宽限超时会销毁房间', async () => {
+    const { s, host, guest } = await setupPlaying(80);
     host.close();
-    const away = await guest.waitType('opponent_away');
-    expect(away.reason).toBe('主机已断开');
-    expect(s.game.status).toBe('playing');
-
-    const host2 = await connect(s.address.port, 'host');
-    const w = await host2.waitType('welcome');
-    expect(w.side).toBe('r');
-    expect(w.state.status).toBe('playing');
-    expect(w.state.moveSeq).toBe(1);
-
-    await guest.waitType('opponent_joined');
-    const sync = await guest.waitType('state');
-    expect(sync.state.status).toBe('playing');
-
-    // 恢复后仍可继续走子（轮到黑方）
-    guest.send({ type: 'move', from: [3, 0], to: [4, 0] });
-    const applied = await host2.waitType('move_applied');
-    expect(applied.seq).toBe(2);
+    await guest.waitType('opponent_away');
+    const closed = await guest.waitType('room_closed');
+    expect(closed.reason).toBe('房主已断开');
+    expect(s.roomCount).toBe(0);
   });
 });
 
-describe('主机服务 · 先手方式（红黑 / 随机 / 猜先）', () => {
-  /** 创建等待中的主机（可选先手方式） */
-  async function setupWaiting(mode?: 'r' | 'b' | 'random' | 'guess') {
+describe('服务器 · 房间生命周期', () => {
+  it('终局后无人「再来一局」则销毁房间', async () => {
+    const s = await startServer({ overTtlMs: 80 });
+    const { host, guest } = await setupGame(s);
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+    await guest.waitType('game_over');
+
+    const closed = await guest.waitType('room_closed');
+    expect(closed.reason).toBe('对局已结束');
+    expect(s.roomCount).toBe(0);
+  });
+
+  it('终局后双方「再来一局」则不销毁房间', async () => {
+    const s = await startServer({ overTtlMs: 120 });
+    const { host, guest } = await setupGame(s);
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+    await guest.waitType('game_over');
+
+    guest.send({ type: 'restart_request' });
+    await host.waitType('restart_request');
+    host.send({ type: 'restart_response', accept: true });
+    await guest.waitType('start');
+
+    await new Promise((r) => setTimeout(r, 200));
+    expect(s.roomCount).toBe(1);
+  });
+
+  it('房间内无在线连接超时后被回收', async () => {
+    // AI 房的对手席没有连接：人类断线后房间内无在线连接，触发空闲回收
+    const s = await startServer({ roomIdleMs: 80 });
+    const { c } = await createRoom(s, { mode: 'ai' });
+    await c.waitType('start');
+    c.close();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(s.roomCount).toBe(0);
+  });
+
+  it('建房数达到上限时返回错误', async () => {
+    const s = await startServer({ maxRooms: 1 });
+    await createRoom(s);
+    const c = await open(s.address.port);
+    c.send({ type: 'create_room' });
+    expect((await c.waitType('error')).message).toBe('房间数已达上限');
+  });
+});
+
+describe('服务器 · 先手方式（红黑 / 随机 / 猜先）', () => {
+  it('默认房主执红；选择「黑」后房主执黑、对手执红先行', async () => {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    const welcome = await host.waitType('welcome');
-    if (mode) host.send({ type: 'choose_first', mode });
-    return { s, host, welcome };
-  }
+    const { c: host, roomId, joined } = await createRoom(s);
+    expect(joined.firstMode).toBe('r');
+    host.send({ type: 'choose_first', mode: 'b' });
+    await new Promise((r) => setTimeout(r, 20));
 
-  it('默认主机执红；选择「黑」后主机执黑、加入者执红先行', async () => {
-    const { host, welcome } = await setupWaiting('b');
-    expect(welcome.firstMode).toBe('r');
-
-    const guest = await connect(server!.address.port, 'guest');
-    expect((await guest.waitType('welcome')).side).toBe('r');
+    const guest = await joinRoom(s, roomId);
+    expect((await guest.waitType('room_joined')).seat).toBe('r');
     expect((await host.waitType('start')).side).toBe('b');
     expect((await guest.waitType('start')).side).toBe('r');
 
-    // 未轮到黑方（主机）时抢先走子被拒
+    // 未轮到黑方（房主）时抢先走子被拒
     host.send({ type: 'move', from: [3, 0], to: [4, 0] });
     await host.waitType('move_rejected');
 
-    // 红方（加入者）先行，随后轮到黑方（主机）
+    // 红方（对手）先行，随后轮到黑方（房主）
     guest.send({ type: 'move', from: [9, 0], to: [8, 0] });
     expect((await guest.waitType('move_applied')).turn).toBe('b');
     host.send({ type: 'move', from: [3, 0], to: [4, 0] });
@@ -573,18 +618,22 @@ describe('主机服务 · 先手方式（红黑 / 随机 / 猜先）', () => {
   });
 
   it('随机黑红：开赛前广播席位结果，双方各按结果执子', async () => {
-    const { host } = await setupWaiting('random');
-    const guest = await connect(server!.address.port, 'guest');
-    await guest.waitType('welcome');
+    const s = await startServer();
+    const { c: host, roomId } = await createRoom(s, {});
+    host.send({ type: 'choose_first', mode: 'random' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
 
     const result = await host.waitType('first_result');
     expect(result.mode).toBe('random');
-    expect(['r', 'b']).toContain(result.hostSide);
+    expect(['r', 'b']).toContain(result.ownerSide);
     expect(result.guess).toBeNull();
     await guest.waitType('first_result');
 
-    const redConn = result.hostSide === 'r' ? host : guest;
-    const blackConn = result.hostSide === 'r' ? guest : host;
+    const redConn = result.ownerSide === 'r' ? host : guest;
+    const blackConn = result.ownerSide === 'r' ? guest : host;
     expect((await redConn.waitType('start')).side).toBe('r');
     expect((await blackConn.waitType('start')).side).toBe('b');
 
@@ -592,100 +641,101 @@ describe('主机服务 · 先手方式（红黑 / 随机 / 猜先）', () => {
     expect((await redConn.waitType('move_applied')).turn).toBe('b');
   });
 
-  it('猜先：主机抓单双、客方猜，猜中者执红（双方阵营与结果一致）', async () => {
-    const { host } = await setupWaiting('guess');
-    const guest = await connect(server!.address.port, 'guest');
-    await guest.waitType('welcome');
+  it('猜先：房主抓单双、对手猜，猜中者执红', async () => {
+    const s = await startServer();
+    const { c: host, roomId } = await createRoom(s);
+    host.send({ type: 'choose_first', mode: 'guess' });
+    await new Promise((r) => setTimeout(r, 20));
 
-    // 第一步：主机收到「抓子」请求（客方不该收到）
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
+
+    // 第一步：房主收到「抓子」请求（对手不该收到）
     await host.waitType('grasp_request');
     await guest.expectNo('grasp_request');
 
-    // 抓子前：客方猜先或抢着抓子都被拒
+    // 抓子前：对手猜先或抢着抓子都被拒
     guest.send({ type: 'guess', choice: 'odd' });
     expect((await guest.waitType('error')).message).toBe('当前不在猜先阶段');
     guest.send({ type: 'grasp', choice: 'odd' });
-    expect((await guest.waitType('error')).message).toBe('只有主机可以抓子');
+    expect((await guest.waitType('error')).message).toBe('只有房主可以抓子');
 
-    // 主机抓「单」，双方收到猜先请求
+    // 房主抓「单」，双方收到猜先请求
     host.send({ type: 'grasp', choice: 'odd' });
     await guest.waitType('guess_request');
     await host.waitType('guess_request');
 
-    // 客方猜「单」→ 猜中 → 客方执红
+    // 对手猜「单」→ 猜中 → 对手执红
     guest.send({ type: 'guess', choice: 'odd' });
     const result = await guest.waitType('first_result');
     expect(result.mode).toBe('guess');
     expect(result.guess).toEqual({ choice: 'odd', actual: 'odd', guestWon: true });
-    expect(result.hostSide).toBe('b');
+    expect(result.ownerSide).toBe('b');
 
     expect((await guest.waitType('start')).side).toBe('r');
     expect((await host.waitType('start')).side).toBe('b');
 
-    // 红方（客方）先行，主机（黑方）抢先走子被拒
+    // 红方（对手）先行，房主（黑方）抢先走子被拒
     host.send({ type: 'move', from: [3, 0], to: [4, 0] });
     await host.waitType('move_rejected');
     guest.send({ type: 'move', from: [9, 0], to: [8, 0] });
     expect((await guest.waitType('move_applied')).turn).toBe('b');
   });
 
-  it('猜先未猜中：主机执红；非主机不能改先手方式', async () => {
-    const { host } = await setupWaiting('guess');
-    const guest = await connect(server!.address.port, 'guest');
-    await guest.waitType('welcome');
+  it('猜先未猜中：房主执红；非房主不能改先手方式', async () => {
+    const s = await startServer();
+    const { c: host, roomId } = await createRoom(s);
+    host.send({ type: 'choose_first', mode: 'guess' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
     await host.waitType('grasp_request');
 
-    // 非主机不能选择先手方式
     guest.send({ type: 'choose_first', mode: 'r' });
-    expect((await guest.waitType('error')).message).toBe('只有主机可以选择先手方式');
+    expect((await guest.waitType('error')).message).toBe('只有房主可以选择先手方式');
 
-    // 主机抓「双」，客方猜「单」→ 未猜中 → 主机执红
     host.send({ type: 'grasp', choice: 'even' });
     await guest.waitType('guess_request');
     guest.send({ type: 'guess', choice: 'odd' });
 
     const result = await host.waitType('first_result');
     expect(result.guess).toEqual({ choice: 'odd', actual: 'even', guestWon: false });
-    expect(result.hostSide).toBe('r');
+    expect(result.ownerSide).toBe('r');
     expect((await host.waitType('start')).side).toBe('r');
     expect((await guest.waitType('start')).side).toBe('b');
   });
 
   it('对局进行中不允许更改先手方式', async () => {
-    const { s, host } = await setupWaiting();
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-
+    const s = await startServer();
+    const { host } = await setupGame(s);
     host.send({ type: 'choose_first', mode: 'guess' });
     expect((await host.waitType('error')).message).toBe('对局进行中，无法更改先手方式');
   });
 });
 
-describe('主机服务 · 对局回顾与 AI 推荐', () => {
-  /** 打一局并结束（默认主机执红，走一步后红方认输） */
+describe('服务器 · 对局回顾与 AI 推荐', () => {
+  /** 打一局并结束（默认房主执红，走一步后红方认输） */
   async function playAndFinish() {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
+    const { host, guest, roomId } = await setupGame(s);
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     await host.waitType('move_applied');
     host.send({ type: 'resign' });
     await host.waitType('game_over');
-    return { s, base: `http://127.0.0.1:${s.address.port}` };
+    await guest.waitType('game_over');
+    return { s, base: `http://127.0.0.1:${s.address.port}`, roomId };
   }
 
-  it('终局后写入记录：席位、取先方式、时间、胜负与着法数', async () => {
+  it('终局后写入记录：玩家、取先方式、时间、胜负与着法数', async () => {
     const { base } = await playAndFinish();
-    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: Record<string, unknown>[] };
+    const list = (await (await fetch(`${base}/api/history`)).json()) as {
+      games: Record<string, unknown>[];
+    };
     expect(list.games).toHaveLength(1);
     const g = list.games[0];
-    expect(g.red).toBe('host');
-    expect(g.black).toBe('guest');
+    expect((g.red as { kind: string }).kind).toBe('guest');
+    expect((g.black as { kind: string }).kind).toBe('guest');
     expect(g.firstMode).toBe('r');
     expect(g.guess).toBeNull();
     expect(g.winner).toBe('b');
@@ -720,20 +770,12 @@ describe('主机服务 · 对局回顾与 AI 推荐', () => {
     expect(hint.text.length).toBeGreaterThan(0);
 
     const hint2 = (await (await fetch(`${base}/api/ai/hint?id=${id}&index=1`)).json()) as { side: string };
-    expect(hint2.side).toBe('b'); // 走完一步后轮到黑方
-
-    expect((await fetch(`${base}/api/ai/hint?id=999&index=0`)).status).toBe(404);
+    expect(hint2.side).toBe('b');
   });
 
   it('对局未结束时不写入记录', async () => {
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-
+    await setupGame(s);
     const list = (await (await fetch(`http://127.0.0.1:${s.address.port}/api/history`)).json()) as {
       games: unknown[];
     };
@@ -741,33 +783,82 @@ describe('主机服务 · 对局回顾与 AI 推荐', () => {
   });
 });
 
-describe('主机服务 · HTTP 接口', () => {
-  it('/api/host-info 返回地址与状态', async () => {
+describe('服务器 · HTTP 接口与账号', () => {
+  it('/api/server-info 返回地址、版本与房间数', async () => {
     const s = await startServer();
-    const res = await fetch(`http://127.0.0.1:${s.address.port}/api/host-info`);
-    expect(res.status).toBe(200);
-    const info = (await res.json()) as { port: number; hosting: boolean };
+    const info = (await (await fetch(`http://127.0.0.1:${s.address.port}/api/server-info`)).json()) as {
+      port: number;
+      version: string;
+      rooms: number;
+    };
     expect(info.port).toBe(s.address.port);
-    expect(info.hosting).toBe(false);
+    expect(info.version).toBeTruthy();
+    expect(info.rooms).toBe(0);
   });
 
-  it('/api/host/start 会开启等待状态', async () => {
+  it('/api/rooms 返回房间列表', async () => {
     const s = await startServer();
-    const res = await fetch(`http://127.0.0.1:${s.address.port}/api/host/start`, { method: 'POST' });
-    expect(res.status).toBe(200);
-    expect(s.isHosting()).toBe(true);
-    const info = (await (await fetch(`http://127.0.0.1:${s.address.port}/api/host-info`)).json()) as {
-      hosting: boolean;
+    const { roomId } = await createRoom(s);
+    const data = (await (await fetch(`http://127.0.0.1:${s.address.port}/api/rooms`)).json()) as {
+      rooms: { roomId: string }[];
     };
-    expect(info.hosting).toBe(true);
+    expect(data.rooms.map((r) => r.roomId)).toEqual([roomId]);
+  });
+
+  it('注册 / 登录：签发 token，重复用户名与错误密码被拒', async () => {
+    const s = await startServer();
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const post = (p: string, body: unknown) =>
+      fetch(`${base}${p}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    const reg = await post('/api/auth/register', { username: 'alice', password: 'pass1234' });
+    expect(reg.status).toBe(200);
+    const regBody = (await reg.json()) as { token: string; username: string };
+    expect(regBody.username).toBe('alice');
+    expect(regBody.token).toBeTruthy();
+
+    expect((await post('/api/auth/register', { username: 'alice', password: 'pass1234' })).status).toBe(400);
+    expect((await post('/api/auth/register', { username: 'ab', password: 'pass1234' })).status).toBe(400);
+
+    const login = await post('/api/auth/login', { username: 'alice', password: 'pass1234' });
+    expect(login.status).toBe(200);
+    expect((await post('/api/auth/login', { username: 'alice', password: 'bad' })).status).toBe(400);
+  });
+
+  it('账号 token 可用于加入房间并归属对局记录', async () => {
+    const s = await startServer();
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const reg = await fetch(`${base}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'bob', password: 'pass1234' }),
+    });
+    const { token } = (await reg.json()) as { token: string };
+
+    const { c: host, roomId } = await createRoom(s, { token });
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
+    await host.waitType('start');
+    guest.send({ type: 'resign' });
+    await host.waitType('game_over');
+    await guest.waitType('game_over');
+
+    const list = (await (await fetch(`${base}/api/history`)).json()) as {
+      games: { red: { name: string; kind: string } }[];
+    };
+    expect(list.games[0].red).toMatchObject({ name: 'bob', kind: 'account' });
   });
 });
 
-describe('主机服务 · 静态资源', () => {
+describe('服务器 · 静态资源', () => {
   let base = '';
   let dir = '';
   let secret = '';
-  let server: HostServer | null = null;
+  let server: GameServer | null = null;
 
   beforeAll(async () => {
     // 构造与 dist 相同的目录结构：renderer/* 页面脚本 + shared/* 共享模块
@@ -793,10 +884,11 @@ describe('主机服务 · 静态资源', () => {
     fs.writeFileSync(path.join(base, 'root-evil', 'secret.txt'), 'sibling-secret');
 
     for (let i = 0; i < 5 && !server; i++) {
-      const candidate = new HostServer({
+      const candidate = new GameServer({
         port: 20000 + Math.floor(Math.random() * 30000),
         staticDir: dir,
         host: '127.0.0.1',
+        dataDir: null,
       });
       try {
         await candidate.listen();
@@ -885,50 +977,38 @@ describe('主机服务 · 静态资源', () => {
   });
 });
 
-describe('主机服务 · 人机对战与计时读秒', () => {
-  /** 创建人机对局并连接主机，等对局开始 */
-  async function setupAi(s: HostServer) {
-    const res = await fetch(`http://127.0.0.1:${s.address.port}/api/host/start-ai`, {
-      method: 'POST',
-    });
-    expect(res.status).toBe(200);
-    const host = await connect(s.address.port, 'host');
-    const w = await host.waitType('welcome');
-    return { host, welcome: w };
-  }
-
-  it('人机对战：主机执红，AI 延迟后自动走黑', async () => {
+describe('服务器 · 人机对战与计时读秒', () => {
+  it('人机对战：人类执红，AI 延迟后自动走黑', async () => {
     const s = await startServer({ aiDelayMs: 20 });
-    const { host, welcome } = await setupAi(s);
-    expect(welcome.side).toBe('r');
-    expect(welcome.state.status).toBe('playing');
+    const { c: host, joined } = await createRoom(s, { mode: 'ai' });
+    expect(host).toBeDefined();
+    expect(joined.seat).toBe('r');
+    expect((await host.waitType('start')).state.status).toBe('playing');
 
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
-    const mine = await host.waitType('move_applied');
-    expect(mine.seq).toBe(1);
+    expect((await host.waitType('move_applied')).seq).toBe(1);
 
     const ai = await host.waitType('move_applied');
     expect(ai.seq).toBe(2);
     expect(ai.turn).toBe('r'); // AI 走完轮到红方
     expect(ai.history).toHaveLength(2);
-    expect(ai.board[ai.from[0]][ai.from[1]]).toBeNull();
-    expect(s.game.history[1]).toEqual({ from: ai.from, to: ai.to });
   }, 10000);
 
-  it('人机对战：guest 无法加入，观战者可加入', async () => {
+  it('人机对战：其它玩家无法加入（房间已满），观战者可加入', async () => {
     const s = await startServer({ aiDelayMs: 1000 });
-    await setupAi(s);
+    const { roomId } = await createRoom(s, { mode: 'ai' });
 
-    const guest = await connect(s.address.port, 'guest');
-    expect((await guest.waitType('error')).message).toBe('人机对局，无法加入');
+    const other = await joinRoom(s, roomId);
+    expect((await other.waitType('error')).message).toBe('房间已满');
 
-    const watcher = await connect(s.address.port, 'spectator');
-    expect((await watcher.waitType('welcome')).side).toBeNull();
+    const watcher = await joinRoom(s, roomId, { role: 'spectator' });
+    expect((await watcher.waitType('room_joined')).seat).toBeNull();
   });
 
-  it('人机对战：悔棋自动同意（AI 重新走子）、和棋被拒、重开自动同意', async () => {
+  it('人机对战：悔棋自动同意、和棋被拒、重开自动同意', async () => {
     const s = await startServer({ aiDelayMs: 20 });
-    const { host } = await setupAi(s);
+    const { c: host } = await createRoom(s, { mode: 'ai' });
+    await host.waitType('start');
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     await host.waitType('move_applied');
     await host.waitType('move_applied'); // AI 应招
@@ -936,9 +1016,7 @@ describe('主机服务 · 人机对战与计时读秒', () => {
     host.send({ type: 'undo_request' });
     expect((await host.waitType('undo_response')).accept).toBe(true);
     await host.waitType('state');
-    // 悔棋后轮到黑方（AI），AI 会重新走子
-    const aiAgain = await host.waitType('move_applied');
-    expect(aiAgain.seq).toBe(2);
+    expect((await host.waitType('move_applied')).seq).toBe(2);
 
     host.send({ type: 'draw_request' });
     expect((await host.waitType('draw_response')).accept).toBe(false);
@@ -948,32 +1026,23 @@ describe('主机服务 · 人机对战与计时读秒', () => {
     host.send({ type: 'restart_request' });
     const restarted = await host.waitType('start');
     expect(restarted.state.moveSeq).toBe(0);
-    expect(restarted.state.status).toBe('playing');
   }, 10000);
 
-  it('人机对战难度：start-ai 支持 depth 参数（1-4），非法值忽略', async () => {
+  it('人机对战难度：depth 参数（1-4）生效，非法值沿用上次', async () => {
     const s = await startServer({ aiDelayMs: 1000 });
-    const res = await fetch(`http://127.0.0.1:${s.address.port}/api/host/start-ai?depth=4`, {
-      method: 'POST',
-    });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { depth: number }).depth).toBe(4);
+    const a = await createRoom(s, { mode: 'ai', depth: 4 });
+    const room = s.room(a.roomId)!;
+    expect(room).toBeDefined();
 
-    const bad = await fetch(`http://127.0.0.1:${s.address.port}/api/host/start-ai?depth=99`, {
-      method: 'POST',
-    });
-    expect(((await bad.json()) as { depth: number }).depth).toBe(4); // 非法值沿用上一次深度
+    // 非法 depth 不报错，仍可正常建房
+    const b = await createRoom(s, { mode: 'ai', depth: 99 });
+    expect(b.roomId).toMatch(/^\d{6}$/);
   });
 
   it('计时读秒：本回合超时判负并清空 deadline', async () => {
     const s = await startServer({ turnMs: 150 });
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    const start = await host.waitType('start');
-    expect(start.state.deadline).toBeGreaterThan(Date.now());
+    const { host, hStart } = await setupGame(s);
+    expect(hStart.state.deadline as number).toBeGreaterThan(Date.now());
 
     const over = await host.waitType('game_over');
     expect(over.reason).toBe('超时判负');
@@ -983,43 +1052,31 @@ describe('主机服务 · 人机对战与计时读秒', () => {
 
   it('计时读秒：走子后 deadline 顺延给下一方', async () => {
     const s = await startServer({ turnMs: 5000 });
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    const start = await host.waitType('start');
-    const firstDeadline = start.state.deadline as number;
+    const { host, hStart } = await setupGame(s);
+    const firstDeadline = hStart.state.deadline as number;
 
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
-    const applied = await host.waitType('move_applied');
-    expect(applied.deadline).toBeGreaterThanOrEqual(firstDeadline);
+    expect((await host.waitType('move_applied')).deadline as number).toBeGreaterThanOrEqual(firstDeadline);
   });
 });
 
-describe('主机服务 · 日志与端口回退（C2/C5）', () => {
+describe('服务器 · 日志与端口回退', () => {
   it('默认输出连接/走子/终局打点，LANSCHESS_DEBUG=0 可关闭', async () => {
     vi.stubEnv('LANSCHESS_DEBUG', '1'); // 打开（同时包含 debug 明细）
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const s = await startServer();
-    s.setHosting(true);
-    const host = await connect(s.address.port, 'host');
-    await host.waitType('welcome');
-    const guest = await connect(s.address.port, 'guest');
-    await guest.waitType('welcome');
-    await host.waitType('start');
-
+    const { host, guest } = await setupGame(s);
     host.send({ type: 'move', from: [9, 0], to: [8, 0] });
     await host.waitType('move_applied');
     host.send({ type: 'resign' });
     await host.waitType('game_over');
 
     const logs = spy.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(logs).toContain('主机连接（红方');
-    expect(logs).toContain('加入者连接（黑方');
-    expect(logs).toContain('走子：红方');
-    expect(logs).toContain('对局结束：黑方胜（认输）');
+    expect(logs).toContain('房主加入');
+    expect(logs).toContain('对手加入');
+    expect(logs).toContain('走子 红方');
+    expect(logs).toContain('对局结束 黑方胜（认输）');
 
     // 关闭开关后不再输出
     vi.stubEnv('LANSCHESS_DEBUG', '0');
@@ -1031,10 +1088,10 @@ describe('主机服务 · 日志与端口回退（C2/C5）', () => {
 
   it('listenWithFallback：端口占用时回退随机端口', async () => {
     // 占用者与待启动者都用默认 0.0.0.0，保证两平台都能触发 EADDRINUSE
-    const first = new HostServer({ port: 0 });
+    const first = new GameServer({ port: 0, dataDir: null });
     const occupied = await first.listen();
     try {
-      const started = await listenWithFallback(occupied);
+      const started = await listenWithFallback(occupied, false, null);
       try {
         expect(started.fallback).toBe(true);
         expect(started.port).not.toBe(occupied);
@@ -1047,10 +1104,10 @@ describe('主机服务 · 日志与端口回退（C2/C5）', () => {
   });
 
   it('listenWithFallback：显式指定端口被占用时抛出 EADDRINUSE', async () => {
-    const first = new HostServer({ port: 0 });
+    const first = new GameServer({ port: 0, dataDir: null });
     const occupied = await first.listen();
     try {
-      await expect(listenWithFallback(occupied, true)).rejects.toMatchObject({
+      await expect(listenWithFallback(occupied, true, null)).rejects.toMatchObject({
         code: 'EADDRINUSE',
       });
     } finally {

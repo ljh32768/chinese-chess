@@ -1,13 +1,25 @@
 /**
  * 渲染层主控制器：页面切换、棋盘交互、消息处理。
- * 客户端只发送「走子意图」，一切以主机广播为准。
+ *
+ * 客户端只发送「走子意图」，一切以服务器广播为准；
+ * 房间的创建 / 加入通过 `create_room` / `join_room` 完成（见 shared/protocol.ts）。
  */
 
 import { findKing, initBoard, legalMoves } from '../shared/rules.js';
-import { ServerMessage } from '../shared/protocol.js';
-import { Board, FirstMode, GameSnapshot, GuessChoice, Move, PieceType, Pos, Side } from '../shared/types.js';
+import { ClientMessage, ServerMessage } from '../shared/protocol.js';
+import {
+  Board,
+  FirstMode,
+  GameSnapshot,
+  GuessChoice,
+  Move,
+  PieceType,
+  Pos,
+  RoomSummary,
+  Side,
+} from '../shared/types.js';
 import { capturedPieces } from '../shared/notation.js';
-import { DiscoveredHost, discoverSubnet, probeHost } from './discover.js';
+import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
   BoardView,
   DEFAULT_SKIN,
@@ -23,14 +35,18 @@ import {
 } from './board.js';
 import { initReview, ReviewController } from './review.js';
 import { playClick, playSelect } from './sound.js';
-import { Net, WelcomeInfo } from './net.js';
+import { Net } from './net.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const boardEl = document.getElementById('board') as HTMLCanvasElement;
 
-/** 皮肤偏好键（localStorage） */
+/** 本地偏好键（localStorage） */
 const SKIN_KEY = 'lanschess-skin';
+const TOKEN_KEY = 'lanschess-token';
+const USER_KEY = 'lanschess-user';
+/** 进行中的房间会话（刷新页面后可自动重连原局） */
+const SESSION_KEY = 'lanschess-session';
 
 /** 棋子汉字（红黑两套用字，用于吃子展示） */
 const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
@@ -40,7 +56,18 @@ const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
 
 /** 客户端本地视图状态（仅用于渲染，非权威） */
 const S = {
-  role: 'host' as 'host' | 'guest',
+  /** 当前角色；未加入房间时为 null */
+  role: null as 'player' | 'spectator' | null,
+  /** 所在房间号 */
+  roomId: '',
+  /** 本端玩家 id（观战为空串） */
+  playerId: '',
+  /** 本端展示名 */
+  name: '',
+  /** 是否为房主（控权：先手方式 / 抓子 / 口令 / 放弃等待） */
+  isOwner: false,
+  /** 房间是否设置了口令 */
+  locked: false,
   /** 观战者模式：只读旁观（不占红黑席位） */
   spectator: false,
   side: 'r' as Side,
@@ -58,21 +85,27 @@ const S = {
   pending: null as null | 'draw' | 'restart' | 'undo',
   /** 对手意外断线、宽限期等待重连中（服务端 opponent_away） */
   oppAway: false,
+  /** 对手展示名（对手加入后由服务端下发） */
+  oppName: '',
   /** 完整着法序列（棋谱 / 吃子 / 悔棋展示） */
   history: [] as Move[],
   /** 本回合截止时间（epoch ms）；null 表示不限时 */
   deadline: null as number | null,
-  /** 人机对战（本机创建的对局，AI 执黑） */
+  /** 人机对战（AI 执黑） */
   aiMode: false,
   /** 当前皮肤（参考项目三套素材） */
   skin: DEFAULT_SKIN as SkinId,
   /** 鼠标悬停的交叉点（仅用于预高亮） */
   hover: null as Pos | null,
-  /** 主机在等待页选择的先手（红方）方式 */
+  /** 房主在等待页选择的先手（红方）方式 */
   firstMode: 'r' as FirstMode,
+  /** 当前账号（可选）：登录后对局记录归属账号，并支持跨设备恢复席位 */
+  account: null as { token: string; username: string } | null,
 };
 
 let net: Net | null = null;
+/** 等待服务端对 create_room / join_room / login / register 的回应 */
+let pendingReq: { resolve: () => void; reject: (e: Error) => void } | null = null;
 
 /** 已加载的皮肤素材（按皮肤缓存） */
 const loadedImages: Partial<Record<SkinId, Record<string, HTMLImageElement>>> = {};
@@ -124,6 +157,23 @@ function showModal(o: { title: string; sub?: string; buttons: ModalButton[] }): 
 
 function closeModal(): void {
   $('modal').classList.remove('show');
+}
+
+/** 本地存储读写（隐私模式下静默失败） */
+function readStore(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeStore(key: string, value: string | null): void {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    /* 忽略：隐私模式下无法写入，仅本次会话生效 */
+  }
 }
 
 // -------------------------------------------------------------- 渲染
@@ -203,15 +253,15 @@ function render(): void {
 
 function updateRoleHint(): void {
   if (S.spectator) {
-    $('role-hint').textContent = '观战 · 只读';
+    $('role-hint').textContent = `房间 ${S.roomId} · 观战 · 只读`;
     return;
   }
   if (S.aiMode) {
-    $('role-hint').textContent = '人机对战 · AI 执黑';
+    $('role-hint').textContent = `房间 ${S.roomId} · 人机对战 · AI 执黑`;
     return;
   }
-  $('role-hint').textContent = `你执${S.side === 'r' ? '红' : '黑'} · ${
-    S.role === 'host' ? '主机' : '加入者'
+  $('role-hint').textContent = `房间 ${S.roomId} · 你执${S.side === 'r' ? '红' : '黑'}${
+    S.isOwner ? ' · 房主' : ''
   }`;
 }
 
@@ -229,7 +279,8 @@ function updatePanel(): void {
   rowTop.className = 'player-row ' + (opp === 'r' ? 'red' : 'black');
   rowBottom.className = 'player-row ' + (S.side === 'r' ? 'red' : 'black');
   // 观战者视角显示红黑双方，不出现「你 / 对手」
-  $('p-top-name').textContent = S.spectator ? sideName(opp) : `${sideName(opp)} · 对手`;
+  const oppLabel = S.oppName && !S.aiMode && S.oppName !== '对手' ? S.oppName : '对手';
+  $('p-top-name').textContent = S.spectator ? sideName(opp) : `${sideName(opp)} · ${oppLabel}`;
   $('p-bottom-name').textContent = S.spectator ? sideName(S.side) : `${sideName(S.side)} · 你`;
 
   const active = S.status === 'playing';
@@ -318,19 +369,92 @@ function enterGame(): void {
   render();
 }
 
+/** 等待页：展示房间号 / 口令状态 / 先手方式 */
+function showWaiting(): void {
+  $('host-ip').textContent = S.roomId || '—';
+  $('room-pass-hint').textContent = S.locked
+    ? '本房间已设置口令，加入者需输入口令'
+    : '未设口令，任何人点击即可加入';
+  $('host-wait').textContent = S.aiMode ? '正在开始人机对战…' : '让对方在「加入房间」中输入上方房间号';
+  renderSidePick();
+  show('screen-host');
+}
+
+const FIRST_HINT: Record<FirstMode, string> = {
+  r: '先手（红方）：房主执红先行',
+  b: '先手（红方）：房主执黑，对手执红先行',
+  random: '先手（红方）：开局时随机分配红黑',
+  guess: '先手（红方）：房主抓单双、对手猜，猜中者执红',
+};
+
+/** 等待页：渲染先手（红方）方式的选择状态 */
+function renderSidePick(): void {
+  document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === S.firstMode);
+  });
+  $('side-hint').textContent = FIRST_HINT[S.firstMode];
+}
+
+/** 等待页：选择先手方式（仅等待阶段有效，开赛后服务端会拒绝） */
+function chooseFirst(mode: FirstMode): void {
+  if (S.firstMode === mode) return;
+  S.firstMode = mode;
+  renderSidePick();
+  net?.send({ type: 'choose_first', mode });
+}
+
 // -------------------------------------------------------------- 消息处理
 
 function handleMessage(msg: ServerMessage): void {
   switch (msg.type) {
+    case 'room_joined':
+      applyRoomJoined(msg);
+      settlePending(true);
+      return;
+    case 'auth_ok':
+      S.account = { token: msg.token, username: msg.username };
+      writeStore(TOKEN_KEY, msg.token);
+      writeStore(USER_KEY, msg.username);
+      renderHomeHint();
+      toast(`已登录：${msg.username}`);
+      settlePending(true);
+      return;
+    case 'room_list':
+      renderRoomList(msg.rooms);
+      return;
+    case 'room_closed': {
+      // 房间已被销毁（终局超时 / 空闲回收 / 房主解散 / 服务器停止）
+      net?.close();
+      net = null;
+      clearSession();
+      const inGame = S.status === 'playing' || S.status === 'over';
+      S.status = 'idle';
+      S.oppAway = false;
+      showModal({
+        title: '房间已结束',
+        sub: msg.reason,
+        buttons: [
+          {
+            label: inGame ? '返回首页' : '知道了',
+            primary: true,
+            onClick: () => {
+              resetLocal();
+              show('screen-home');
+            },
+          },
+        ],
+      });
+      return;
+    }
     case 'start':
       closeModal(); // 猜先弹层（若在等待应答时开局）
       if (msg.side !== null) S.side = msg.side;
       applySnapshot(msg.state);
       enterGame();
       toast('对局开始，红方先行');
-      break;
+      return;
     case 'grasp_request':
-      // 猜先第一步：主机自己抓单 / 抓双
+      // 猜先第一步：房主自己抓单 / 抓双
       $('host-wait').textContent = '猜先：请选择抓单或抓双…';
       showModal({
         title: '猜 先',
@@ -340,15 +464,15 @@ function handleMessage(msg: ServerMessage): void {
           { label: '抓 双', onClick: () => net?.send({ type: 'grasp', choice: 'even' }) },
         ],
       });
-      break;
+      return;
     case 'guess_request':
-      // 猜先第二步：客方弹层应答，主机在等待页看到进度
-      if (S.role === 'host') {
-        $('host-wait').textContent = '进入猜先：等待加入者猜单双…';
+      // 猜先第二步：对手弹层应答，房主在等待页看到进度
+      if (S.isOwner) {
+        $('host-wait').textContent = '进入猜先：等待对手猜单双…';
       } else {
         showModal({
           title: '猜 先',
-          sub: '主机已抓子，请猜单双 —— 猜中者执红',
+          sub: '房主已抓子，请猜单双 —— 猜中者执红',
           buttons: [
             {
               label: '猜 单',
@@ -359,20 +483,20 @@ function handleMessage(msg: ServerMessage): void {
           ],
         });
       }
-      break;
+      return;
     case 'first_result': {
-      const hostRed = msg.hostSide === 'r';
+      const ownerRed = msg.ownerSide === 'r';
       if (msg.mode === 'guess' && msg.guess) {
         const cn = (c: GuessChoice) => (c === 'odd' ? '单' : '双');
         toast(
-          `猜先：主机抓「${cn(msg.guess.actual)}」，${S.role === 'guest' ? '你' : '对方'}猜「${cn(msg.guess.choice)}」→ 主机执${
-            hostRed ? '红' : '黑'
+          `猜先：房主抓「${cn(msg.guess.actual)}」，${S.isOwner ? '对方' : '你'}猜「${cn(msg.guess.choice)}」→ 房主执${
+            ownerRed ? '红' : '黑'
           }`,
         );
       } else if (msg.mode === 'random') {
-        toast(`随机黑红：主机执${hostRed ? '红' : '黑'}，加入者执${hostRed ? '黑' : '红'}`);
+        toast(`随机黑红：房主执${ownerRed ? '红' : '黑'}，对手执${ownerRed ? '黑' : '红'}`);
       }
-      break;
+      return;
     }
     case 'move_applied':
       S.board = msg.board;
@@ -389,25 +513,22 @@ function handleMessage(msg: ServerMessage): void {
       S.deadline = msg.deadline;
       playClick();
       render();
-      break;
+      return;
     case 'move_rejected':
       toast(`走子无效：${msg.reason}`);
-      break;
+      return;
     case 'state':
       applySnapshot(msg.state);
-      // 宽限超时 / 放弃等待后主机回到等待页（等待新对手加入）；顺带关闭断线弹层
-      if (S.role === 'host' && S.status === 'waiting') {
+      // 对手离开 / 放弃等待后回到等待页；顺带关闭断线弹层
+      if (S.role === 'player' && S.status === 'waiting' && !S.aiMode) {
         closeModal();
         $('host-wait').textContent = '对手已离开，等待新对手加入…';
         show('screen-host');
-      } else if (S.role === 'host' && S.status === 'idle') {
-        closeModal();
-        show('screen-home');
       }
-      break;
+      return;
     case 'game_over':
       applySnapshot(msg.state);
-      break;
+      return;
     case 'draw_request':
       showModal({
         title: '对方请求和棋',
@@ -417,12 +538,12 @@ function handleMessage(msg: ServerMessage): void {
           { label: '拒绝', onClick: () => respondDraw(false) },
         ],
       });
-      break;
+      return;
     case 'draw_response':
       S.pending = null;
       if (!msg.accept) toast('对方拒绝了和棋请求');
       updatePanel();
-      break;
+      return;
     case 'restart_request':
       showModal({
         title: '对方请求重开',
@@ -432,12 +553,12 @@ function handleMessage(msg: ServerMessage): void {
           { label: '拒绝', onClick: () => respondRestart(false) },
         ],
       });
-      break;
+      return;
     case 'restart_response':
       S.pending = null;
       if (!msg.accept) toast('对方拒绝了重开请求');
       updatePanel();
-      break;
+      return;
     case 'undo_request':
       showModal({
         title: '对方请求悔棋',
@@ -447,50 +568,53 @@ function handleMessage(msg: ServerMessage): void {
           { label: '拒绝', onClick: () => respondUndo(false) },
         ],
       });
-      break;
+      return;
     case 'undo_response':
       S.pending = null;
-      if (msg.accept) {
-        toast('悔棋成功，已回退一步');
-      } else {
-        toast('对方拒绝了悔棋请求');
-      }
+      if (msg.accept) toast('悔棋成功，已回退一步');
+      else toast('对方拒绝了悔棋请求');
       updatePanel();
-      break;
+      return;
     case 'opponent_joined':
       closeModal();
+      S.oppName = msg.player.name;
       if (S.status === 'playing') {
         toast('对手已重新连接');
       } else {
-        $('host-wait').textContent = '对手已加入，正在开局…';
+        $('host-wait').textContent = `对手（${msg.player.name}）已加入，正在开局…`;
       }
       updatePanel();
-      break;
+      return;
     case 'opponent_away':
-      // 对手意外断线：进入宽限等待（主机可放弃等待，改为等待新对手）
+      // 对手意外断线：进入宽限等待（房主可放弃等待，改为等待新对手）
       S.oppAway = true;
       updatePanel();
       showModal({
         title: '对手已断开',
         sub: '正在等待对方重连（限时恢复）',
-        buttons:
-          S.role === 'host'
-            ? [
-                { label: '继续等待重连', primary: true },
-                { label: '等待新对手', onClick: () => net?.send({ type: 'wait_new_opponent' }) },
-              ]
-            : [{ label: '继续等待重连', primary: true }],
+        buttons: S.isOwner
+          ? [
+              { label: '继续等待重连', primary: true },
+              { label: '等待新对手', onClick: () => net?.send({ type: 'wait_new_opponent' }) },
+            ]
+          : [{ label: '继续等待重连', primary: true }],
       });
-      break;
+      return;
     case 'opponent_left':
       handleOpponentLeft(msg.reason);
-      break;
+      return;
     case 'error':
-      // 主机端的协议 / 状态错误提示（如「尚未加入对局」）
-      toast(msg.message);
-      break;
+      // 房主 / 对手的协议或状态错误提示；若正等待加入回应则作为加入失败处理
+      if (pendingReq) {
+        const reject = pendingReq.reject;
+        pendingReq = null;
+        reject(new Error(msg.message));
+      } else {
+        toast(msg.message);
+      }
+      return;
     default:
-      break;
+      return;
   }
 }
 
@@ -516,7 +640,6 @@ function respondUndo(accept: boolean): void {
 }
 
 function handleOpponentLeft(reason: string): void {
-  // 主机视角 reason 就是「对手已离开」，避免标题与说明重复
   const sub = reason === '对手已离开' ? '本局已结束，可返回首页重新开局' : reason;
   if (S.status === 'playing' || S.status === 'over') {
     S.status = 'over';
@@ -540,7 +663,7 @@ function handleClosed(reason: string): void {
     render();
     showModal({
       title: '连接已断开',
-      sub: '与主机的连接已中断，可返回首页重试',
+      sub: '与服务器的连接已中断，可返回首页重试',
       buttons: [{ label: '返回首页', primary: true, onClick: leaveToHome }],
     });
   } else {
@@ -548,82 +671,155 @@ function handleClosed(reason: string): void {
   }
 }
 
-// -------------------------------------------------------------- 连接
+// -------------------------------------------------------------- 房间会话
 
-async function openNet(url: string, role: 'host' | 'guest' | 'spectator'): Promise<void> {
+/** 建立到服务器的 WebSocket 连接（页面由服务器提供，因此用当前来源地址） */
+async function openSocket(): Promise<Net> {
   net?.close();
-  net = new Net({
-    onWelcome(info: WelcomeInfo) {
-      S.side = info.side ?? 'r'; // 观战者 side 为 null，统一按红方视角渲染
-      S.spectator = info.side === null;
-      S.role = role === 'host' ? 'host' : 'guest';
-      S.firstMode = info.firstMode;
-      renderSidePick();
-      applySnapshot(info.state);
-      if (S.spectator) {
-        enterGame();
-        toast('已进入观战（只读）');
-      } else if (info.state.status === 'playing') {
-        enterGame();
-      }
-    },
-    onMessage: handleMessage,
-    onClosed: handleClosed,
-  });
-  await net.connect(url, role);
+  const n = new Net({ onMessage: handleMessage, onClosed: handleClosed });
+  net = n;
+  await n.connect(`ws://${location.host}/ws`);
+  return n;
 }
 
-async function createGame(): Promise<void> {
-  try {
-    const res = await fetch('/api/host/start', { method: 'POST' });
-    if (!res.ok) throw new Error('当前页面无法创建对局，请通过主机端打开');
-    const info = (await res.json()) as { ip: string; port: number };
-    S.role = 'host';
-    S.aiMode = false;
-    S.firstMode = 'r'; // 主机服务在新建等待时也会重置为默认
-    $('host-ip').textContent = `${info.ip}:${info.port}`;
-    $('host-wait').textContent = '让对方在「加入对局」中输入上方地址';
-    renderSidePick();
-    show('screen-host');
-    await openNet(`ws://${location.host}/ws`, 'host');
-  } catch (e) {
-    toast(e instanceof Error ? e.message : String(e));
+/** 发送一个需要服务端回应的请求（room_joined / auth_ok 成功，error 失败） */
+function request(msg: ClientMessage, timeoutMs = 8000): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      if (!pendingReq) return;
+      pendingReq = null;
+      reject(new Error('服务器无响应，请稍后重试'));
+    }, timeoutMs);
+    pendingReq = {
+      resolve: () => {
+        window.clearTimeout(timer);
+        resolve();
+      },
+      reject: (e) => {
+        window.clearTimeout(timer);
+        reject(e);
+      },
+    };
+    net?.send(msg);
+  });
+}
+
+function settlePending(ok: boolean): void {
+  const p = pendingReq;
+  pendingReq = null;
+  if (ok) p?.resolve();
+}
+
+/** 记住当前房间会话，页面刷新后可用同一身份重连原局 */
+function storeSession(): void {
+  if (S.spectator || !S.roomId || !S.playerId) return;
+  writeStore(SESSION_KEY, JSON.stringify({ roomId: S.roomId, playerId: S.playerId }));
+}
+
+function clearSession(): void {
+  writeStore(SESSION_KEY, null);
+}
+
+/** 服务端确认加入房间：写入本地状态并进入对应页面 */
+function applyRoomJoined(msg: Extract<ServerMessage, { type: 'room_joined' }>): void {
+  S.roomId = msg.roomId;
+  S.playerId = msg.playerId;
+  S.name = msg.name;
+  S.locked = msg.locked;
+  S.spectator = msg.seat === null;
+  S.role = S.spectator ? 'spectator' : 'player';
+  S.isOwner = !S.spectator && msg.ownerId === msg.playerId;
+  S.side = msg.seat ?? 'r';
+  S.firstMode = msg.firstMode;
+  S.oppName = '';
+  storeSession();
+
+  applySnapshot(msg.state);
+  if (S.spectator) {
+    enterGame();
+    toast('已进入观战（只读）');
+  } else if (msg.state.status === 'playing') {
+    enterGame();
+    toast('已恢复对局');
+  } else {
+    showWaiting();
   }
 }
 
-const FIRST_HINT: Record<FirstMode, string> = {
-  r: '先手（红方）：主机执红先行',
-  b: '先手（红方）：主机执黑，加入者执红先行',
-  random: '先手（红方）：开局时随机分配红黑',
-  guess: '先手（红方）：主机抓单双、加入者猜，猜中者执红',
-};
-
-/** 等待页：渲染先手（红方）方式的选择状态 */
-function renderSidePick(): void {
-  document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.mode === S.firstMode);
-  });
-  $('side-hint').textContent = FIRST_HINT[S.firstMode];
+/** 取消等待（销毁自己创建的房间）并回首页 */
+async function cancelHost(): Promise<void> {
+  net?.send({ type: 'leave_room' });
+  net?.close();
+  net = null;
+  clearSession();
+  resetLocal();
+  backToIndex();
+  show('screen-home');
 }
 
-/** 等待页：选择先手方式（仅等待阶段有效，开赛后主机服务会拒绝） */
-function chooseFirst(mode: FirstMode): void {
-  if (S.firstMode === mode) return;
-  S.firstMode = mode;
-  renderSidePick();
-  $('host-wait').textContent = '让对方在「加入对局」中输入上方地址';
-  net?.send({ type: 'choose_first', mode });
+/** 重置本地对局视图状态 */
+function resetLocal(): void {
+  S.role = null;
+  S.roomId = '';
+  S.playerId = '';
+  S.name = '';
+  S.isOwner = false;
+  S.locked = false;
+  S.spectator = false;
+  S.status = 'idle';
+  S.selected = null;
+  S.moves = [];
+  S.aiMode = false;
+  S.deadline = null;
+  S.hover = null;
+  S.oppName = '';
+  S.oppAway = false;
+  S.pending = null;
 }
 
-/** 首页「人机对弈」子菜单：与参考项目一致，先选难度再开始 */
-function showAiMenu(): void {
+function leaveToHome(): void {
+  net?.send({ type: 'leave_room' });
+  net?.close();
+  net = null;
+  clearSession();
+  closeModal();
+  resetLocal();
+  backToIndex();
+  show('screen-home');
+}
+
+// -------------------------------------------------------------- 首页入口
+
+const FIRST_MODE_DEFAULT: FirstMode = 'r';
+
+/** 首页「创建房间」子菜单 */
+function showCreateMenu(): void {
   $('menu-index').hidden = true;
-  $('menu-ai').hidden = false;
+  $('menu-ai').hidden = true;
+  $('menu-create').hidden = false;
 }
 
 function backToIndex(): void {
   $('menu-ai').hidden = true;
+  $('menu-create').hidden = true;
   $('menu-index').hidden = false;
+}
+
+/** 创建双人对战房间（口令可选，留空即任何人可加入） */
+async function createRoom(): Promise<void> {
+  const password = $<HTMLInputElement>('create-pass').value.trim();
+  try {
+    await openSocket();
+    S.aiMode = false;
+    S.firstMode = FIRST_MODE_DEFAULT;
+    await request({ type: 'create_room', mode: 'pvp', password: password || null, token: S.account?.token });
+    backToIndex();
+  } catch (e) {
+    net?.close();
+    net = null;
+    toast(e instanceof Error ? e.message : String(e));
+    show('screen-home');
+  }
 }
 
 /** 读取人机对战难度（搜索深度，2/3/4 对应菜鸟/中级/高手） */
@@ -634,27 +830,248 @@ function aiDepth(): number {
 }
 
 /** 人机对战：AI 执黑，创建后直接进入对局 */
-async function createAiGame(): Promise<void> {
+async function createAiRoom(): Promise<void> {
   try {
-    const res = await fetch(`/api/host/start-ai?depth=${aiDepth()}`, { method: 'POST' });
-    if (!res.ok) throw new Error('当前页面无法创建对局，请通过主机端打开');
-    S.role = 'host';
+    await openSocket();
     S.aiMode = true;
-    await openNet(`ws://${location.host}/ws`, 'host');
-    toast('人机对战开始，你执红先行');
+    await request({ type: 'create_room', mode: 'ai', depth: aiDepth(), token: S.account?.token });
+    backToIndex();
   } catch (e) {
+    net?.close();
+    net = null;
+    S.aiMode = false;
     toast(e instanceof Error ? e.message : String(e));
+    show('screen-home');
   }
 }
 
+function showJoin(): void {
+  const msg = $('join-msg');
+  msg.textContent = '';
+  msg.className = 'hint';
+  $('scan-result').hidden = true;
+  renderAccountState();
+  show('screen-join');
+}
+
+/** 加入房间（或观战） */
+async function doJoin(asSpectator = false): Promise<void> {
+  const roomId = $<HTMLInputElement>('join-room').value.trim();
+  const pwd = $<HTMLInputElement>('join-pwd').value;
+  const setMsg = (t: string, kind?: 'ok' | 'err') => {
+    const msg = $('join-msg');
+    msg.textContent = t;
+    msg.className = 'hint' + (kind ? ` ${kind}` : '');
+  };
+
+  if (!/^\d{4,8}$/.test(roomId)) return setMsg('请输入 4-8 位数字房间号', 'err');
+
+  setMsg(`正在加入房间 ${roomId} …`);
+  S.aiMode = false;
+  try {
+    await openSocket();
+    const session = readSession();
+    const playerId = session && session.roomId === roomId ? session.playerId : undefined;
+    await request({
+      type: 'join_room',
+      roomId,
+      role: asSpectator ? 'spectator' : 'player',
+      playerId,
+      password: pwd || undefined,
+      token: S.account?.token,
+    });
+    setMsg(asSpectator ? '已进入观战（只读）' : '加入成功', 'ok');
+  } catch (e) {
+    net?.close();
+    net = null;
+    setMsg(e instanceof Error ? e.message : '加入失败', 'err');
+  }
+}
+
+/** 读取本地保存的房间会话 */
+function readSession(): { roomId: string; playerId: string } | null {
+  const raw = readStore(SESSION_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as { roomId?: unknown; playerId?: unknown };
+    if (typeof data.roomId === 'string' && typeof data.playerId === 'string') {
+      return { roomId: data.roomId, playerId: data.playerId };
+    }
+  } catch {
+    /* 忽略损坏的本地数据 */
+  }
+  return null;
+}
+
+/** 页面加载时尝试用上次会话重连原局（失败则静默回首页） */
+async function tryResumeSession(): Promise<boolean> {
+  const session = readSession();
+  if (!session) return false;
+  try {
+    await openSocket();
+    await request(
+      {
+        type: 'join_room',
+        roomId: session.roomId,
+        role: 'player',
+        playerId: session.playerId,
+        token: S.account?.token,
+      },
+      4000,
+    );
+    return true;
+  } catch {
+    net?.close();
+    net = null;
+    clearSession();
+    return false;
+  }
+}
+
+// -------------------------------------------------------------- 账号（可选）
+
+function renderAccountState(): void {
+  const user = S.account?.username;
+  $('acct-user').setAttribute('placeholder', user ? `已登录：${user}` : '用户名');
+}
+
+function renderHomeHint(): void {
+  const who = S.account ? `已登录：${S.account.username}` : '未登录（游客）';
+  $('home-hint').textContent = `服务器 ${location.host} · ${who}`;
+}
+
+/** 登录 / 注册（可选：不登录也能以游客身份游玩） */
+async function doAuth(isRegister: boolean): Promise<void> {
+  const username = $<HTMLInputElement>('acct-user').value.trim();
+  const password = $<HTMLInputElement>('acct-pwd').value;
+  const setMsg = (t: string, kind?: 'ok' | 'err') => {
+    const msg = $('join-msg');
+    msg.textContent = t;
+    msg.className = 'hint' + (kind ? ` ${kind}` : '');
+  };
+  if (!username || !password) return setMsg('请输入用户名与密码', 'err');
+  try {
+    if (!net?.connected) await openSocket();
+    await request(
+      isRegister ? { type: 'register', username, password } : { type: 'login', username, password },
+    );
+    renderAccountState();
+    $<HTMLInputElement>('acct-pwd').value = '';
+  } catch (e) {
+    setMsg(e instanceof Error ? e.message : '操作失败', 'err');
+  }
+}
+
+/** 退出登录（仅清除本地凭据） */
+function logout(): void {
+  S.account = null;
+  writeStore(TOKEN_KEY, null);
+  writeStore(USER_KEY, null);
+  renderAccountState();
+  renderHomeHint();
+  toast('已退出登录');
+}
+
+// -------------------------------------------------------------- 服务器发现与房间列表
+
+/** 把房间列表渲染为可点击按钮（点击后填入房间号） */
+function renderRoomList(rooms: RoomSummary[]): void {
+  const box = $('scan-result');
+  box.replaceChildren();
+  const joinable = rooms.filter((r) => r.mode === 'pvp');
+  box.hidden = joinable.length === 0;
+  for (const r of joinable) {
+    const btn = document.createElement('button');
+    btn.className = 'btn small';
+    const state = r.status === 'playing' ? '对局中' : r.players >= 2 ? '已满' : '等待中';
+    btn.textContent = `${r.roomId} · ${r.players}/2 · ${state}${r.locked ? ' · 🔒' : ''}`;
+    btn.addEventListener('click', () => {
+      $<HTMLInputElement>('join-room').value = r.roomId;
+      if (r.locked) $<HTMLInputElement>('join-pwd').focus();
+      toast(`已选择房间 ${r.roomId}`);
+    });
+    box.appendChild(btn);
+  }
+}
+
+/** 刷新房间列表 */
+async function refreshRooms(): Promise<void> {
+  const setMsg = (t: string, kind?: 'ok' | 'err') => {
+    const msg = $('join-msg');
+    msg.textContent = t;
+    msg.className = 'hint' + (kind ? ` ${kind}` : '');
+  };
+  try {
+    if (!net?.connected) await openSocket();
+    net?.send({ type: 'list_rooms' });
+    setMsg('已刷新房间列表', 'ok');
+  } catch (e) {
+    setMsg(e instanceof Error ? e.message : '无法连接服务器', 'err');
+  }
+}
+
+/** 局域网服务器发现：扫描同网段并列出可访问的服务器（点击即跳转） */
+function renderServerList(servers: DiscoveredServer[]): void {
+  const box = $('scan-result');
+  box.replaceChildren();
+  box.hidden = servers.length === 0;
+  for (const s of servers) {
+    const btn = document.createElement('button');
+    btn.className = 'btn small';
+    btn.textContent = `${s.ip}:${s.port}`;
+    btn.addEventListener('click', () => {
+      window.location.href = `http://${s.ip}:${s.port}/`;
+    });
+    box.appendChild(btn);
+  }
+}
+
+/** 从 IP 中取前三段作为 /24 网段前缀；不合法返回 null */
+function subnetPrefix(ip: string): string | null {
+  const m = /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/.exec(ip.trim());
+  return m ? m[1] : null;
+}
+
+/** 搜索局域网服务器：先直探当前来源地址，再扫同网段并合并去重 */
+async function scanServers(): Promise<void> {
+  const setMsg = (t: string, kind?: 'ok' | 'err') => {
+    const msg = $('join-msg');
+    msg.textContent = t;
+    msg.className = 'hint' + (kind ? ` ${kind}` : '');
+  };
+  const port = Number(location.port || '7777');
+  const prefix = subnetPrefix(location.hostname);
+  if (!prefix || !Number.isInteger(port)) {
+    return setMsg('请通过服务器地址打开页面后再搜索，或手动输入房间号', 'err');
+  }
+
+  const found = new Map<string, DiscoveredServer>();
+  const add = (h: DiscoveredServer | null) => {
+    if (h) found.set(`${h.ip}:${h.port}`, h);
+  };
+
+  setMsg('正在探测当前服务器…');
+  add(await probeServer(location.hostname, port, { timeoutMs: 800 }));
+
+  const sweep = await discoverSubnet(prefix, port, {
+    onProgress: (done, total) => setMsg(`正在搜索 ${prefix}.0/24 … ${done}/${total}`),
+  });
+  for (const h of sweep) add(h);
+
+  const servers = [...found.values()];
+  renderServerList(servers);
+  setMsg(
+    servers.length ? `发现 ${servers.length} 台服务器，点击即可切换` : '未发现其它服务器',
+    servers.length ? 'ok' : 'err',
+  );
+}
+
+// -------------------------------------------------------------- 皮肤
+
 /** 读取上次选择的皮肤（localStorage 不可用时回退默认皮肤） */
 function loadSkinPreference(): SkinId {
-  try {
-    const saved = window.localStorage.getItem(SKIN_KEY);
-    return isSkinId(saved) ? saved : DEFAULT_SKIN;
-  } catch {
-    return DEFAULT_SKIN;
-  }
+  const saved = readStore(SKIN_KEY);
+  return isSkinId(saved) ? saved : DEFAULT_SKIN;
 }
 
 /** 更换皮肤：按参考项目顺序循环三套素材，并记住选择 */
@@ -663,11 +1080,7 @@ function switchSkin(): void {
     return toast('对局中不能更换皮肤');
   }
   S.skin = nextSkin(S.skin);
-  try {
-    window.localStorage.setItem(SKIN_KEY, S.skin);
-  } catch {
-    /* 忽略：隐私模式下无法写入，仅本次会话生效 */
-  }
+  writeStore(SKIN_KEY, S.skin);
   applyTheme();
   ensureSkinImages();
   paint();
@@ -675,24 +1088,12 @@ function switchSkin(): void {
   toast(`已更换皮肤：${SKINS[S.skin].label}`);
 }
 
-async function cancelHost(): Promise<void> {
-  try {
-    await fetch('/api/host/stop', { method: 'POST' });
-  } catch {
-    /* 忽略 */
-  }
-  net?.close();
-  net = null;
-  S.status = 'idle';
-  show('screen-home');
-}
-
 /**
- * 复制本机地址（A2）。
+ * 复制房间号（邀请对手用）。
  * 局域网页面是 http 非安全上下文，navigator.clipboard 多数不可用，
  * 因此降级为「选中文本 + execCommand('copy')」。
  */
-async function copyHostAddr(): Promise<void> {
+async function copyRoomNo(): Promise<void> {
   const el = $('host-ip');
   const text = el.textContent?.trim() ?? '';
   if (!text || text === '—') return;
@@ -712,118 +1113,7 @@ async function copyHostAddr(): Promise<void> {
     }
     sel?.removeAllRanges();
   }
-  toast('地址已复制');
-}
-
-function showJoin(): void {
-  const msg = $('join-msg');
-  msg.textContent = '';
-  msg.className = 'hint';
-  $('scan-result').hidden = true;
-  show('screen-join');
-}
-
-/** 从 IP 中取前三段作为 /24 网段前缀；不合法返回 null */
-function subnetPrefix(ip: string): string | null {
-  const m = /^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/.exec(ip.trim());
-  return m ? m[1] : null;
-}
-
-/** 把发现的候选主机渲染为可点击按钮（点击后填入加入表单） */
-function renderScanResult(hosts: DiscoveredHost[]): void {
-  const box = $('scan-result');
-  box.replaceChildren();
-  box.hidden = hosts.length === 0;
-  for (const h of hosts) {
-    const btn = document.createElement('button');
-    btn.className = 'btn small';
-    btn.textContent = `${h.ip}:${h.port}`;
-    btn.addEventListener('click', () => {
-      $<HTMLInputElement>('join-ip').value = h.ip;
-      $<HTMLInputElement>('join-port').value = String(h.port);
-      toast(`已选择 ${h.ip}:${h.port}`);
-    });
-    box.appendChild(btn);
-  }
-}
-
-/** 搜索局域网主机（D1）：先直探已知地址，再扫描同网段并合并去重 */
-async function scanHosts(): Promise<void> {
-  const msg = $('join-msg');
-  const setMsg = (t: string, kind?: 'ok' | 'err') => {
-    msg.textContent = t;
-    msg.className = 'hint' + (kind ? ` ${kind}` : '');
-  };
-  const ipInput = $<HTMLInputElement>('join-ip').value.trim();
-  const port = Number($<HTMLInputElement>('join-port').value.trim() || '7777');
-  const prefix = subnetPrefix(ipInput) ?? subnetPrefix(location.hostname);
-  if (!prefix || !Number.isInteger(port)) {
-    return setMsg('请先填写同网段的任意主机地址与端口，再进行搜索', 'err');
-  }
-
-  const found = new Map<string, DiscoveredHost>();
-  const add = (h: DiscoveredHost | null) => {
-    if (h) found.set(`${h.ip}:${h.port}`, h);
-  };
-
-  // 已知地址优先（输入框中的地址 / 当前页面来源主机），再扫网段
-  setMsg('正在探测已知地址…');
-  if (subnetPrefix(ipInput)) add(await probeHost(ipInput, port, { timeoutMs: 800 }));
-  if (location.hostname !== ipInput) {
-    add(await probeHost(location.hostname, port, { timeoutMs: 800 }));
-  }
-
-  const sweep = await discoverSubnet(prefix, port, {
-    onProgress: (done, total) => setMsg(`正在搜索 ${prefix}.0/24 … ${done}/${total}`),
-  });
-  for (const h of sweep) add(h);
-
-  const hosts = [...found.values()];
-  renderScanResult(hosts);
-  setMsg(
-    hosts.length ? `发现 ${hosts.length} 台主机，点击即可填入` : '未发现主机，请确认在同一局域网',
-    hosts.length ? 'ok' : 'err',
-  );
-}
-
-async function doJoin(asSpectator = false): Promise<void> {
-  const ip = $<HTMLInputElement>('join-ip').value.trim();
-  const port = $<HTMLInputElement>('join-port').value.trim();
-  const msg = $('join-msg');
-  const setMsg = (t: string, kind?: 'ok' | 'err') => {
-    msg.textContent = t;
-    msg.className = 'hint' + (kind ? ` ${kind}` : '');
-  };
-
-  if (!ip || !port) return setMsg('请输入主机地址和端口', 'err');
-  if (!/^\d+$/.test(port)) return setMsg('端口必须是数字', 'err');
-
-  setMsg(`正在连接 ${ip}:${port} …`);
-  S.aiMode = false;
-  try {
-    await openNet(`ws://${ip}:${port}/ws`, asSpectator ? 'spectator' : 'guest');
-    setMsg(asSpectator ? '已进入观战（只读）' : '连接成功，正在开局…', 'ok');
-  } catch (e) {
-    setMsg(e instanceof Error ? e.message : '连接失败', 'err');
-  }
-}
-
-function leaveToHome(): void {
-  net?.send({ type: 'leave' });
-  net?.close();
-  net = null;
-  if (S.role === 'host') {
-    fetch('/api/host/stop', { method: 'POST' }).catch(() => undefined);
-  }
-  closeModal();
-  S.status = 'idle';
-  S.selected = null;
-  S.moves = [];
-  S.aiMode = false;
-  S.deadline = null;
-  S.hover = null;
-  backToIndex();
-  show('screen-home');
+  toast('房间号已复制');
 }
 
 // -------------------------------------------------------------- 对局操作
@@ -916,21 +1206,30 @@ function onCell([r, c]: Pos): void {
 // -------------------------------------------------------------- 初始化
 
 function bindEvents(): void {
-  $('btn-create').addEventListener('click', () => void createGame());
+  $('btn-create').addEventListener('click', showCreateMenu);
+  $('btn-create-back').addEventListener('click', backToIndex);
+  $('btn-create-start').addEventListener('click', () => void createRoom());
   $('btn-show-join').addEventListener('click', showJoin);
-  $('btn-create-ai').addEventListener('click', showAiMenu);
+  $('btn-create-ai').addEventListener('click', () => {
+    $('menu-index').hidden = true;
+    $('menu-create').hidden = true;
+    $('menu-ai').hidden = false;
+  });
   $('btn-ai-back').addEventListener('click', backToIndex);
-  $('btn-ai-start').addEventListener('click', () => void createAiGame());
+  $('btn-ai-start').addEventListener('click', () => void createAiRoom());
   $('btn-skin').addEventListener('click', switchSkin);
   $('btn-history').addEventListener('click', () => void review?.open());
   document.querySelectorAll<HTMLButtonElement>('#side-opts .side_opt').forEach((btn) => {
     btn.addEventListener('click', () => chooseFirst(btn.dataset.mode as FirstMode));
   });
   $('btn-cancel-host').addEventListener('click', () => void cancelHost());
-  $('ip-box').addEventListener('click', () => void copyHostAddr());
+  $('ip-box').addEventListener('click', () => void copyRoomNo());
   $('btn-connect').addEventListener('click', () => void doJoin());
   $('btn-spectate').addEventListener('click', () => void doJoin(true));
-  $('btn-scan').addEventListener('click', () => void scanHosts());
+  $('btn-rooms').addEventListener('click', () => void refreshRooms());
+  $('btn-scan').addEventListener('click', () => void scanServers());
+  $('btn-login').addEventListener('click', () => void doAuth(false));
+  $('btn-register').addEventListener('click', () => void doAuth(true));
   $('btn-spectate-leave').addEventListener('click', leaveToHome);
   $('btn-join-back').addEventListener('click', () => show('screen-home'));
   $('btn-resign').addEventListener('click', resign);
@@ -996,8 +1295,12 @@ function bindEvents(): void {
     clearSelection();
   });
 
-  const joinIp = $<HTMLInputElement>('join-ip');
-  joinIp.addEventListener('keydown', (e) => {
+  const roomInput = $<HTMLInputElement>('join-room');
+  roomInput.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') void doJoin();
+  });
+  const pwdInput = $<HTMLInputElement>('join-pwd');
+  pwdInput.addEventListener('keydown', (e) => {
     if ((e as KeyboardEvent).key === 'Enter') void doJoin();
   });
 }
@@ -1016,21 +1319,26 @@ async function init(): Promise<void> {
     toast,
   });
   render();
+
+  // 账号：恢复上次登录的 token（可选使用）
+  const token = readStore(TOKEN_KEY);
+  const username = readStore(USER_KEY);
+  if (token && username) S.account = { token, username };
+  renderAccountState();
+  renderHomeHint();
+
   // 计时读秒（D4）：定时刷新剩余时间显示（未启用计时时几乎零开销）
   window.setInterval(() => {
     if (S.deadline && S.status === 'playing') updatePanel();
   }, 500);
-  try {
-    const res = await fetch('/api/host-info');
-    if (res.ok) {
-      const info = (await res.json()) as { ip: string; port: number };
-      $('home-hint').textContent = `本机地址 ${info.ip}:${info.port}`;
-      $<HTMLInputElement>('join-ip').value = info.ip;
-      $<HTMLInputElement>('join-port').value = String(info.port);
-    }
-  } catch {
-    $('home-hint').textContent = '请通过主机端页面打开以创建对局';
-  }
+
+  // 刷新页面后尝试恢复原局（失败静默回首页）
+  await tryResumeSession();
 }
 
 void init();
+
+// 退出登录入口：长按首页提示区（避免占用宝贵的菜单按钮位）
+$('home-hint').addEventListener('dblclick', () => {
+  if (S.account) logout();
+});

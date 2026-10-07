@@ -1,6 +1,8 @@
 # ADR-0005：主机服务模块规格（server/host-server.ts）
 
-- 状态：已接受（记录现状实现）
+- 状态：**已被取代** —— 单进程单对局的 `HostServer` 已拆分为
+  [server.ts](../../src/server/server.ts)（多房间服务器）与 [room.ts](../../src/server/room.ts)（单局房间）；
+  本文的双席位模型、HTTP 接口、静态服务与宽限语义已迁移并调整，见 [ADR-0010](./0010-room-server.md)（2026-10-07）
 - 日期：2026-10-03
 - 关联入口：创建对局、显示本机地址、加入对局、WebSocket 消息路由、断线重连宽限与断线清理
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0004 状态机](./0004-game-state-machine.md)

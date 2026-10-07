@@ -144,7 +144,8 @@ body {
   zoom: var(--ui-scale);
 }
 
-.menu_info input[type="text"] {
+.menu_info input[type="text"],
+.menu_info input[type="password"] {
   width: 100%;
   padding: 5px 8px;
   font: 13px/1.5 inherit;
@@ -154,7 +155,8 @@ body {
   border-radius: 3px;
   outline: none;
 }
-.menu_info input[type="text"]:focus { border-color: #c9963c; }
+.menu_info input[type="text"]:focus,
+.menu_info input[type="password"]:focus { border-color: #c9963c; }
 
 .ip-box {
   margin: 6px 0;

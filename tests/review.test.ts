@@ -1,18 +1,11 @@
 /**
- * 对局回顾工具函数测试（复盘局面还原、时间/结果文案）。
+ * 对局回顾工具函数测试（复盘局面还原、时间/结果/列表文案）。
  * review.ts 的 DOM 部分由 app 装配，这里只测纯函数。
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  SEAT_LABEL,
-  formatTime,
-  recordLine,
-  replayBoard,
-  resultText,
-  sideAt,
-} from '../src/renderer/review.js';
-import { GameRecordSummary, Move } from '../src/shared/types.js';
+import { formatTime, recordLine, replayBoard, resultText, sideAt } from '../src/renderer/review.js';
+import { GameRecordSummary, Move, PlayerRef } from '../src/shared/types.js';
 
 /** 三步着法：红车进一、黑卒进一、红炮平中 */
 const MOVES: Move[] = [
@@ -21,12 +14,19 @@ const MOVES: Move[] = [
   { from: [7, 1], to: [7, 4] },
 ];
 
+const player = (name: string, kind: PlayerRef['kind'] = 'account'): PlayerRef => ({
+  id: `${kind}:${name}`,
+  name,
+  kind,
+});
+
 const summary = (over: Partial<GameRecordSummary> = {}): GameRecordSummary => ({
   id: '1',
+  roomId: '123456',
   startedAt: new Date(2026, 9, 6, 14, 32).getTime(),
   endedAt: new Date(2026, 9, 6, 14, 40).getTime(),
-  red: 'host',
-  black: 'guest',
+  red: player('alice'),
+  black: player('bob'),
   firstMode: 'guess',
   guess: { choice: 'odd', actual: 'even', guestWon: false },
   winner: 'b',
@@ -77,19 +77,20 @@ describe('回顾列表文案', () => {
     expect(resultText({ winner: null, reason: '同意和棋' })).toBe('和棋（同意和棋）');
   });
 
-  it('列表行：红黑方 / 取先方式 / 时间 / 胜负', () => {
+  it('列表行：红黑方（玩家名） / 取先方式 / 时间 / 胜负', () => {
     const line = recordLine(summary());
-    expect(line.vs).toBe('主机（红） vs 加入者（黑）');
+    expect(line.vs).toBe('alice（红） vs bob（黑）');
     expect(line.first).toBe('猜先');
     expect(line.time).toBe('10-06 14:32');
     expect(line.result).toBe('黑胜（认输）');
   });
 
-  it('席位与先手方式文案覆盖 AI 与四种方式', () => {
-    expect(SEAT_LABEL.ai).toBe('AI');
-    expect(recordLine(summary({ red: 'host', black: 'ai', firstMode: 'r' })).first).toBe('主机执红');
-    expect(recordLine(summary({ firstMode: 'b' })).first).toBe('主机执黑');
+  it('取先方式文案覆盖四种方式，AI 与游客名称原样展示', () => {
+    expect(recordLine(summary({ firstMode: 'r' })).first).toBe('房主执红');
+    expect(recordLine(summary({ firstMode: 'b' })).first).toBe('房主执黑');
     expect(recordLine(summary({ firstMode: 'random' })).first).toBe('随机黑红');
-    expect(recordLine(summary({ red: 'guest', black: 'host' })).vs).toBe('加入者（红） vs 主机（黑）');
+    expect(recordLine(summary({ red: player('游客AB12', 'guest'), black: player('AI', 'ai') })).vs).toBe(
+      '游客AB12（红） vs AI（黑）',
+    );
   });
 });
