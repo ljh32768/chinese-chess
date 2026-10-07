@@ -37,9 +37,9 @@
 
 | 屏 | id | 元素与入口 |
 |---|---|---|
-| 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「对局回顾」`btn-history`、「更换皮肤」`btn-skin`（5 个入口铺满挂板按钮区）；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`）；本机地址提示 `home-hint` |
+| 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「对局回顾」`btn-history`、「更换皮肤」`btn-skin`（5 个入口铺满挂板按钮区）；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`，面板与木框对齐见 §3.5.3）；本机地址提示 `home-hint` |
 | 主机等待 | `screen-host` | 版块与挂板内框对齐（实测 `init_bg.png` 内表面 x≈10..290、y≈158..395，面板 `280×237`）：标题 `info-title`（内含等待转圈 `spinner`）、地址大字显示 `host-ip`（**点击地址块 `ip-box` 即复制**，非安全上下文降级）、先手（红方）方式 `side-opts`（随机黑红 / 猜先 / 黑 / 红，选中态 `.active`）+ 说明 `side-hint`、等待文案 `host-wait`（猜先阶段显示进度）、取消 `btn-cancel-host`（素材返回箭头） |
-| 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`、返回 `btn-join-back`、提示 `join-msg` |
+| 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`（面板与内框对齐、限高保证按钮落在框内，见 §3.5.3）、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`（面板内滚动）、返回 `btn-join-back`、提示 `join-msg` |
 | 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint`（**棋谱面板已移除，改由「对局回顾」复盘**） |
 | 对局回顾 | `screen-history` | 列表 `history-list`（每行：红黑方 / 取先方式 / 时间 / 胜负，点击进入复盘）、返回 `btn-history-back`、刷新 `btn-history-refresh` |
 | 复盘 | `screen-replay` | 复盘棋盘 `replay-board`、步进按钮 `btn-replay-first/prev/next/last`、返回列表 `btn-replay-back`、对局信息 `replay-info`、当前步 `replay-step`、AI 推荐 `replay-hint` |
@@ -157,6 +157,23 @@
 | 皮肤联动 | 切换皮肤后 `redraw()` 重绘复盘棋盘 |
 | 返回 | 「返回列表」`btn-replay-back`；ESC 依次从复盘 → 列表 → 首页 |
 
+### 3.5.3 主界面尺寸、放大与木框对齐（v1.6）
+
+主界面（首页 / 等待 / 加入，均为木质挂板 `.menu_box`）与对局页、对局回顾页分离：
+**只有主界面使用放大变量，对局与回顾保持原尺寸**。
+
+| 项 | 规格 |
+|---|---|
+| 整体放大 | `:root { --ui-scale: 1.25 }`；`.menu_box` 与 `.home-hint` 应用 `zoom: var(--ui-scale)` 等比缩放（背景图、按钮、面板、表单控件随 zoom 一起放大），面板与内框的相对对齐关系不变；`@media (max-width: 480px)` 回退 `1`，避免手机浏览器入局时水平溢出 |
+| 挂板几何 | 背景 `init_bg.png` 316×422（内含美术标题与挂绳）；`box-sizing: content-box` + `padding-top: 158` + `height: 264`，padding box 恒为 422（背景图完整显示，含底框）；首页 5 个按钮由 `.menu_init { padding-top: 32 }` 保持原位置（y=190 起，5×46=230） |
+| 木框内框 | 实测内表面 x≈10..290、y≈158..395（10px 深色边框）；内容区自 y=158 起，与内框上沿对齐 |
+| 面板对齐 | `.menu_info` 统一 `width: 280`、`margin: 0 0 8px 10px`（与内框同宽、左/上对齐）：等待页版块 `.menu_info.wide` 另加 `height: 237` 铺满内框（280×237）；人机页面板自动高 + `8px` 间距的「开始对弈」；加入页 `#screen-join .menu_info` 限高 `183`（= 237 − 46 − 8）且内部滚动，保证面板 +「连接」按钮都落在内框内 |
+| 署名遮盖 | 主页背景 `init_bg.png` 底部原含参考项目作者署名「@一叶孤舟 QQ:28701884 欢迎交流」，已用目录中的 `cover.bmp` 中段木板条带（羽化边缘、就近映射回原调色板）覆盖；仍为 8bit 索引 PNG，透明区（画面四角与阴影）保持不变 |
+
+验收（自动化）：[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 以像素级检查署名区域
+（无暗色文字像素、透明区不变）并断言缩放范围（zoom 仅出现在 `.menu_box` / `.home-hint`）
+与面板 / 内框几何常量（280×237、限高 183、间距 8、按钮 46 等）。
+
 ### 3.6 走子交互（app.ts `onCell`）
 
 | 场景 | 行为 |
@@ -239,3 +256,7 @@
 - 对局回顾列表按「红黑方 / 取先方式 / 时间 / 胜负」展示已结束对局；点击进入复盘后
   右箭头（或 → 键）一次一步，棋盘与中文记谱同步，AI 推荐随步数刷新并高亮在棋盘上。
 - 请求发出后侧栏显示等待状态；矮窗口下棋盘按高度等比缩小、内容不被裁剪。
+- 主界面（首页 / 等待 / 加入）整体按 1.25 放大且背景图同步放大，各页面无滚动条溢出；
+  对局页与对局回顾页保持原尺寸（不随主界面放大）。
+- 三个子面板（创建 / 加入 / 人机）与木板内框对齐：面板 280 宽、左/上对齐内框，
+  面板与按钮均不越出木板内框；主页背景不再显示参考项目作者署名。
