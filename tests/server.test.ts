@@ -819,6 +819,57 @@ describe('服务器 · HTTP 接口与账号', () => {
     expect(data.rooms.map((r) => r.roomId)).toEqual([roomId]);
   });
 
+  it('API 带跨源响应头，OPTIONS 预检直接放行（桌面客户端从本机外壳页访问）', async () => {
+    const s = await startServer();
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const res = await fetch(`${base}/api/history`, { headers: { Origin: 'http://127.0.0.1:5555' } });
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+
+    const preflight = await fetch(`${base}/api/history`, { method: 'OPTIONS' });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('*');
+    expect(preflight.headers.get('access-control-allow-methods')).toContain('GET');
+    expect(preflight.headers.get('access-control-allow-headers')).toContain('Content-Type');
+  });
+
+  it('我的历史：/api/history?user= 只返回该玩家的对局', async () => {
+    const s = await startServer();
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const reg = await fetch(`${base}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'bob', password: 'pass1234' }),
+    });
+    const { token } = (await reg.json()) as { token: string };
+
+    // 第一局：账号 bob 执红（对手认输）；第二局：两名游客
+    const { c: host, roomId } = await createRoom(s, { token });
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
+    await host.waitType('start');
+    guest.send({ type: 'resign' });
+    await host.waitType('game_over');
+    await guest.waitType('game_over');
+
+    const second = await setupGame(s);
+    second.host.send({ type: 'resign' });
+    await second.host.waitType('game_over');
+
+    const all = (await (await fetch(`${base}/api/history`)).json()) as { games: unknown[] };
+    expect(all.games).toHaveLength(2);
+
+    const mine = (await (
+      await fetch(`${base}/api/history?user=${encodeURIComponent('account:bob')}`)
+    ).json()) as { games: { red: { name: string } }[] };
+    expect(mine.games).toHaveLength(1);
+    expect(mine.games[0].red.name).toBe('bob');
+
+    const none = (await (await fetch(`${base}/api/history?user=account:nobody`)).json()) as {
+      games: unknown[];
+    };
+    expect(none.games).toHaveLength(0);
+  });
+
   it('注册 / 登录：签发 token，重复用户名与错误密码被拒', async () => {
     const s = await startServer();
     const base = `http://127.0.0.1:${s.address.port}`;

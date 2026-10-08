@@ -283,4 +283,12 @@ describe('其他界面约定', () => {
     expect(HTML).not.toContain('side_opts');
     expect(CSS).not.toContain('side_opt');
   });
+
+  it('对局回顾支持「全部对局 / 我的历史」切换（含身份说明位）', () => {
+    expect(HTML).toContain('id="tab-history-all"');
+    expect(HTML).toContain('id="tab-history-mine"');
+    expect(HTML).toContain('id="history-note"');
+    expect(decl('.review_tab.active', 'background')).toBeTruthy();
+    expect(decl('.review_scope_note', 'text-align')).toBe('right');
+  });
 });

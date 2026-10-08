@@ -71,12 +71,27 @@ export interface ReviewDeps {
   loadImages: () => Promise<void>;
   /**
    * 对局记录接口的基址（形如 `http://192.168.1.42:7777`，无服务器时为空串表示同源）。
-   * 桌面客户端的页面由本机外壳服务提供，因此必须显式指向所选服务器。
+   * 桌面客户端的页面由本机外壳服务提供，因此必须显式指向所选服务器（跨源，需服务端 CORS）。
    */
   apiBase: () => string;
+  /** 「我的历史」过滤用的玩家 id（登录为 `account:<用户名>`；游客为本机最近身份；未识别为空串） */
+  myId: () => string;
+  /** 当前身份展示名（「我的历史」说明文案用） */
+  myLabel: () => string;
   /** 切屏（复用 app.ts 的 show） */
   show: (id: string) => void;
   toast: (msg: string) => void;
+}
+
+/** 回顾范围：全部对局 / 我的历史 */
+export type ReviewScope = 'all' | 'mine';
+
+/**
+ * 对局列表请求路径：全部走 `/api/history`；「我的历史」带 `?user=<玩家 id>`。
+ * 未识别身份时退回全部（由调用方给出提示）。
+ */
+export function historyUrl(scope: ReviewScope, myId: string): string {
+  return scope === 'mine' && myId ? `/api/history?user=${encodeURIComponent(myId)}` : '/api/history';
 }
 
 export interface ReviewController {
@@ -101,11 +116,20 @@ export function initReview(deps: ReviewDeps): ReviewController {
   let hint: { from: Pos; to: Pos } | null = null;
   let hintSeq = 0;
   let hintTimer = 0;
+  /** 当前回顾范围（全部 / 我的历史） */
+  let scope: ReviewScope = 'all';
 
   // ---------------------------------------------------------------- 列表
 
   async function fetchJson<T>(url: string): Promise<T> {
-    const res = await fetch(`${deps.apiBase()}${url}`);
+    let res: Response;
+    try {
+      res = await fetch(`${deps.apiBase()}${url}`);
+    } catch {
+      // fetch 抛错常见于：服务器已关闭 / 地址不可达 / 跨源被拦截（服务端缺少 CORS 头）
+      const where = deps.apiBase() || window.location.origin;
+      throw new Error(`无法连接服务器 ${where}，请确认「连接服务器」中已连接`);
+    }
     if (!res.ok) throw new Error(`请求失败（${res.status}）`);
     return (await res.json()) as T;
   }
@@ -115,12 +139,37 @@ export function initReview(deps: ReviewDeps): ReviewController {
     await refresh();
   }
 
-  /** 拉取对局列表并渲染 */
+  /** 切换回顾范围（全部对局 / 我的历史） */
+  function setScope(next: ReviewScope): void {
+    if (scope === next) return;
+    scope = next;
+    void refresh();
+  }
+
+  /** 渲染「全部对局 / 我的历史」切换状态与身份说明 */
+  function renderScopeTabs(): void {
+    $('tab-history-all').classList.toggle('active', scope === 'all');
+    $('tab-history-mine').classList.toggle('active', scope === 'mine');
+    $('history-note').textContent = scope === 'mine' ? `身份：${deps.myLabel()}` : '';
+  }
+
+  /** 拉取对局列表并渲染（按当前范围过滤） */
   async function refresh(): Promise<void> {
     const box = $('history-list');
-    box.textContent = '正在读取对局记录…';
+    renderScopeTabs();
+    const myId = deps.myId();
+    if (scope === 'mine' && !myId) {
+      records = [];
+      box.replaceChildren();
+      const tip = document.createElement('p');
+      tip.className = 'review_empty';
+      tip.textContent = '尚未识别到你的身份：登录账号后可按账号查看「我的历史」；游客请先加入过一局。';
+      box.appendChild(tip);
+      return;
+    }
+    box.textContent = scope === 'mine' ? '正在读取我的对局记录…' : '正在读取对局记录…';
     try {
-      const data = await fetchJson<{ games: GameRecordSummary[] }>('/api/history');
+      const data = await fetchJson<{ games: GameRecordSummary[] }>(historyUrl(scope, myId));
       records = data.games;
     } catch (e) {
       box.textContent = e instanceof Error ? e.message : '读取失败';
@@ -135,7 +184,7 @@ export function initReview(deps: ReviewDeps): ReviewController {
     if (records.length === 0) {
       const empty = document.createElement('p');
       empty.className = 'review_empty';
-      empty.textContent = '暂无对局记录，先下完一盘棋吧';
+      empty.textContent = scope === 'mine' ? '当前服务器没有你的对局记录' : '暂无对局记录，先下完一盘棋吧';
       box.appendChild(empty);
       return;
     }
@@ -277,6 +326,8 @@ export function initReview(deps: ReviewDeps): ReviewController {
 
   $('btn-history-back').addEventListener('click', () => deps.show('screen-home'));
   $('btn-history-refresh').addEventListener('click', () => void refresh());
+  $('tab-history-all').addEventListener('click', () => setScope('all'));
+  $('tab-history-mine').addEventListener('click', () => setScope('mine'));
   $('btn-replay-back').addEventListener('click', () => deps.show('screen-history'));
   $('btn-replay-first').addEventListener('click', () => jump(0));
   $('btn-replay-prev').addEventListener('click', () => step(-1));

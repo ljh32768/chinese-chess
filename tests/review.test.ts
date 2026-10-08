@@ -4,7 +4,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { formatTime, recordLine, replayBoard, resultText, sideAt } from '../src/renderer/review.js';
+import {
+  formatTime,
+  historyUrl,
+  recordLine,
+  replayBoard,
+  resultText,
+  sideAt,
+} from '../src/renderer/review.js';
 import { GameRecordSummary, Move, PlayerRef } from '../src/shared/types.js';
 
 /** 三步着法：红车进一、黑卒进一、红炮平中 */
@@ -92,5 +99,21 @@ describe('回顾列表文案', () => {
     expect(recordLine(summary({ red: player('游客AB12', 'guest'), black: player('AI', 'ai') })).vs).toBe(
       '游客AB12（红） vs AI（黑）',
     );
+  });
+});
+
+describe('对局列表请求路径 historyUrl（全部对局 / 我的历史）', () => {
+  it('「全部对局」恒为 /api/history', () => {
+    expect(historyUrl('all', 'account:bob')).toBe('/api/history');
+    expect(historyUrl('all', '')).toBe('/api/history');
+  });
+
+  it('「我的历史」带 user 参数并做 URL 编码（账号 / 游客 id 含冒号）', () => {
+    expect(historyUrl('mine', 'account:bob')).toBe('/api/history?user=account%3Abob');
+    expect(historyUrl('mine', 'guest:ab12cd34')).toBe('/api/history?user=guest%3Aab12cd34');
+  });
+
+  it('未识别身份时退回全部（由界面给出提示）', () => {
+    expect(historyUrl('mine', '')).toBe('/api/history');
   });
 });

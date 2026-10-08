@@ -174,7 +174,7 @@ main / server-main（进程入口：Electron 客户端 / 常驻服务器）
 | `GET /api/rooms` | 新增 | 房间列表（与 `list_rooms` 同源） |
 | `POST /api/auth/register` | 新增 | `{ username, password }` → `{ token, username }`（REST 便捷入口，与 WS `register` 同源） |
 | `POST /api/auth/login` | 新增 | `{ username, password }` → `{ token, username }` |
-| `GET /api/history` | 变更 | 全局对局记录；支持可选 `?roomId=` / `?user=` 过滤 |
+| `GET /api/history` | 变更 | 全局对局记录；支持可选 `?roomId=` / `?user=` 过滤（后者即客户端的「我的历史」）；**所有 `/api/*` 响应带 CORS 头并放行 `OPTIONS` 预检（v2.3，见 §11.1）** |
 | `GET /api/history/:id` | 不变 | 单局明细 |
 | `GET /api/ai/hint` | 不变 | 按记录 + 步数复原局面求推荐着法 |
 | `POST /api/host/start` | 移除 | 由 WS `create_room` 取代 |
@@ -452,3 +452,34 @@ v2.1 实际使用中暴露的五个问题与修正（不改变「服务器权威
 | 服务端 | [room.ts](../../src/server/room.ts)（AI 不落库）、[server.ts `playerList()`](../../src/server/server.ts)、[accounts.ts](../../src/server/accounts.ts)、[protocol.ts](../../src/shared/protocol.ts) |
 | 测试 | `server.test.ts` 新增「人机对局终局不计入对局回顾」「list_players 含离线账号且不可邀请」；`ui-home-layout.test.ts` 契约改为「大面板 + 邀请列表 + 下拉框 + 无页脚小字」；`npm test` 217 项、`lint` / `format:check` / `build` 全绿 |
 | 浏览器实测 | 浏览器三会话实测（127.0.0.1 房主 / localhost 加入者 / 局域网地址 大厅玩家）：创建房间（大面板、挂板已隐藏）→ 等待页取先下拉框默认「猜先」→ 加入者点击房间行后**双方直接进入棋盘**（房主弹「抓单 / 抓双」、加入者状态栏「猜先：等待房主抓子…」）→ 抓单 / 猜单 → 双方开局（加入者执红「轮到你走棋」）→ 对局页按钮变「邀请观战」，列表标题「邀请观战」（在线在前带「邀请」、离线账号与「对局中」置灰无按钮、本房间内玩家与自己不出现）；等待阶段列表标题为「邀请加入对局」、无观战入口 |
+
+## 11. v2.3 增量（2026-10-08 完成）
+
+### 11.1 修复：桌面客户端「对局回顾」一直 Failed to fetch
+
+| 项 | 内容 |
+|---|---|
+| 现象 | Electron 客户端打开「对局回顾」始终显示 `Failed to fetch`（浏览器直连服务器的页面一切正常） |
+| 原因 | 客户端页面由**本机外壳服务**（`127.0.0.1:<随机端口>`）提供，而对局回顾走 REST（`/api/history`、`/api/history/:id`、`/api/ai/hint`）访问**真实服务器**（另一端口 / 另一 IP）→ 属跨源请求；服务器此前只在响应中带 `Content-Type` / `Cache-Control`，**没有任何 CORS 头**，浏览器直接拦截响应体。服务器搜索不受影响，是因为 `probeServer()` 走 WebSocket（`ping`/`pong`），WS 不受同源策略约束 |
+| 修复 | [server.ts](../../src/server/server.ts)：`sendJson()` 对所有 `/api/*` 响应统一附加 `Access-Control-Allow-Origin: *`（+ `Allow-Methods` / `Allow-Headers`），并对 `OPTIONS` 预检直接回 `204`；客户端 [review.ts](../../src/renderer/review.ts) 在 `fetch` 抛错时给出可读提示「无法连接服务器 <地址>，请确认「连接服务器」中已连接」 |
+| 取舍 | 采用 `*`（而非白名单回显来源）：外壳服务端口随机、且客户端允许「页面来自 A 服务器、连接 B 服务器」，白名单无法覆盖；与本项目「局域网内网互信、不做消息鉴权」（§3.11）一致 |
+| 测试 | `server.test.ts` 新增「API 带跨源响应头，OPTIONS 预检直接放行」（断言 `access-control-allow-origin` / `-methods` / `-headers`） |
+
+### 11.2 新增：对局回顾的「我的历史」
+
+| 项 | 规格 |
+|---|---|
+| 切换入口 | 对局回顾页顶部新增「全部对局 / 我的历史」页签（[review.ts](../../src/renderer/review.ts) `setScope()` / `renderScopeTabs()`），右侧显示当前身份（如「身份：账号 ljh32768」「身份：游客89788011」） |
+| 接口 | `GET /api/history?user=<玩家 id>`：按 `red.id === user \|\| black.id === user` 过滤（与既有 `?roomId=` 并存）；[review.ts `historyUrl()`](../../src/renderer/review.ts) 负责拼装并做 URL 编码 |
+| 身份来源 | 已登录 → `account:<用户名>`（跨设备稳定）；游客 → 本机最近一次入座身份（`localStorage: lanschess-player`，[app.ts `storePlayer()`](../../src/renderer/app.ts) 在每次入座时写入）；未识别 → 列表区给出「登录后可按账号查看 / 游客需先加入过一局」的提示 |
+| 范围 | 记录接口基址仍是**当前所选服务器**（`apiBase()`），因此「我的历史」= 当前服务器上属于我的对局 |
+| 空态 | 已识别身份但无记录 → 「当前服务器没有你的对局记录」 |
+
+### 11.3 交付与验证
+
+| 项 | 内容 |
+|---|---|
+| 客户端 | `review.ts`（页签 / `historyUrl()` / 跨源错误提示）、`app.ts`（`lanschess-player` 身份持久化与注入）、`index.html` + `styles.css`（页签与身份说明样式） |
+| 服务端 | `server.ts`（CORS 头 / OPTIONS / `?user=` 过滤） |
+| 测试 | `npm test` 223 项（新增 CORS+OPTIONS、`?user=` 过滤、`historyUrl`、回顾页签 UI 契约）、`lint` / `format:check` / `build` 全绿 |
+| 浏览器实测 | 复刻桌面客户端形态（页面来自 `127.0.0.1:7789` 外壳服务，连接真实服务器 `192.168.18.50:7788`）：对局回顾正常列出记录（不再 Failed to fetch）→「我的历史」显示「身份：游客89788011」并列出该局 → 把本地身份改成未知游客后显示「当前服务器没有你的对局记录」（过滤生效）→ 注册登录后身份变为「账号 mine_test」；另以浏览器直连页面（同源）复核「全部对局 / 我的历史」均正确 |

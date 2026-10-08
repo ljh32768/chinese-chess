@@ -62,6 +62,8 @@ const TOKEN_KEY = 'lanschess-token';
 const USER_KEY = 'lanschess-user';
 /** 进行中的房间会话（刷新页面后可自动重连原局） */
 const SESSION_KEY = 'lanschess-session';
+/** 本机最近一次入座身份（游客 id 只在本机稳定，用于「我的历史」过滤） */
+const PLAYER_KEY = 'lanschess-player';
 
 /** 棋子汉字（红黑两套用字，用于吃子展示） */
 const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
@@ -821,6 +823,40 @@ function storeSession(): void {
   writeStore(SESSION_KEY, JSON.stringify({ roomId: S.roomId, playerId: S.playerId }));
 }
 
+/** 记住本机最近一次入座身份（对局回顾的「我的历史」用；游客 id 仅在本机稳定） */
+function storePlayer(): void {
+  if (S.spectator || !S.playerId) return;
+  writeStore(PLAYER_KEY, JSON.stringify({ id: S.playerId, name: S.name }));
+}
+
+/** 读取本机最近一次入座身份 */
+function readPlayer(): { id: string; name: string } | null {
+  const raw = readStore(PLAYER_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as { id?: unknown; name?: unknown };
+    if (typeof data.id === 'string' && typeof data.name === 'string') {
+      return { id: data.id, name: data.name };
+    }
+  } catch {
+    /* 忽略损坏的本地数据 */
+  }
+  return null;
+}
+
+/** 「我的历史」过滤用的玩家 id：登录后按账号（跨设备稳定），否则用本机最近一次入座身份 */
+function myPlayerId(): string {
+  if (S.account) return `account:${S.account.username}`;
+  return readPlayer()?.id ?? '';
+}
+
+/** 「我的历史」显示的身份文案 */
+function myPlayerLabel(): string {
+  if (S.account) return `账号 ${S.account.username}`;
+  const last = readPlayer();
+  return last ? last.name : '未识别';
+}
+
 function clearSession(): void {
   writeStore(SESSION_KEY, null);
 }
@@ -841,6 +877,7 @@ function applyRoomJoined(msg: Extract<ServerMessage, { type: 'room_joined' }>): 
   S.aiMode = false;
   S.guessPhase = null;
   storeSession();
+  storePlayer();
 
   applySnapshot(msg.state);
   if (S.spectator) {
@@ -1913,6 +1950,8 @@ async function init(): Promise<void> {
     images: () => loadedImages[S.skin] ?? {},
     loadImages: ensureSkinImagesLoaded,
     apiBase,
+    myId: myPlayerId,
+    myLabel: myPlayerLabel,
     show,
     toast,
   });

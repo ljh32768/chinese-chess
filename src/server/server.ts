@@ -44,6 +44,19 @@ const VIRTUAL_IFACE =
   /vEthernet|WSL|Hyper-?V|VirtualBox|VMware|Docker|Loopback|Tailscale|ZeroTier|VPN|TAP|TUN/i;
 
 /**
+ * API 的跨源响应头（对局回顾等 REST 接口）。
+ *
+ * 桌面客户端（Electron）的页面由**本机外壳服务**（`127.0.0.1:<随机端口>`）提供，
+ * 因此它对真实服务器的 `/api/*` 请求天然是跨源的；浏览器直连服务器时同源、不受影响。
+ * 局域网内网互信（见 ADR-0010 §3.11「明确不做消息鉴权」），这里统一放开读取。
+ */
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+/**
  * 从网卡列表中挑选最可能的局域网 IPv4 地址。
  * 优先真实物理网卡的私有网段（192.168 > 10 > 172.16-31），跳过虚拟网卡。
  */
@@ -196,6 +209,12 @@ export class GameServer {
 
   private handleHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
     try {
+      // 跨源预检（桌面客户端的本机外壳页面 → 真实服务器）
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
+        return;
+      }
       const url = new URL(req.url ?? '/', 'http://localhost');
       const pathname = decodeURIComponent(url.pathname);
 
@@ -215,10 +234,14 @@ export class GameServer {
       if (pathname === '/api/rooms') {
         return this.sendJson(res, 200, { rooms: this.listRooms() });
       }
-      // 对局回顾：列表（最近在前）与单局明细（含着法，供复盘逐步回放）
+      // 对局回顾：列表（最近在前）与单局明细（含着法，供复盘逐步回放）；
+      // 支持 ?roomId= 与 ?user= 过滤（后者用于客户端的「我的历史」）
       if (pathname === '/api/history') {
         const roomId = url.searchParams.get('roomId');
-        const games = roomId ? this.history.list().filter((g) => g.roomId === roomId) : this.history.list();
+        const user = url.searchParams.get('user');
+        let games = this.history.list();
+        if (roomId) games = games.filter((g) => g.roomId === roomId);
+        if (user) games = games.filter((g) => g.red.id === user || g.black.id === user);
         return this.sendJson(res, 200, { games });
       }
       if (pathname.startsWith('/api/history/')) {
@@ -268,7 +291,7 @@ export class GameServer {
 
   private sendJson(res: http.ServerResponse, code: number, body: unknown): void {
     const data = JSON.stringify(body);
-    res.writeHead(code, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+    res.writeHead(code, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store', ...CORS_HEADERS });
     res.end(data);
   }
 
