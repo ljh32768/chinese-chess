@@ -7,12 +7,14 @@ import { describe, expect, it } from 'vitest';
 import {
   formatTime,
   historyUrl,
+  mateOf,
   recordLine,
   replayBoard,
   resultText,
   sideAt,
 } from '../src/renderer/review.js';
-import { GameRecordSummary, Move, PlayerRef } from '../src/shared/types.js';
+import { GameRecord, GameRecordSummary, Move, PlayerRef } from '../src/shared/types.js';
+import { MATE_LINE } from './mate-line.js';
 
 /** 三步着法：红车进一、黑卒进一、红炮平中 */
 const MOVES: Move[] = [
@@ -82,6 +84,29 @@ describe('回顾列表文案', () => {
     expect(resultText({ winner: 'r', reason: '将死' })).toBe('红胜（将死）');
     expect(resultText({ winner: 'b', reason: '超时判负' })).toBe('黑胜（超时判负）');
     expect(resultText({ winner: null, reason: '同意和棋' })).toBe('和棋（同意和棋）');
+  });
+
+  it('结果文案优先展示识别出的杀法（将死不再只显示「将死」）', () => {
+    expect(resultText({ winner: 'r', reason: '将死', killMethod: '马后炮杀' })).toBe('红胜（马后炮杀）');
+    expect(resultText({ winner: 'b', reason: '将死', killMethod: '双车错杀' })).toBe('黑胜（双车错杀）');
+    // 无杀法字段（旧记录 / 非将死）时退回结束原因
+    expect(resultText({ winner: 'r', reason: '将死' })).toBe('红胜（将死）');
+    expect(resultText({ winner: 'b', reason: '认输' })).toBe('黑胜（认输）');
+  });
+
+  it('复盘杀法识别：按记录着法还原终局并给出具体杀法', () => {
+    const rec: GameRecord = {
+      ...summary({ winner: 'r', reason: '将死' }),
+      id: 'mate-1',
+      moveCount: MATE_LINE.length,
+      moves: MATE_LINE,
+    };
+    const mate = mateOf(rec);
+    expect(mate?.pattern.label).toBe('夹车炮杀');
+    expect(mate?.pattern.definition.length).toBeGreaterThan(0);
+    // 非「将死」结束（认输 / 和棋）不展示杀法
+    expect(mateOf({ ...rec, reason: '认输', winner: 'b' })).toBeNull();
+    expect(mateOf({ ...rec, reason: '同意和棋', winner: null })).toBeNull();
   });
 
   it('列表行：红黑方（玩家名） / 取先方式 / 时间 / 胜负', () => {

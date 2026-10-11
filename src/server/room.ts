@@ -24,6 +24,7 @@ import {
   Side,
 } from '../shared/types.js';
 import { describeMove } from '../shared/notation.js';
+import { classifyCheckmateFromHistory } from '../shared/checkmate.js';
 import { initBoard, makeMove } from '../shared/rules.js';
 import { Conn, sendTo as wsSend } from './conn.js';
 import { Game, MoveResult } from '../shared/game.js';
@@ -650,6 +651,9 @@ export class Room {
     const ownerPlayer: PlayerRef = this.a?.player ?? { id: this.ownerId, name: '—', kind: 'guest' };
     const oppPlayer: PlayerRef = this.b?.player ?? AI_PLAYER;
     const ownerIsRed = this.ownerSide === 'r';
+    // 将死时识别杀法（如「马后炮杀」），随记录落库供对局回顾展示
+    const mate =
+      s.reason === '将死' ? classifyCheckmateFromHistory(this.game.board, s.history, s.winner) : null;
     const record: GameRecord = {
       id: `r${this.id}-${cur.startedAt}`,
       roomId: this.id,
@@ -661,11 +665,16 @@ export class Room {
       guess: cur.guess,
       winner: s.winner,
       reason: s.reason,
+      killMethod: mate?.recognized ? mate.pattern.label : undefined,
       moveCount: s.history.length,
       moves: [...s.history],
     };
     this.deps.onRecord(record);
-    logInfo(`房间 ${this.id}：对局记录已保存（${record.moveCount} 步，${record.reason}）`);
+    logInfo(
+      `房间 ${this.id}：对局记录已保存（${record.moveCount} 步，${record.reason}${
+        record.killMethod ? ` · ${record.killMethod}` : ''
+      }）`,
+    );
   }
 
   // --------------------------------------------------- 人机对战与计时

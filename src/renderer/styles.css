@@ -416,6 +416,20 @@ body {
   border-radius: 4px;
 }
 
+/* 终局杀法（将死时展示具体杀法名 / 解说 / 同时构成的其它杀法） */
+.kill-box {
+  padding: 8px 10px;
+  text-align: center;
+  background: #3a2410;
+  border: 1px solid #a5651f;
+  border-radius: 4px;
+}
+.kill-name { font-size: 14px; font-weight: 700; letter-spacing: 2px; color: #ffcf7a; }
+.kill-box.win-black .kill-name { color: #bcd2e8; }
+.kill-def { margin-top: 4px; font-size: 12px; line-height: 1.6; color: #ffe0a8; word-break: break-all; }
+.kill-also { margin-top: 4px; font-size: 11px; letter-spacing: 1px; color: #d8b071; }
+.kill-also:empty { display: none; }
+
 .panel-box {
   padding: 8px 10px;
   font-size: 12px;
@@ -568,7 +582,7 @@ body {
   .game-layout { gap: 12px; }
   .panel { flex: 1 1 100%; min-width: 0; flex-direction: row; flex-wrap: wrap; }
   .player-row { flex: 1 1 45%; }
-  .status-box, .req-hint, .panel-box, .role-hint { flex: 1 1 100%; }
+  .status-box, .req-hint, .panel-box, .role-hint, .kill-box { flex: 1 1 100%; }
   #board { max-height: calc(100vh - 260px); }
 }
 

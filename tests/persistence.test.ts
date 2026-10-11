@@ -34,6 +34,7 @@ const record = (id: string): GameRecord => ({
   guess: null,
   winner: 'r',
   reason: '将死',
+  killMethod: '马后炮杀',
   moveCount: 1,
   moves: [{ from: [9, 0], to: [8, 0] }],
 });
@@ -117,6 +118,7 @@ describe('对局记录 HistoryStore', () => {
     const list = second.list();
     expect(list).toHaveLength(1);
     expect(list[0]).toEqual(toSummary(record('a')));
+    expect(list[0].killMethod).toBe('马后炮杀'); // 杀法名随记录落盘并读回
     expect(second.get('a')?.moveCount).toBe(1);
   });
 
