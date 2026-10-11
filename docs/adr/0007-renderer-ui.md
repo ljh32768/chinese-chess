@@ -1,7 +1,7 @@
 # ADR-0007：渲染层模块规格（src/renderer/）
 
 - 状态：已接受（记录现状实现；v1.4 起棋盘改为 Canvas + 图片素材）
-- 日期：2026-10-03（v1.4 视觉改造：2026-10-06）
+- 日期：2026-10-03（v1.4 视觉改造：2026-10-06；v2.4 视觉与交互精修：2026-10-11）
 - 关联入口：首页（含人机难度子菜单与更换皮肤）、主机等待页（含地址复制）、加入页、对局页、结束结果卡、断线提示与宽限重连、视角翻转、悬停反馈、快捷键、心跳、音效
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0009 扩展](./0009-c-d-extensions.md)
 
@@ -172,7 +172,32 @@
 
 验收（自动化）：[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 以像素级检查署名区域
 （无暗色文字像素、透明区不变）并断言缩放范围（zoom 仅出现在 `.menu_box`）、首页挂板入口结构、
-大面板（`.panel-lg`）与列表行 / 邀请玩家列表 / 取先下拉框 / 无页脚小字等布局契约（v2.2 更新）。
+大面板（`.panel-lg`）与列表行 / 邀请玩家列表 / 取先下拉框 / 无页脚小字等布局契约（v2.2 更新；
+v2.4 追加视觉精修契约，见 §3.5.4）。
+
+### 3.5.4 v2.4 视觉与交互精修（令牌化 / 状态反馈 / 动效 / 无障碍）
+
+在 v2.2 的「大面板」结构与 v1.4 的木质素材风格之上做**不动结构、只精修表达**的一轮：
+统一视觉语言、强化对局过程中的状态可见性、补足键盘与减弱动效支持。原则：只保留一种强调色（金），
+所有可点击元素状态一致（hover / active / disabled / focus-visible），装饰性动效在
+`prefers-reduced-motion` 下全部关闭。
+
+| 项 | 规格 |
+|---|---|
+| 设计令牌（`:root`） | 木色层次 `--wood-deep/--surface-0..3`、线条 `--line/--line-strong`、强调 `--accent/--gold/--gold-bright`、文本阶梯 `--text/--text-dim/--text-mute`、`--radius/--shadow-panel/--shadow-pop/--focus-ring/--ease`；组件只引用变量，不再散落字面色值（`--ui-scale` 仍只作用于 `.menu_box`） |
+| 层级 | 面板标题 17px/金 → 分组标题 12px/金 + 字距 → 正文 `--text` → 说明 `--text-dim`；面板头部与内容之间加发丝分隔线（`.panel-lg-head`） |
+| 背景焦点 | `body::before` 全屏暗角（radial-gradient，`pointer-events: none`），压低木纹背景干扰，让挂板 / 面板成为视觉焦点 |
+| 按钮与状态 | `.btn` family 统一 hover 上浮 1px + 提亮、active 回落按压、`:disabled` 去饱和且 `not-allowed`；`.bn_box input` 与 `.btn` 同步；`.btn.ghost` 为木面反色（金字） |
+| 焦点可见 | 键盘 `:focus-visible` 统一金色焦点环（`--focus-ring`）；挂板入口 `a:focus-visible` 用 2px 金描边；鼠标点击不出现焦点环 |
+| 动效（克制） | 切屏 `screen-in`（淡入 + 上浮 10px，0.26s）、弹层遮罩 `fade-in` + 弹层 `modal-in`（缩放淡入）；列表行 hover 横移 2px 提示「可点进去」；`prefers-reduced-motion: reduce` 时动画与过渡降到 0.001ms |
+| 对局侧栏 | 「轮到你走棋」用浅金实底 `.status-box.mine`（与主按钮呼应，一眼可辨该谁走）；将军 `.check`、终局 `.over.*` 仍在 `.mine` 之后定义，优先级更高，保持原警示配色；玩家行左侧加红 / 黑细色条，走棋方整行加亮，「走棋中」为胶囊标签（`.tag:empty` 不渲染） |
+| 列表与表单 | 房间号做成徽章（`.room-row .room-no`）；回顾页签未选中态改为描边幽灵样式（不再是深色块）；单选按钮 `accent-color: var(--accent)`；输入框 hover/focus 描边 + 金色光圈；滚动条统一细金色（`scrollbar-width/color` + `::-webkit-scrollbar`） |
+| 细节修正 | 轻提示允许换行（`max-width: min(86vw, 460px)`，窄屏不再溢出）并带 `role="status" aria-live="polite"`；右上角服务器 / 账号入口超宽省略（`max-width: 46vw` + ellipsis） |
+| 小屏 | `@media (max-width: 480px)` 除挂板回退 1 倍外，大面板内边距收紧（14px），右上角入口靠边 8px |
+
+验收（自动化）：同 §3.5.3 的 [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)
+追加断言：`:root` 令牌、`:focus-visible` 焦点环、切屏 / 弹层动效与 `prefers-reduced-motion`、
+`.status-box.mine`（含 `app.ts` 的 class 切换）、`.tag:empty`、toast 换行与 aria 语义、房间号徽章、暗角层。
 
 ### 3.6 走子交互（app.ts `onCell`）
 
@@ -260,3 +285,7 @@
   对局页与对局回顾页保持原尺寸（不随主界面放大）。
 - 三个子面板（创建 / 加入 / 人机）与木板内框对齐：面板 280 宽、左/上对齐内框，
   面板与按钮均不越出木板内框；主页背景不再显示参考项目作者署名。
+- v2.4 视觉精修：界面只使用一种强调色（金），色值与圆角/阴影/缓动全部取自 `:root` 令牌；
+  键盘 Tab 到按钮 / 列表行 / 挂板入口有金色焦点环；切屏淡入与弹层缩放淡入在
+  `prefers-reduced-motion: reduce` 下被关闭；对局轮到自己时状态框为浅金实底（将军 / 终局仍为警示配色）；
+  窄屏下轻提示自动换行、右上角入口超宽省略，页面无水平溢出。

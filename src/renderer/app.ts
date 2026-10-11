@@ -371,6 +371,8 @@ function updatePanel(): void {
   $('p-bottom-tag').textContent = active && S.turn === S.side ? '走棋中' : '';
 
   const st = $('status-box');
+  // 「轮到你走棋」用浅金实底强调（styles.css .status-box.mine）；将军 / 终局态各自覆盖
+  st.classList.toggle('mine', active && !S.check && !S.spectator && S.turn === S.side);
   st.classList.toggle('check', active && S.check);
   st.classList.toggle('over', over);
   st.classList.toggle('win-red', over && S.winner === 'r');

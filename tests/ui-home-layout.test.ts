@@ -3,7 +3,8 @@
  * 1) 主页背景 init_bg.png 的署名文字已用 cover.bmp 木板条带覆盖（像素级验证，透明区不受影响）；
  * 2) 首页木质挂板按 --ui-scale 等比缩放；点击板块后的界面改用「大面板」（参考对局回顾），不再与木框对齐；
  * 3) 大面板内的列表行（房间 / 玩家）不会被撑破，离线玩家置灰且不显示邀请按钮；
- * 4) 底部小字（服务器 / 已登录）已删除，等待页取先方式为下拉框（默认猜先）。
+ * 4) 底部小字（服务器 / 已登录）已删除，等待页取先方式为下拉框（默认猜先）；
+ * 5) v2.4 视觉与交互精修：设计令牌、焦点可见、切屏 / 弹层动效、减少动态效果、状态框「轮到你走棋」强调。
  */
 
 import { readFileSync } from 'node:fs';
@@ -19,6 +20,7 @@ const CSS = readFileSync(path.join(ROOT, 'src', 'renderer', 'styles.css'), 'utf8
   '',
 );
 const HTML = readFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), 'utf8');
+const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8');
 const BG_PNG = path.join(ROOT, 'src', 'renderer', 'assets', 'img', 'init_bg.png');
 
 // ---------------------------------------------------------------- CSS 解析辅助
@@ -290,5 +292,59 @@ describe('其他界面约定', () => {
     expect(HTML).toContain('id="history-note"');
     expect(decl('.review_tab.active', 'background')).toBeTruthy();
     expect(decl('.review_scope_note', 'text-align')).toBe('right');
+  });
+});
+
+// ---------------------------------------------------------------- v2.4 视觉与交互精修
+
+describe('v2.4 视觉与交互精修', () => {
+  it('设计令牌集中在 :root（木色层次 / 强调金 / 焦点环 / 缓动）', () => {
+    expect(decl(':root', '--ui-scale')).toBe('1.25');
+    expect(decl(':root', '--gold')).toBe('#ffcf7a');
+    expect(decl(':root', '--surface-3')).toBeTruthy();
+    expect(decl(':root', '--focus-ring')).toBeTruthy();
+    expect(decl(':root', '--ease')).toBeTruthy();
+  });
+
+  it('键盘焦点可见：按钮 / 标签页 / 列表行 / 挂板入口都有焦点环', () => {
+    const focusRule = RULES.find((r) => r.selectors.includes('.btn:focus-visible'));
+    expect(focusRule).toBeTruthy();
+    expect(focusRule!.decls).toContain('--focus-ring');
+    for (const sel of ['.chip:focus-visible', '.review_tab:focus-visible', '.room-row:focus-visible']) {
+      expect(focusRule!.selectors).toContain(sel);
+    }
+    expect(decl('.menu_box a:focus-visible', 'outline')).toContain('--gold');
+  });
+
+  it('动效克制：切屏淡入上浮、弹层缩放淡入，且可被「减少动态效果」整体关闭', () => {
+    expect(decl('.screen.active', 'animation')).toContain('screen-in');
+    expect(decl('.modal-mask.show', 'animation')).toContain('fade-in');
+    expect(decl('.modal-mask.show .modal', 'animation')).toContain('modal-in');
+    expect(CSS).toContain('prefers-reduced-motion: reduce');
+    const reduced = RULES.find((r) => r.selectors.includes('*') && r.decls.includes('animation-duration'));
+    expect(reduced).toBeTruthy();
+  });
+
+  it('对局状态框：「轮到你走棋」用浅金实底强调，由 app.ts 切换 .mine', () => {
+    expect(decl('.status-box.mine', 'background')).toBeTruthy();
+    expect(APP).toContain("classList.toggle('mine'");
+    // 将军 / 终局态仍在 .mine 之后定义，优先级更高（沿用原有警示配色）
+    expect(decl('.status-box.check', 'color')).toBe('#ffb066');
+    expect(decl('.status-box.over.win-red', 'color')).toBe('#ff9d8a');
+  });
+
+  it('细节修正：空标签不渲染、toast 允许换行、右上角入口可省略、房间号做徽章', () => {
+    expect(decl('.tag:empty', 'display')).toBe('none');
+    expect(decl('.toast', 'white-space')).toBeUndefined();
+    expect(decl('.toast', 'max-width')).toBeTruthy();
+    expect(decl('.chip', 'text-overflow')).toBe('ellipsis');
+    expect(decl('.room-row .room-no', 'background')).toBeTruthy();
+    // 背景暗角（纯装饰层，不接收事件）
+    expect(decl('body::before', 'pointer-events')).toBe('none');
+    expect(decl('body::before', 'background')).toContain('radial-gradient');
+  });
+
+  it('轻提示具备无障碍语义（status / polite）', () => {
+    expect(HTML).toContain('id="toast" role="status" aria-live="polite"');
   });
 });

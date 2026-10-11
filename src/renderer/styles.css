@@ -2,12 +2,51 @@
  * 界面样式：沿用参考项目 Reference/Chess 的经典木质风格（MIT，见 assets/LICENSE-ReferenceChess.txt）。
  * 首页为木质挂板入口；点击板块后的界面不再与木框对齐，改用「大面板」（参考对局回顾）展示，
  * 避免把内容挤进 280px 的窄框里。对局为木质棋盘 + 图片棋子，信息面板为深棕木纹底。
+ *
+ * v2.4 视觉精修（在 v2.3 结构不变的前提下统一视觉语言，见 ADR-0007 §3.5.4）：
+ * 1) 设计令牌集中在 :root（木色层次 / 强调金 / 圆角 / 阴影 / 焦点环 / 缓动），各组件只引用变量；
+ * 2) 层级：面板标题 → 分组标题 → 正文 → 说明文字，字号与颜色阶梯固定，只有「强调金」一种强调色；
+ * 3) 状态：可点击元素统一 hover（上浮 1px + 提亮）/ active（回落按压）/ disabled / focus-visible（金色焦点环）；
+ * 4) 动效克制：切屏淡入上浮、弹层缩放淡入、列表行 hover 横移；prefers-reduced-motion 下全部关闭；
+ * 5) 对局侧栏：「轮到你走棋」用浅金实底强调（.status-box.mine），将军/终局仍各自保留警示配色。
  */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* 首页木质挂板整体放大比例（仅挂板与其内元素，含背景图）：对局页与大面板不引用该变量 */
-:root { --ui-scale: 1.25; }
+:root {
+  /* 首页木质挂板整体放大比例（仅挂板与其内元素，含背景图）：对局页与大面板不引用该变量 */
+  --ui-scale: 1.25;
+
+  /* 木色层次：底 → 面板 → 信息块 → 列表行 */
+  --wood-deep: #2b2016;
+  --surface-0: #2b1d12;
+  --surface-1: #2f2418;
+  --surface-2: #3a2b1c;
+  --surface-3: #463521;
+  --surface-3-hover: #52401f;
+
+  /* 线条与强调色（全站只用一种强调金） */
+  --line: #6b4f2a;
+  --line-strong: #8a6b3f;
+  --accent: #c9963c;
+  --gold: #ffcf7a;
+  --gold-bright: #ffd98a;
+
+  /* 文本阶梯 */
+  --text: #ffe9c9;
+  --text-dim: #e0cba6;
+  --text-mute: #bda684;
+  --ok: #9fdc9f;
+  --err: #ff9d8a;
+
+  /* 形状与阴影 */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --shadow-panel: 0 12px 30px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 18px 44px rgba(0, 0, 0, 0.65);
+  --focus-ring: 0 0 0 3px rgba(255, 207, 122, 0.38);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
 
 /* 只固定 html 高度：body 用 min-height，内容高于视口时随内容撑开，避免 flex 垂直居中裁剪 */
 html { height: 100%; }
@@ -17,18 +56,32 @@ body {
   color: #fff;
   font: 14px/170% "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
   text-align: center;
-  background: #2b2016;
+  background: var(--wood-deep);
   display: flex;
   align-items: center;
   justify-content: center;
   -webkit-tap-highlight-color: transparent;
 }
+/* 暗角：木纹背景较花，压暗四周让面板 / 挂板成为视觉焦点（纯装饰层，不接收事件） */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(130% 90% at 50% 12%, rgba(0, 0, 0, 0) 42%, rgba(0, 0, 0, 0.42) 100%);
+}
 /* hidden 必须生效：需要盖过 label / .btn 这类选择器（否则隐藏不彻底） */
 [hidden] { display: none !important; }
 
-.app { width: 100%; max-width: 1180px; }
+.app { position: relative; z-index: 1; width: 100%; max-width: 1180px; }
 .screen { display: none; }
-.screen.active { display: block; }
+/* 切屏：淡入 + 上浮（克制、无弹跳） */
+.screen.active { display: block; animation: screen-in 0.26s var(--ease) both; }
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .menu_wrap { width: 100%; }
 
 /* ---------- 大面板（点击板块之后 / 连接服务器 / 等待 / 加入；与对局回顾同款） ---------- */
@@ -38,32 +91,55 @@ body {
   max-width: 620px;
   max-height: calc(100vh - 48px);
   margin: 12px auto;
-  padding: 14px 18px 16px;
+  padding: 16px 18px 18px;
   overflow-y: auto;
   overflow-x: hidden;
   text-align: left;
-  background: linear-gradient(180deg, rgba(84, 64, 40, 0.96), rgba(63, 47, 29, 0.96));
-  border: 1px solid #8a6b3f;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px rgba(255, 214, 150, 0.18), 0 12px 30px rgba(0, 0, 0, 0.4);
+  background: linear-gradient(180deg, rgba(86, 66, 42, 0.97), rgba(63, 47, 29, 0.97));
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 214, 150, 0.18), var(--shadow-panel);
 }
-.panel-lg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.panel-lg-title { flex: 1; font-size: 17px; letter-spacing: 2px; color: #ffcf7a; }
+/* 头部与内容之间用发丝线分隔，扫描时先看到标题的行区块 */
+.panel-lg-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 207, 122, 0.14);
+}
+.panel-lg-title { flex: 1; font-size: 17px; font-weight: 600; letter-spacing: 2px; color: var(--gold); }
 .panel-lg-title .spinner { margin-left: 8px; vertical-align: -2px; }
 
 /* 面板内的整行按钮（创建房间 / 开始对弈 / 邀请玩家 / 退出登录） */
 .btn.block { display: block; width: 100%; margin-top: 12px; padding: 10px; font-size: 14px; }
 
-.panel-lg label { display: block; margin-top: 8px; line-height: 1.7; cursor: pointer; }
+.panel-lg label { display: block; margin-top: 8px; line-height: 1.7; color: var(--text-dim); letter-spacing: 0.5px; cursor: pointer; }
 .panel-lg .hint { margin-top: 8px; }
-.panel-lg .radio-row { display: flex; align-items: center; gap: 8px; }
-.panel-lg .radio-row input { width: auto; }
+.panel-lg .radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s var(--ease);
+}
+.panel-lg .radio-row:hover { background: rgba(255, 207, 122, 0.08); }
+.panel-lg .radio-row input {
+  width: 16px;
+  height: 16px;
+  /* 让原生单选圆点跟随木色 + 强调金，避免默认蓝色控件与主题冲突 */
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 
 /* 表单行：左标签 + 右控件（取先方式下拉框 / 房间号 + 按钮） */
 .form-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-.form-row label { flex: none; margin-top: 0; color: #ffcf7a; letter-spacing: 1px; }
+.form-row label { flex: none; margin-top: 0; color: var(--gold); letter-spacing: 1px; }
 .form-row input[type="text"],
-.form-row input[type="password"] { flex: 1; width: auto; min-width: 0; }
+.form-row input[type="password"],
+.form-row select { flex: 1; width: auto; min-width: 0; }
 
 .panel-lg input[type="text"],
 .panel-lg input[type="password"],
@@ -71,38 +147,46 @@ body {
   width: 100%;
   padding: 8px 10px;
   font: 14px/1.5 inherit;
-  color: #ffe9c9;
-  background: #2b1d12;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   outline: none;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
-.panel-lg select { cursor: pointer; }
+.panel-lg input[type="text"]:hover,
+.panel-lg input[type="password"]:hover,
+.panel-lg select:hover { border-color: var(--line-strong); }
 .panel-lg input[type="text"]:focus,
 .panel-lg input[type="password"]:focus,
-.panel-lg select:focus { border-color: #c9963c; }
+.panel-lg select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(201, 150, 60, 0.22); }
+.panel-lg input::placeholder { color: #9c8461; }
+.panel-lg select { cursor: pointer; }
 
-.hint { margin-top: 6px; min-height: 18px; font-size: 12.5px; color: #e8dcc8; }
-.hint.ok { color: #9fdc9f; }
-.hint.err { color: #ff9d8a; }
-.side_hint { margin-top: 6px; font-size: 12px; line-height: 1.6; color: #e8dcc8; }
+.hint { margin-top: 6px; min-height: 18px; font-size: 12.5px; line-height: 1.7; color: var(--text-dim); }
+.hint.ok { color: var(--ok); }
+.hint.err { color: var(--err); }
+.side_hint { margin-top: 6px; font-size: 12px; line-height: 1.65; color: var(--text-dim); }
 
+/* 房间号：整块可点（点击复制），hover 时以金色描边提示可交互 */
 .ip-box {
   margin: 6px 0;
-  padding: 8px;
-  background: #2b1d12;
-  border: 1px dashed #8a6b3f;
-  border-radius: 3px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(43, 29, 18, 0.95), rgba(32, 21, 13, 0.95));
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: 0.15s;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.ip-box:hover { border-color: #c9963c; }
-.ip-label { font-size: 11px; letter-spacing: 2px; color: #e8c98c; }
+.ip-box:hover { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(201, 150, 60, 0.35); transform: translateY(-1px); }
+.ip-box:active { transform: translateY(0); }
+.ip-label { font-size: 11px; letter-spacing: 2px; color: var(--gold); }
 .ip-value {
+  margin-top: 2px;
   font-family: Consolas, Menlo, monospace;
-  font-size: 18px;
-  letter-spacing: 1px;
-  color: #ffd98a;
+  font-size: 22px;
+  letter-spacing: 5px;
+  color: var(--gold-bright);
   word-break: break-all;
 }
 /* 等待中的小转圈：内联在标题后，不额外占行高 */
@@ -112,8 +196,8 @@ body {
   height: 12px;
   margin-left: 6px;
   vertical-align: -1px;
-  border: 2px solid #6b4f2a;
-  border-top-color: #ffcf7a;
+  border: 2px solid var(--line);
+  border-top-color: var(--gold);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -143,11 +227,15 @@ body {
   font: normal 18px/46px "Microsoft YaHei", "PingFang SC", sans-serif;
   color: #ff8a00;
   background: url(./assets/img/btn_bg.png) center 0 no-repeat;
+  /* 深红底上的橙字加一点下投影，提升可读性 */
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
   cursor: pointer;
   user-select: none;
+  transition: color 0.15s var(--ease), transform 0.15s var(--ease), filter 0.15s var(--ease);
 }
-.menu_box a:hover { color: #ffa433; background-position: center -46px; }
-.menu_box a:active { color: #ffc266; }
+.menu_box a:hover { color: #ffb552; background-position: center -46px; filter: brightness(1.05); transform: translateY(-1px); }
+.menu_box a:active { color: #ffc266; transform: translateY(0); filter: brightness(0.97); }
+.menu_box a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 /* 首页 5 个入口正好铺满挂板按钮区 */
 .menu_init { padding-top: 32px; }
 
@@ -158,7 +246,9 @@ body {
   margin-top: 3px;
   background: url(./assets/img/btn_fh.png) no-repeat;
   cursor: pointer;
+  transition: filter 0.15s var(--ease), transform 0.15s var(--ease);
 }
+.menu_fh:hover { filter: brightness(1.4); transform: translateX(-1px); }
 .panel-lg-head .menu_fh { float: none; flex: none; margin-top: 0; }
 
 /* ---------- 连接服务器：手动地址 + 服务器列表（绿=已连接 / 红=连接失败 / 灰=未连接） ---------- */
@@ -170,13 +260,15 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 9px 11px;
   font: 500 13px/1.4 inherit;
-  color: #e8dcc8;
-  background: #2b1d12;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  color: var(--text-dim);
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease), transform 0.15s var(--ease);
 }
+.server-row:hover { border-color: var(--line-strong); background: #33241a; transform: translateY(-1px); }
 .server-row .dot-status {
   flex: none;
   width: 9px;
@@ -195,10 +287,10 @@ body {
 .server-row .tag-line { flex: none; font-size: 12px; letter-spacing: 1px; }
 .server-row.ok { border-color: #4c8a4c; }
 .server-row.ok .dot-status { background: #4fd24f; box-shadow: 0 0 8px rgba(79, 210, 79, 0.7); }
-.server-row.ok .tag-line { color: #9fdc9f; }
+.server-row.ok .tag-line { color: var(--ok); }
 .server-row.fail { border-color: #8a4a3a; }
 .server-row.fail .dot-status { background: #e2503f; box-shadow: 0 0 8px rgba(226, 80, 63, 0.7); }
-.server-row.fail .tag-line { color: #ff9d8a; }
+.server-row.fail .tag-line { color: var(--err); }
 .server-row .btn { flex: none; margin-top: 0; padding: 5px 12px; font-size: 12px; }
 .server-row.locked { opacity: 0.72; }
 #server-panel.locked { opacity: 0.85; }
@@ -211,20 +303,27 @@ body {
   z-index: 20;
   display: flex;
   gap: 8px;
+  max-width: calc(100vw - 24px);
 }
 .chip {
   appearance: none;
+  max-width: 46vw;
+  overflow: hidden;
   padding: 6px 12px;
   font: 500 12px/1.4 inherit;
-  color: #ffcf7a;
-  background: rgba(43, 29, 18, 0.9);
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  color: var(--gold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: rgba(31, 21, 12, 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
   cursor: pointer;
-  transition: 0.15s;
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.chip:hover { border-color: #c9963c; color: #ffd98a; }
-.chip.on { color: #5b3a12; background: linear-gradient(180deg, #f7e3bd, #e2c288); border-color: #8a6b3f; }
+.chip:hover { border-color: var(--accent); color: var(--gold-bright); transform: translateY(-1px); }
+.chip.on { color: #5b3a12; background: linear-gradient(180deg, #f7e3bd, #e2c288); border-color: var(--line-strong); }
 
 /* ---------- 加入房间：房间列表 ---------- */
 .room-list { display: flex; flex-direction: column; gap: 6px; }
@@ -232,30 +331,40 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 10px 12px;
   font: 500 13px/1.5 inherit;
-  color: #ffe9c9;
-  background: #2b1d12;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: 0.15s;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.room-row:hover { border-color: #c9963c; background: #35261a; }
-.room-row .room-no { flex: none; font-family: Consolas, Menlo, monospace; font-size: 15px; color: #ffd98a; }
+.room-row:hover { border-color: var(--accent); background: #35261a; transform: translateX(2px); }
+/* 房间号做成徽章：一眼区分「几号房」与其它信息 */
+.room-row .room-no {
+  flex: none;
+  padding: 2px 8px;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 15px;
+  color: var(--gold-bright);
+  background: rgba(255, 217, 138, 0.12);
+  border: 1px solid rgba(255, 217, 138, 0.28);
+  border-radius: var(--radius-sm);
+}
 .room-row .room-info {
   flex: 1;
   /* 同上：不归零 min-width 会把按钮挤出面板并被裁剪 */
   min-width: 0;
   text-align: left;
   font-size: 12.5px;
-  color: #e0cba6;
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .room-row .btn { flex: none; margin-top: 0; padding: 6px 12px; font-size: 12px; }
-.room-empty { color: #e8dcc8; font-size: 13px; padding: 8px 0; }
+.room-empty { color: var(--text-dim); font-size: 13px; padding: 8px 0; }
 .room-manual { margin-top: 12px; }
 
 /* ---------- 邀请玩家：列表行（在线在前 / 离线置灰） ---------- */
@@ -264,18 +373,20 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 9px 11px;
   font: 500 13px/1.4 inherit;
-  color: #ffe9c9;
-  background: #2b1d12;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   text-align: left;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
 }
+.player-item:hover { border-color: var(--line-strong); background: #33241a; }
 .player-item .p-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #4fd24f; }
 .player-item .p-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-item .p-kind,
-.player-item .p-state { flex: none; font-size: 12px; color: #e0cba6; }
+.player-item .p-state { flex: none; font-size: 12px; color: var(--text-dim); }
 .player-item .btn { flex: none; margin-top: 0; padding: 5px 14px; font-size: 12px; }
 .player-item.busy .p-dot,
 .player-item.offline .p-dot { background: #8b8073; }
@@ -286,16 +397,16 @@ body {
 
 /* 对局面板内的「邀请玩家 / 邀请观战」按钮 */
 #btn-invite {
-  padding: 8px 10px;
+  padding: 9px 10px;
   font: 500 13px/1.4 inherit;
-  color: #ffcf7a;
-  background: #2f2418;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  color: var(--gold);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: 0.15s;
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease);
 }
-#btn-invite:hover { border-color: #c9963c; color: #ffd98a; }
+#btn-invite:hover { border-color: var(--accent); color: var(--gold-bright); transform: translateY(-1px); }
 
 /* ---------- 通用按钮（弹层 / 面板内小按钮） ---------- */
 .btn {
@@ -304,16 +415,33 @@ body {
   font: 600 13px/1 inherit;
   color: #5b3a12;
   background: linear-gradient(180deg, #f7e3bd, #e2c288);
-  border: 1px solid #8a6b3f;
-  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
   cursor: pointer;
-  transition: filter 0.15s;
+  transition: filter 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.btn:hover { filter: brightness(1.06); }
-.btn:active { transform: scale(0.98); }
-.btn.ghost { color: #ffcf7a; background: #2f2418; }
+.btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.btn:active { transform: translateY(0) scale(0.98); }
+.btn:disabled { filter: grayscale(0.35) brightness(0.9); cursor: not-allowed; transform: none; }
+.btn.ghost { color: var(--gold); background: var(--surface-1); box-shadow: none; }
 .btn.small { padding: 6px 12px; font-size: 12px; font-weight: 500; }
-.btn.small.danger { color: #ff9d8a; }
+.btn.small.danger { color: var(--err); }
+
+/* 键盘焦点：统一金色焦点环（鼠标点击不显示，键盘 Tab 才出现） */
+.btn:focus-visible,
+.chip:focus-visible,
+.review_tab:focus-visible,
+.bn_box input:focus-visible,
+.room-row:focus-visible,
+.review_row:focus-visible,
+#btn-invite:focus-visible,
+.panel-lg input:focus-visible,
+.panel-lg select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--accent);
+}
 
 /* ---------- 对局 ---------- */
 .game-layout {
@@ -339,26 +467,30 @@ body {
   cursor: default;
 }
 #board { cursor: default; }
-.bn_box { margin-top: 6px; }
+.bn_box { margin-top: 8px; }
 .bn_box input {
   width: 100px;
   margin: 3px 5px 0;
-  padding: 4px 2px;
-  font: normal 14px/1.5 "Microsoft YaHei", "PingFang SC", sans-serif;
+  padding: 6px 2px;
+  font: normal 14px/1.4 "Microsoft YaHei", "PingFang SC", sans-serif;
   color: #5b3a12;
   background: linear-gradient(180deg, #f7e3bd, #e2c288);
-  border: 1px solid #8a6b3f;
-  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 0 rgba(0, 0, 0, 0.18);
   cursor: pointer;
+  transition: filter 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.bn_box input:hover { filter: brightness(1.06); }
-.bn_box input:active { transform: scale(0.98); }
+.bn_box input:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.bn_box input:active { transform: translateY(0) scale(0.98); }
 .bn_box input:disabled {
   color: #8f7d63;
   background: #d9c8a8;
   border-color: #a5967a;
+  box-shadow: none;
   cursor: not-allowed;
   filter: none;
+  transform: none;
 }
 
 .panel {
@@ -369,100 +501,127 @@ body {
   gap: 10px;
   text-align: left;
 }
+/* 玩家行：左侧红/黑细色条区分阵营，走棋方整行加亮 */
 .player-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
-  background: #463521;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
-  transition: 0.2s;
+  padding: 9px 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
+.player-row.red { border-left-color: rgba(217, 67, 58, 0.8); }
+.player-row.black { border-left-color: rgba(122, 152, 186, 0.8); }
 .player-row.active {
-  background: #54401f;
+  background: var(--surface-3-hover);
   border-color: #ffb433;
-  box-shadow: 0 0 0 1px rgba(255, 180, 51, 0.4);
+  box-shadow: 0 0 0 1px rgba(255, 180, 51, 0.4), 0 4px 14px rgba(0, 0, 0, 0.32);
 }
 .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #7a7a7a; }
 .player-row.red .dot { background: #d9433a; box-shadow: 0 0 8px rgba(217, 67, 58, 0.7); }
 .player-row.black .dot { background: #33475c; box-shadow: 0 0 8px rgba(51, 71, 92, 0.7); }
 .pname { flex: 1; font-size: 13px; }
-.tag { font-size: 11px; color: #ffcf7a; letter-spacing: 1px; }
-
-.status-box {
-  padding: 10px;
-  text-align: center;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #ffe9c9;
-  background: #2f2418;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+.tag {
+  padding: 2px 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #ffdca4;
+  background: rgba(255, 180, 51, 0.16);
+  border: 1px solid rgba(255, 180, 51, 0.42);
+  border-radius: 999px;
 }
-.status-box.check { color: #ffb066; background: #3a2410; border-color: #a5651f; }
-.status-box.over { font-weight: 700; letter-spacing: 1px; }
+/* 非走棋方没有标签：空状态不渲染成一个空胶囊 */
+.tag:empty { display: none; }
+
+/* 状态框：对局进程的唯一焦点信息，字号与配色都比其它信息块重一档 */
+.status-box {
+  padding: 12px 12px;
+  text-align: center;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 1.6;
+  color: var(--text);
+  background: linear-gradient(180deg, #3d2d1d, #33251a);
+  border: 1px solid var(--line);
+  border-left: 3px solid rgba(255, 207, 122, 0.3);
+  border-radius: var(--radius-sm);
+  transition: background 0.2s var(--ease), border-color 0.2s var(--ease), color 0.2s var(--ease);
+}
+/* 轮到自己走棋：用浅金实底与主按钮呼应，一眼可辨「该你了」 */
+.status-box.mine {
+  color: #46290a;
+  background: linear-gradient(180deg, #f8e6c0, #e9c98e);
+  border-color: #d9b877;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+.status-box.check { color: #ffb066; background: #3a2410; border-color: #a5651f; box-shadow: 0 0 16px rgba(255, 140, 60, 0.18); }
+.status-box.over { font-size: 16px; font-weight: 700; letter-spacing: 2px; }
 .status-box.over.win-red { color: #ff9d8a; border-color: #8a4a3a; }
 .status-box.over.win-black { color: #bcd2e8; border-color: #46586b; }
-.status-box.over.draw { color: #ffd98a; border-color: #a5865a; }
+.status-box.over.draw { color: var(--gold-bright); border-color: #a5865a; }
 
 .req-hint {
-  padding: 6px 8px;
+  padding: 7px 8px;
   text-align: center;
   font-size: 12px;
-  color: #ffcf7a;
-  background: #2f2418;
+  color: var(--gold);
+  background: var(--surface-1);
   border: 1px dashed #a5865a;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .panel-box {
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-size: 12px;
-  background: #463521;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
-.box-title { color: #e8c98c; letter-spacing: 2px; }
+.box-title { margin-bottom: 4px; font-size: 12px; letter-spacing: 2px; color: var(--gold); }
 .cap-row { display: flex; gap: 6px; align-items: baseline; }
-.cap-label { flex: none; color: #e8c98c; letter-spacing: 1px; }
-.cap-list { color: #fff; word-break: break-all; }
+.cap-label { flex: none; color: var(--text-mute); letter-spacing: 1px; }
+.cap-list { color: #fff; font-size: 13px; letter-spacing: 2px; word-break: break-all; }
 .role-hint { font-size: 12px; color: #ffe0a8; text-align: center; letter-spacing: 1px; }
 
 /* ---------- 复盘 ---------- */
-.replay-info { color: #ffe9c9; line-height: 1.9; }
+.replay-info { color: var(--text); line-height: 1.9; }
 .replay-info div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.replay-step { color: #ffe9c9; line-height: 1.7; word-break: break-all; }
-.replay-hint { color: #ffd98a; line-height: 1.7; word-break: break-all; }
+.replay-step { color: var(--text); line-height: 1.7; word-break: break-all; }
+.replay-hint { color: var(--gold-bright); line-height: 1.7; word-break: break-all; }
 
 /* ---------- 对局回顾（列表） ---------- */
 .review_head { display: flex; align-items: center; gap: 8px; }
-.review_title { flex: 1; font-size: 16px; letter-spacing: 2px; color: #ffcf7a; }
+.review_title { flex: 1; font-size: 16px; font-weight: 600; letter-spacing: 2px; color: var(--gold); }
 .review_refresh { width: auto; margin-top: 0; }
 /* 回顾范围切换：全部对局 / 我的历史（右侧显示当前身份） */
 .review_tabs { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
 .review_tab {
   padding: 6px 14px;
   font: 500 12.5px/1.4 inherit;
-  color: #ffcf7a;
-  background: #2b1d12;
-  border: 1px solid #6b4f2a;
-  border-radius: 4px;
+  color: var(--gold);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: 0.15s;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease), color 0.15s var(--ease);
 }
-.review_tab:hover { border-color: #c9963c; color: #ffd98a; }
+.review_tab:hover { border-color: var(--accent); color: var(--gold-bright); background: rgba(255, 207, 122, 0.08); }
 .review_tab.active {
   color: #5b3a12;
   background: linear-gradient(180deg, #f7e3bd, #e2c288);
-  border-color: #8a6b3f;
+  border-color: var(--line-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 .review_scope_note {
   flex: 1;
   min-width: 0;
   text-align: right;
   font-size: 11.5px;
-  color: #e0cba6;
+  color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -479,34 +638,35 @@ body {
   padding: 4px 8px;
   font-size: 11px;
   letter-spacing: 1px;
-  color: #e8c98c;
-  border-bottom: 1px solid #6b4f2a;
+  color: var(--gold);
+  border-bottom: 1px solid var(--line);
 }
 .review_list { max-height: 52vh; overflow-y: auto; }
 .review_row {
   width: 100%;
-  padding: 9px 8px;
+  padding: 10px 10px;
   margin-top: 4px;
   font: 400 12px/1.5 inherit;
   text-align: left;
-  color: #ffe9c9;
-  background: #2f2418;
+  color: var(--text);
+  background: var(--surface-1);
   border: 1px solid #5c472c;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: 0.15s;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.review_row:hover { background: #3b2d1d; border-color: #c9963c; }
-.review_row .rv-vs { color: #ffe9c9; }
+/* 整行可点：hover 时轻微右移，暗示「点进去复盘」 */
+.review_row:hover { background: var(--surface-2); border-color: var(--accent); transform: translateX(2px); }
+.review_row .rv-vs { color: var(--text); }
 .review_row .rv-first,
-.review_row .rv-time { color: #e0cba6; }
-.review_row .rv-result.win-red { color: #ff9d8a; }
+.review_row .rv-time { color: var(--text-dim); }
+.review_row .rv-result.win-red { color: var(--err); }
 .review_row .rv-result.win-black { color: #bcd2e8; }
-.review_row .rv-result.draw { color: #ffd98a; }
+.review_row .rv-result.draw { color: var(--gold-bright); }
 .review_empty {
   margin: 18px 0;
   text-align: center;
-  color: #e8dcc8;
+  color: var(--text-dim);
   font-size: 13px;
 }
 
@@ -520,49 +680,80 @@ body {
   justify-content: center;
   padding: 20px;
   background: rgba(24, 14, 6, 0.72);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(3px);
 }
-.modal-mask.show { display: flex; }
+.modal-mask.show { display: flex; animation: fade-in 0.18s ease-out both; }
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .modal {
   width: 100%;
   max-width: 330px;
   max-height: 84vh;
   overflow-y: auto;
   padding: 20px 18px;
-  background: #463521;
-  border: 2px solid #8a6b3f;
-  border-radius: 6px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.65);
+  background: var(--surface-3);
+  border: 2px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-pop);
+}
+/* 弹层本体：缩放淡入，比遮罩稍慢一点，形成层次 */
+.modal-mask.show .modal { animation: modal-in 0.22s var(--ease) both; }
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 /* 富内容弹层（邀请玩家列表等）：更宽，便于把列表铺开 */
 .modal.wide { max-width: 520px; }
-.modal-title { font-size: 18px; letter-spacing: 2px; color: #ffcf7a; margin-bottom: 6px; }
-.modal-sub { min-height: 16px; font-size: 12px; color: #e8dcc8; margin-bottom: 14px; }
+.modal-title { font-size: 18px; letter-spacing: 2px; color: var(--gold); margin-bottom: 6px; }
+.modal-sub { min-height: 16px; font-size: 12px; color: var(--text-dim); margin-bottom: 14px; }
 .modal-body { max-height: 46vh; overflow-y: auto; }
 .modal .btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .modal .btns.col { flex-direction: column; }
 .modal .btns.col .btn { width: 100%; }
 .modal .btn { flex: 1; padding: 10px; font-size: 13px; }
 
+/* 轻提示：允许换行（长文案在窄屏会超出视口），窄屏最多 86vw */
 .toast {
   position: fixed;
   left: 50%;
   bottom: 34px;
   z-index: 99;
+  max-width: min(86vw, 460px);
   padding: 10px 18px;
-  color: #ffe9c9;
+  color: var(--text);
   font-size: 13px;
+  line-height: 1.6;
   letter-spacing: 0.5px;
-  white-space: nowrap;
-  background: rgba(70, 53, 33, 0.96);
-  border: 1px solid #8a6b3f;
-  border-radius: 4px;
+  text-align: center;
+  background: rgba(58, 43, 28, 0.96);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, 16px);
-  transition: 0.25s;
+  transition: 0.25s var(--ease);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- 滚动条：面板/列表统一细金色，避免默认浅色滚动条破坏木色 ---------- */
+.panel-lg,
+.review_box,
+.review_list,
+.modal,
+.modal-body { scrollbar-width: thin; scrollbar-color: #6b4f2a transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(201, 150, 60, 0.4);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(201, 150, 60, 0.7); background-clip: content-box; }
 
 @media (max-width: 900px) {
   .game-layout { gap: 12px; }
@@ -572,7 +763,21 @@ body {
   #board { max-height: calc(100vh - 260px); }
 }
 
-/* 小屏（手机浏览器入局）：首页挂板回退原始尺寸，避免水平溢出 */
+/* 小屏（手机浏览器入局）：首页挂板回退原始尺寸，避免水平溢出；面板内边距收紧 */
 @media (max-width: 480px) {
   :root { --ui-scale: 1; }
+  .panel-lg,
+  .review_box { padding: 14px 14px 16px; }
+  .home-corner { top: 8px; right: 8px; }
+}
+
+/* 跟随系统「减少动态效果」：关闭切屏 / 弹层 / 转圈等所有装饰动画与过渡 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
