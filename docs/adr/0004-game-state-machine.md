@@ -97,6 +97,7 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 | 认输 `resign()` | [game.ts](../../src/shared/game.ts#L88-L95) |
 | 和棋 `acceptDraw()` | [game.ts](../../src/shared/game.ts#L98-L105) |
 | 可重开判定 `canRestart()` | [game.ts](../../src/shared/game.ts#L108-L110) |
+| 自定义局面 `setup()` | [game.ts](../../src/shared/game.ts)（以题库局面开局，供残局挑战使用，见 [ADR-0009 §3.12](./0009-c-d-extensions.md)） |
 
 调用方：[host-server.ts `handleMessage()`](../../src/server/host-server.ts#L260-L365)、
 测试 [game.test.ts](../../tests/game.test.ts)。
@@ -108,3 +109,5 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 - 非本方回合 / 非法走法：返回对应原因，棋盘与 `moveSeq` 保持不变。
 - 吃子后棋盘更新；将死局面自动置 `over` 且 `reason='将死'`，并清空待处理请求。
 - 认输、同意和棋分别以 `认输`、`同意和棋` 结束；`canRestart` 仅在 `over` 时为真。
+- `setup(board, turn)` 以自定义局面开局（残局挑战）：`status='playing'`、`moveSeq=0`、`history` 与悔棋栈清空、
+  待处理请求清零，并按先行方是否被将军置 `check`；之后走子 / 悔棋 / 终局判定与标准开局完全一致。

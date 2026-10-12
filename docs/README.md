@@ -5,8 +5,8 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.4（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修（设计令牌 / 层级 / 状态反馈 / 克制动效 / 键盘焦点 / 减少动态效果）+ 象棋杀法识别（将死不再只显示「将死」，而是给出具体杀法名与解说）**）
-- 状态：v2.4 完成；259 项自动化测试通过，lint / format / build / CI 全绿
+- 版本：v2.5（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**）
+- 状态：v2.5 完成；281 项自动化测试通过，lint / format / build / CI 全绿
 - 更新日期：2026-10-12
 
 版本里程碑：
@@ -26,6 +26,7 @@
 | **v2.3** | **修复桌面客户端「对局回顾」一直 Failed to fetch：所有 `/api/*` 响应补上 CORS 头并放行 `OPTIONS` 预检（页面来自本机外壳服务，REST 访问真实服务器属跨源）；「对局回顾」新增「全部对局 / 我的历史」页签（`GET /api/history?user=`），登录按账号、游客按本机最近一次入座身份过滤** | 见 [ADR-0010 §11](./adr/0010-room-server.md) |
 | **v2.4** | **界面视觉与交互精修（不动结构、只精修表达）：`:root` 设计令牌（木色层次 / 强调金 / 焦点环 / 缓动）；面板头部分隔线与文本层级；切屏淡入、弹层缩放淡入与 `prefers-reduced-motion` 支持；按钮 / 列表行 / 输入框统一 hover / active / disabled / `:focus-visible` 金色焦点环；对局「轮到你走棋」浅金实底强调（将军 / 终局仍为警示配色）；房间号徽章、回顾页签幽灵态、单选按钮与滚动条配色、轻提示换行与 `role=status`、右上角入口超宽省略** | 见 [ADR-0007 §3.5.4](./adr/0007-renderer-ui.md) |
 | **v2.4** | **象棋杀法识别：新增共享模块 `shared/checkmate.ts`（18 种经典杀法 + 结构匹配），将死时状态框显示具体杀法名（如「马后炮杀」）并给出解说与「同时构成」；对局记录新增 `killMethod` 随对局回顾落库，列表与复盘页同步展示（复盘按着法即时识别，新老记录都可用）；终局杀法框沿用 v2.4 设计令牌与层级** | 见 [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
+| **v2.5** | **残局挑战：新增共享模块 `shared/endgame.ts`（9 局经典杀法题库 + 强制将死求解器 `canForceMate` / `findMateMove`）；首页挂板新增「残局挑战」入口（5 → 6 入口，按钮按 43px 等比缩放铺满内框）；题库列表给出名称 / 难度 / 目标步数与通关标记，开局即本地对弈（AI 执玩家的对方、深度 4 防守），对局页残局操作行为「悔棋 / 提示 / 重来 / 离开」并新增残局目标信息块；在目标步数内将死即成功（超出步数 / 被将死则失败），通关记录存本机并显示「已通关 · N 步」；状态机新增 `Game.setup()` 以自定义局面开局** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -78,6 +79,11 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
    （红黑方 / 取先方式 / 时间 / 胜负），顶部页签可切换「全部对局 / 我的历史」（我的历史按账号或本机最近一次身份过滤，
    请求的是**当前所选服务器**的记录）；点进某一局即可「下一步 ▶」逐步复盘并查看每个局面的 AI 推荐着法。
    **人机对局（本地或服务器 AI 房间）不计入对局回顾。**
+8. 单人还可点首页「残局挑战」做杀法练习：面板里列出 9 局残局（入门 / 中等 / 困难，目标 1–3 步内取胜），
+   点一条即进入棋盘——你执红先行，AI（黑方）自动应招；侧栏「残局目标」显示目标与已用步数，
+   棋盘下可用「悔棋 / 提示 / 重来 / 离开」（提示会给出仍能取胜的正解首着）。
+   在目标步数内取胜即挑战成功（显示具体杀法名并可「下一关」），超出步数或被将死则挑战失败；
+   通关记录存在本机，列表显示「已通关 · N 步」。**残局同样是本地对弈，不需要连接服务器，也不计入对局回顾。**
 
 账号（可选）：点首页**右上角**的账号按钮（未登录时显示「登录 / 注册」，登录后显示用户名），
 在弹出的面板中填写用户名与密码点「登 录」或「注 册」；登录后对局记录会归属账号，
@@ -174,6 +180,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 11 | 测试体系 | 单元测试、服务端集成测试、完整对局端到端回放 | [tests/](../tests/) | [ADR-0008](./adr/0008-testing-strategy.md) |
 | 12 | 记谱 / AI / 日志 | 中文记谱与吃子、negamax + α-β 搜索（服务端 AI 房间与客户端本地人机共用）、`LANSCHESS_DEBUG` 日志 | [notation.ts](../src/shared/notation.ts)、[ai.ts](../src/shared/ai.ts)、[log.ts](../src/server/log.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 13 | 杀法识别 | 将死时判定具体杀法（18 种经典杀法 + 兜底「将死」）、给出杀法名与解说；服务端落库与客户端展示共用 | [checkmate.ts](../src/shared/checkmate.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
+| 14 | 残局挑战 | 内置经典杀法题库（9 局，入门 – 困难）+ 强制将死求解器；本地对弈、提示 / 悔棋 / 重来、目标步数判定与本机通关记录 | [endgame.ts](../src/shared/endgame.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -214,6 +221,9 @@ main / server-main（进程入口，装配 server 与页面）
 | 复盘（逐步 + AI 推荐） | 列表点击某局 → 「下一步 ▶」/ → 键 | [review.ts](../src/renderer/review.ts) → `GET /api/history/:id` + `GET /api/ai/hint?id&index` | [ADR-0009 §3.10](./adr/0009-c-d-extensions.md) |
 | 人机对弈（本地） | 首页「人机对弈」→ 选难度 →「开始对弈」（**不计入对局回顾**） | [app.ts `createAiRoom()` / `localMove()` / `scheduleLocalAi()`](../src/renderer/app.ts) → [shared/game.ts](../src/shared/game.ts) + [shared/ai.ts `pickMove()`](../src/shared/ai.ts)；**不需要连接服务器** | [ADR-0009 §3.7](./adr/0009-c-d-extensions.md)、[ADR-0010 §9.5 / §10](./adr/0010-room-server.md) |
 | 人机对弈（服务器 AI 房间，协议保留；**不计入对局回顾**） | 可由 `create_room{mode:'ai'}` 触发 | [room.ts `startAiGame()` / `scheduleAiMove()`](../src/server/room.ts) → [shared/ai.ts](../src/shared/ai.ts) | [ADR-0010 §10](./adr/0010-room-server.md) |
+| 残局挑战（题库列表 → 开局） | 首页「残局挑战」→ 面板列表点某一条（**本地对弈，不需服务器**） | [app.ts `openEndgamePanel()` / `renderEndgameList()` / `startPuzzle()`](../src/renderer/app.ts) → [endgame.ts `PUZZLES` / `buildPuzzleBoard()`](../src/shared/endgame.ts) → [game.ts `setup()`](../src/shared/game.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 残局提示 / 悔棋 / 重来 | 棋盘下「提示 / 悔棋 / 重来」 | [app.ts `endgameHint()` / `endgameUndo()` / `restartPuzzle()`](../src/renderer/app.ts) → [endgame.ts `findMateMove()`](../src/shared/endgame.ts)（棋盘金环高亮 + 中文记谱提示） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 残局胜负与通关记录 | 每步之后自动判定 | [app.ts `endgameEvaluate()` / `showEndgameResult()`](../src/renderer/app.ts)（目标步数内取胜 = 成功并记入 `localStorage`；超出步数 / 被将死 = 失败） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 更换皮肤 | 首页「更换皮肤」 | [app.ts `switchSkin()`](../src/renderer/app.ts) → [board.ts `nextSkin()` / `loadSkinImages()`](../src/renderer/board.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 选子 / 走子音效 | 点击棋子 / 收到走子广播时自动 | [sound.ts](../src/renderer/sound.ts)（`select.wav` / `click.wav`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 心跳保活 | 后台自动运行（5s 间隔） | [net.ts `startPing()`](../src/renderer/net.ts) → `ping` / `pong`（`pong` 携带服务器声明地址） | [ADR-0007](./adr/0007-renderer-ui.md) |
@@ -235,7 +245,8 @@ Chinese_chess/
 │   │   ├── game.ts        #   对局状态机：权威棋盘、走子校验、悔棋/超时/终局
 │   │   ├── ai.ts          #   人机引擎：negamax + α-β（服务端 AI 房间与客户端本地人机共用）
 │   │   ├── notation.ts    #   中文记谱：describeMove/describeHistory/capturedPieces
-│   │   └── checkmate.ts   #   杀法识别：18 种经典杀法匹配（将死时给出具体杀法名与解说）
+│   │   ├── checkmate.ts   #   杀法识别：18 种经典杀法匹配（将死时给出具体杀法名与解说）
+│   │   └── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove）
 │   ├── server/            # 服务端（中心服务器）
 │   │   ├── server.ts      #   服务器：HTTP 静态+API、WS 路由、房间表、在线玩家、邀请、空闲回收、局域网 IP
 │   │   ├── room.ts        #   单局房间：席位/先手/猜先/宽限/读秒/AI 房间/邀请口令豁免/落库/销毁倒计时
@@ -247,7 +258,7 @@ Chinese_chess/
 │   ├── main/
 │   │   └── main.ts        #   Electron 客户端主进程（本机外壳服务 + client/server/lan 参数）
 │   └── renderer/          # 渲染层（客户端页面，浏览器与 Electron 共用）
-│       ├── app.ts         #   页面流转 / 服务器选择 / 房间与账号交互 / 邀请 / 本地人机 / 消息处理
+│       ├── app.ts         #   页面流转 / 服务器选择 / 房间与账号交互 / 邀请 / 本地人机 / 残局挑战 / 消息处理
 │       ├── servers.ts     #   服务器地址工具（解析 / 网段推导 / 客户端形态判定）
 │       ├── board.ts       #   棋盘 Canvas 渲染（三套皮肤）、绘制计划与坐标换算
 │       ├── review.ts      #   对局回顾列表与复盘（逐步回放 + AI 推荐）
@@ -292,17 +303,18 @@ Chinese_chess/
 ## 8. 测试与验收
 
 - 测试命令：`npm test`（vitest run，node 环境）；配套 `npm run lint` 与 `npm run format:check`。
-- 覆盖范围：规则引擎单测、状态机单测（含悔棋/终局清理）、棋盘 Canvas 渲染计划与点击命中、中文记谱与吃子统计、
-  AI 引擎、WebSocket 客户端心跳、完整对局端到端回放、服务器连接/消息/房间隔离/口令/宽限重连/观战/人机（含难度）/
+- 覆盖范围：规则引擎单测、状态机单测（含自定义局面 `setup` / 悔棋 / 终局清理）、棋盘 Canvas 渲染计划与点击命中、中文记谱与吃子统计、
+  AI 引擎、**残局题库与强制将死求解器**、WebSocket 客户端心跳、完整对局端到端回放、服务器连接/消息/房间隔离/口令/宽限重连/观战/人机（含难度）/
   先手方式与猜先/对局回顾与 AI 推荐/计时/静态安全与素材 MIME 集成、账号与记录持久化、局域网 IP 与服务器发现、
-  复盘局面还原、主界面布局（署名遮盖 / 放大范围 / 大面板 / v2.4 视觉精修契约）。
+  复盘局面还原、主界面布局（署名遮盖 / 放大范围 / 大面板 / **6 入口挂板几何** / v2.4 视觉精修契约）。
 
 | 测试文件 | 覆盖 |
 |---|---|
 | [rules.test.ts](../tests/rules.test.ts) | 开局棋盘、各棋子走法、将军/照面、将死/困毙、validateMove |
-| [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照 |
+| [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照、**`setup()` 自定义局面（残局开局）与终局判定** |
 | [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转 |
 | [checkmate.test.ts](../tests/checkmate.test.ts) | 杀法识别：18 种杀法各构造一个终局局面（先用规则引擎确认确为将死，再断言杀法名）、未匹配时兜底「将死」、红黑双方对称、同时成立的杀法进 `alsoMatched`、`capturedPieceAt` 推导吃子、杀法库条目唯一 |
+| [endgame.test.ts](../tests/endgame.test.ts) | 残局挑战：题库自洽（id 唯一、难度有序、棋子不重叠、双方有将、对方有子可走）、**9 局逐条由求解器验证「目标步数内可强制取胜且步数最少」**、正解首着合法且走完仍在杀棋内、非退化（不是随便走都赢）；求解器语义（一步杀 / 多步杀 / **困毙同将死** / 不改动传入棋盘 / 黑方对称）；界面接线（首页 6 入口、残局面板、残局操作行与目标块、**多步残局继续调度 AI 应招**、列表与样式契约） |
 | [review.test.ts](../tests/review.test.ts) | 复盘局面还原与越界收敛、行棋方交替、列表文案（玩家名/取先方式/时间/胜负）、**结果文案优先显示杀法名（killMethod）**、**复盘按着法即时识别杀法（mateOf）**、**列表请求路径 `historyUrl`（全部 / 我的历史 + URL 编码）** |
 | [notation.test.ts](../tests/notation.test.ts) | 中文记谱（平/进/退/前后消歧/斜走目标列）、describeHistory 回放、capturedPieces 吃子统计 |
 | [ai.test.ts](../tests/ai.test.ts) | 一步杀、白吃子、无着法返回 null、开局着法合法与耗时 |
@@ -313,7 +325,7 @@ Chinese_chess/
 | [discover.test.ts](../tests/discover.test.ts) | 服务器探测、无服务端口返回 null、网段扫描聚合去重与进度 |
 | [servers.test.ts](../tests/servers.test.ts) | 服务器地址解析、网段推导、服务器键、页面地址回退与「浏览器 / 桌面客户端」判定 |
 | [lan-ip.test.ts](../tests/lan-ip.test.ts) | pickLanIp 网段优先级与虚拟网卡跳过 |
-| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）** |
+| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构（**6 个入口：43×6 + 6 = 264 铺满内框，按钮素材等比缩放与悬停偏移**）、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）** |
 
 验收标准见 [Product-plan.md 第 14 节](./Product-plan.md)、[ADR-0008](./adr/0008-testing-strategy.md)
 与 [ADR-0010 §6](./adr/0010-room-server.md)。
@@ -333,7 +345,8 @@ Chinese_chess/
 | 加入时提示「房间口令错误」 | 该房间设置了口令：从房间列表点击该房间后填入「口令（房间已上锁）」输入框，或让房内玩家用「邀请玩家」邀请你（被邀请者免口令） |
 | 加入时提示「房间已满」 | 该房间两席已满（人机房里对手席由 AI 占用）；可点「观战」只读旁观，或另开一间 |
 | 邀请玩家时提示「该玩家不在线 / 已在房间中」 | 对方已断开（列表里显示为「离线」置灰）或已进入其它房间（显示为「对局中」）；只可邀请列表里「在线」且有「邀请」按钮的玩家 |
-| 没连服务器还能玩吗 | 可以：首页「人机对弈」在**客户端本地**运行（规则与 AI 都在本机），无需连接服务器；创建 / 加入房间、对局回顾才需要服务器 |
+| 没连服务器还能玩吗 | 可以：首页「人机对弈」与「残局挑战」都在**客户端本地**运行（规则、AI 与残局求解都在本机），无需连接服务器；创建 / 加入房间、对局回顾才需要服务器 |
+| 残局打不开 / 提示点了没反应 | 残局是本地对弈，与服务器无关；「提示」在已走离杀棋（局面已无法在剩余步数内取胜）时会提示「建议重来」，此时点「重来」恢复初始局面即可。通关记录存在本机浏览器（`localStorage`），换浏览器 / 清缓存会丢失 |
 | 端口被占用 | 服务器未显式指定 `LANSCHESS_PORT` 时自动回退随机端口；显式指定则提示更换端口 |
 | 对方意外断线 | 进入 30 秒宽限期：对方重新打开页面会自动凭 `playerId` 恢复原局；房主也可选择「等待新对手」 |
 | 两盘棋同时进行 | 支持：每个房间有独立权威棋盘与房间号，互不影响 |

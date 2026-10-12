@@ -187,8 +187,21 @@ describe('首页木质挂板：仅入口，按 --ui-scale 放大', () => {
     expect(px('.menu_box', 'width')).toBe(316);
     expect(decl('.menu_box', 'background')).toContain('init_bg.png');
     expect(decl('.menu_box', 'zoom')).toBe('var(--ui-scale)');
-    // 首页挂板只承载 5 个入口按钮，不再嵌套子面板
+    // 首页挂板只承载入口按钮（v2.5 起 6 个：创建/加入/人机/残局/回顾/皮肤），不再嵌套子面板
     expect(HTML).toMatch(/<div class="menu_box" id="menu-board">[\s\S]*?id="menu-index"/);
+  });
+
+  it('6 个入口按钮正好铺满挂板内框（43×6 + 6 = 264）', () => {
+    const boardHtml = HTML.slice(HTML.indexOf('id="menu-board"'), HTML.indexOf('id="menu-create"'));
+    expect((boardHtml.match(/<a id="/g) ?? []).length).toBe(6);
+    // 内框可用高度 = 422（背景图高） - 158（顶部标题区）
+    expect(px('.menu_box', 'height')).toBe(264);
+    expect(px('.menu_init', 'padding-top')).toBe(6);
+    expect(px('.menu_box a', 'height')).toBe(43);
+    expect(6 * 43 + 6).toBe(264);
+    // 按钮素材 214×92（正常 / 悬停两态各 46px）等比压到 43px，悬停偏移同步
+    expect(decl('.menu_box a', 'background-size')).toBe('214px 86px');
+    expect(decl('.menu_box a:hover', 'background-position')).toBe('center -43px');
   });
 });
 
@@ -210,8 +223,8 @@ describe('点击板块后的界面：不再与木框对齐，改用大面板（�
     expect(values).not.toContain('237px');
   });
 
-  it('三个首页面板 / 连接服务器 / 等待 / 加入 都用大面板承载', () => {
-    for (const id of ['menu-create', 'menu-ai', 'menu-acct', 'server-panel']) {
+  it('首页各面板 / 连接服务器 / 等待 / 加入 都用大面板承载', () => {
+    for (const id of ['menu-create', 'menu-ai', 'menu-endgame', 'menu-acct', 'server-panel']) {
       const idx = HTML.indexOf(`id="${id}"`);
       expect(idx).toBeGreaterThan(-1);
       // 元素自身带 panel-lg 类

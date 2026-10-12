@@ -41,6 +41,7 @@
         <a id="btn-create">创建房间</a>
         <a id="btn-show-join">加入房间</a>
         <a id="btn-create-ai">人机对弈</a>
+        <a id="btn-endgame">残局挑战</a>
         <a id="btn-history">对局回顾</a>
         <a id="btn-skin">更换皮肤</a>
       </div>
@@ -67,6 +68,15 @@
       <label class="radio-row"><input name="ai-depth" type="radio" value="4"> 高手水平</label>
       <p class="hint">本地对弈，无需连接服务器；人机对局不计入「对局回顾」。</p>
       <button type="button" class="btn block" id="btn-ai-start">开始对弈</button>
+    </div>
+
+    <div class="panel-lg" id="menu-endgame" hidden>
+      <div class="panel-lg-head">
+        <span class="menu_fh" id="btn-endgame-back" title="返回"></span>
+        <span class="panel-lg-title">残局挑战</span>
+      </div>
+      <div class="endgame-list" id="endgame-list"></div>
+      <p class="hint" id="endgame-hint">选一局开战：轮到你（红方）走，务必在目标步数内取胜；卡住了可用「提示」看正解首着。</p>
     </div>
 
     <div class="panel-lg" id="menu-acct" hidden>
@@ -146,6 +156,12 @@
             <input type="button" id="btn-resign" value="认　输">
             <input type="button" id="btn-leave" value="离　开">
           </div>
+          <div id="actions-endgame" hidden>
+            <input type="button" id="btn-eg-undo" value="悔　棋">
+            <input type="button" id="btn-eg-hint" value="提　示">
+            <input type="button" id="btn-eg-restart" value="重　来">
+            <input type="button" id="btn-eg-leave" value="离　开">
+          </div>
           <div id="actions-over" hidden>
             <input type="button" id="btn-play-again" value="再来一局">
             <input type="button" id="btn-home" value="返回首页">
@@ -167,6 +183,10 @@
           <span class="tag" id="p-bottom-tag"></span>
         </div>
         <div class="status-box" id="status-box">准备开始</div>
+        <div class="panel-box" id="eg-box" hidden>
+          <div class="box-title" id="eg-title">残局目标</div>
+          <div class="eg-info" id="eg-info"></div>
+        </div>
         <div class="kill-box" id="kill-box" hidden>
           <div class="kill-name" id="kill-name"></div>
           <div class="kill-def" id="kill-def"></div>

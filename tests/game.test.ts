@@ -151,6 +151,58 @@ describe('Game 状态机', () => {
     expect(r.reason).toBe('对局未在进行中');
   });
 
+  it('setup 载入自定义残局局面并保持元信息干净', () => {
+    const g = new Game();
+    g.reset('playing');
+    g.applyMove([6, 0], [5, 0], 'r');
+    g.pendingDraw = 'b';
+
+    const board = Array.from({ length: 10 }, () => Array(9).fill(null));
+    board[0][4] = { t: 'K', s: 'b' };
+    board[9][3] = { t: 'K', s: 'r' };
+    board[8][0] = { t: 'R', s: 'r' };
+    g.setup(board, 'r');
+
+    expect(g.status).toBe('playing');
+    expect(g.turn).toBe('r');
+    expect(g.moveSeq).toBe(0);
+    expect(g.history).toEqual([]);
+    expect(g.lastMove).toBeNull();
+    expect(g.check).toBe(false);
+    expect(g.pendingDraw).toBeNull();
+    expect(g.board).toEqual(board);
+    // 与传入棋盘解耦：后续走子不影响外部棋盘
+    expect(g.applyMove([8, 0], [8, 4], 'r').ok).toBe(true);
+    expect(board[8][4]).toBeNull();
+  });
+
+  it('setup 载入的局面走子后照常判定终局', () => {
+    const g = new Game();
+    // 残局局面：红车 [1,0] / [2,8] 对黑将，红方一步将死（车到 [0,8]）
+    const board = Array.from({ length: 10 }, () => Array(9).fill(null));
+    board[0][4] = { t: 'K', s: 'b' };
+    board[9][3] = { t: 'K', s: 'r' };
+    board[1][0] = { t: 'R', s: 'r' };
+    board[2][8] = { t: 'R', s: 'r' };
+    g.setup(board, 'r');
+    const r = g.applyMove([2, 8], [0, 8], 'r');
+    expect(r.ok).toBe(true);
+    expect(g.status).toBe('over');
+    expect(g.winner).toBe('r');
+    expect(g.reason).toBe('将死');
+  });
+
+  it('setup 会标记行棋方被将军的局面', () => {
+    const g = new Game();
+    const board = Array.from({ length: 10 }, () => Array(9).fill(null));
+    board[0][4] = { t: 'K', s: 'b' };
+    board[9][3] = { t: 'K', s: 'r' };
+    board[5][4] = { t: 'R', s: 'r' };
+    g.setup(board, 'b');
+    expect(g.check).toBe(true);
+    expect(g.turn).toBe('b');
+  });
+
   it('snapshot 反映当前状态', () => {
     const g = new Game();
     g.reset('playing');

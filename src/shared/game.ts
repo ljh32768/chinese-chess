@@ -59,6 +59,17 @@ export class Game {
     this.deadline = null;
   }
 
+  /**
+   * 载入自定义初始局面（残局挑战用）：清空对局元信息，换上给定棋盘与行棋方。
+   * 与 reset 一样把状态置为 `playing`（残局从指定局面直接开始）。
+   */
+  setup(board: Board, turn: Side): void {
+    this.reset('playing');
+    this.board = cloneBoard(board);
+    this.turn = turn;
+    this.check = isInCheck(this.board, turn);
+  }
+
   /** 生成当前快照 */
   snapshot(): GameSnapshot {
     return {

@@ -221,23 +221,25 @@ body::before {
 .menu_box a {
   display: block;
   width: 214px;
-  height: 46px;
+  height: 43px;
   margin: 0 0 0 45px;
   text-align: center;
-  font: normal 18px/46px "Microsoft YaHei", "PingFang SC", sans-serif;
+  font: normal 18px/43px "Microsoft YaHei", "PingFang SC", sans-serif;
   color: #ff8a00;
+  /* 素材为 214×92（正常 / 悬停两态各 46px）；6 个入口按 43px 等比缩放后正好铺满挂板内框 */
   background: url(./assets/img/btn_bg.png) center 0 no-repeat;
+  background-size: 214px 86px;
   /* 深红底上的橙字加一点下投影，提升可读性 */
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
   cursor: pointer;
   user-select: none;
   transition: color 0.15s var(--ease), transform 0.15s var(--ease), filter 0.15s var(--ease);
 }
-.menu_box a:hover { color: #ffb552; background-position: center -46px; filter: brightness(1.05); transform: translateY(-1px); }
+.menu_box a:hover { color: #ffb552; background-position: center -43px; filter: brightness(1.05); transform: translateY(-1px); }
 .menu_box a:active { color: #ffc266; transform: translateY(0); filter: brightness(0.97); }
 .menu_box a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
-/* 首页 5 个入口正好铺满挂板按钮区 */
-.menu_init { padding-top: 32px; }
+/* 首页 6 个入口正好铺满挂板按钮区（6 × 43 + 6 = 264 = 422 - 158） */
+.menu_init { padding-top: 6px; }
 
 .menu_fh {
   float: right;
@@ -434,6 +436,7 @@ body::before {
 .review_tab:focus-visible,
 .bn_box input:focus-visible,
 .room-row:focus-visible,
+.eg-row:focus-visible,
 .review_row:focus-visible,
 #btn-invite:focus-visible,
 .panel-lg input:focus-visible,
@@ -563,6 +566,8 @@ body::before {
 .status-box.over.win-red { color: #ff9d8a; border-color: #8a4a3a; }
 .status-box.over.win-black { color: #bcd2e8; border-color: #46586b; }
 .status-box.over.draw { color: var(--gold-bright); border-color: #a5865a; }
+/* 残局挑战失败（超出步数 / 被将死）：与将军同一档警示色 */
+.status-box.over.lose { color: var(--err); border-color: #8a4a3a; }
 
 .req-hint {
   padding: 7px 8px;
@@ -602,6 +607,50 @@ body::before {
 .cap-label { flex: none; color: var(--text-mute); letter-spacing: 1px; }
 .cap-list { color: #fff; font-size: 13px; letter-spacing: 2px; word-break: break-all; }
 .role-hint { font-size: 12px; color: #ffe0a8; text-align: center; letter-spacing: 1px; }
+
+/* ---------- 残局挑战：题库列表（名称 / 难度 / 目标 / 通关标记） ---------- */
+.eg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  margin-top: 4px;
+  font: 500 13px/1.5 inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid #5c472c;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.eg-row:hover { background: var(--surface-2); border-color: var(--accent); transform: translateX(2px); }
+.eg-row .eg-name {
+  flex: 1;
+  /* 同上：不归零 min-width 会把难度 / 步数挤出面板 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eg-row .eg-level {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--gold-bright);
+  background: rgba(255, 217, 138, 0.12);
+  border: 1px solid rgba(255, 217, 138, 0.28);
+  border-radius: 999px;
+}
+.eg-row .eg-level.hard { color: #ffb9a6; background: rgba(255, 157, 138, 0.12); border-color: rgba(255, 157, 138, 0.34); }
+.eg-row .eg-goal { flex: none; font-size: 12px; color: var(--text-dim); }
+.eg-row .eg-done { flex: none; font-size: 11px; letter-spacing: 1px; color: var(--ok); }
+
+/* 对局侧栏的残局目标（残局模式下取代常规信息块） */
+.eg-info { color: var(--text-dim); line-height: 1.85; word-break: break-all; }
+.eg-intro { margin-top: 4px; color: var(--text-mute); }
 
 /* ---------- 复盘 ---------- */
 .replay-info { color: var(--text); line-height: 1.9; }

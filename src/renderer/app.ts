@@ -21,8 +21,16 @@ import {
 } from '../shared/types.js';
 import { Game } from '../shared/game.js';
 import { pickMove } from '../shared/ai.js';
-import { CheckmateInfo, classifyCheckmateFromHistory } from '../shared/checkmate.js';
-import { capturedPieces } from '../shared/notation.js';
+import { CheckmateInfo, classifyCheckmate, classifyCheckmateFromHistory } from '../shared/checkmate.js';
+import {
+  EndgamePuzzle,
+  LEVEL_LABEL,
+  PUZZLES,
+  buildPuzzleBoard,
+  findMateMove,
+  nextPuzzle,
+} from '../shared/endgame.js';
+import { capturedPieces, describeMove } from '../shared/notation.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
   DEFAULT_PORT,
@@ -65,6 +73,19 @@ const USER_KEY = 'lanschess-user';
 const SESSION_KEY = 'lanschess-session';
 /** 本机最近一次入座身份（游客 id 只在本机稳定，用于「我的历史」过滤） */
 const PLAYER_KEY = 'lanschess-player';
+/** 残局挑战通关记录（id → 取胜所用步数） */
+const ENDGAME_KEY = 'lanschess-endgame';
+
+/** 残局挑战的进度（本地对弈，不连服务器） */
+interface EndgameState {
+  puzzle: EndgamePuzzle;
+  /** 玩家已用步数 */
+  used: number;
+  /** 结果：null 进行中；win 已达成目标；fail 超出步数或被将死 */
+  result: null | 'win' | 'fail';
+  /** 结果原因文案（将死 / 困毙 / 超出步数 / 被将死…） */
+  reason: string;
+}
 
 /** 棋子汉字（红黑两套用字，用于吃子展示） */
 const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
@@ -121,6 +142,10 @@ const S = {
   skin: DEFAULT_SKIN as SkinId,
   /** 鼠标悬停的交叉点（仅用于预高亮） */
   hover: null as Pos | null,
+  /** 提示环（残局挑战的「提示」正解首着） */
+  hint: null as Move | null,
+  /** 残局挑战进度；null 表示当前不是残局模式 */
+  endgame: null as EndgameState | null,
   /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
   firstMode: 'guess' as FirstMode,
   /** 猜先阶段：双方到齐后先进入棋盘界面，再在棋盘上抓子 / 猜单双 */
@@ -147,11 +172,14 @@ const resultText = () => (S.winner === 'r' ? '红方胜' : S.winner === 'b' ? '�
 
 /**
  * 终局杀法（仅「将死」且识别到具体杀法时返回）。
- * 识别依据终局局面与完整着法，在本地完成——联机、人机、观战结果一致。
+ * 识别依据终局局面与完整着法，在本地完成——联机、人机、残局、观战结果一致。
  */
 function mateInfo(): CheckmateInfo | null {
-  if (S.reason !== '将死') return null;
-  const info = classifyCheckmateFromHistory(S.board, S.history, S.winner);
+  if (S.reason !== '将死' || !S.winner) return null;
+  // 残局从自定义局面开始，无法从标准开局回放着法（「被吃的棋子」需按终局盘面推导）
+  const info = S.endgame
+    ? classifyCheckmate(S.board, S.winner === 'r' ? 'b' : 'r', { lastMove: S.lastMove })
+    : classifyCheckmateFromHistory(S.board, S.history, S.winner);
   return info?.recognized ? info : null;
 }
 
@@ -235,9 +263,9 @@ function writeStore(key: string, value: string | null): void {
 
 // -------------------------------------------------------------- 渲染
 
-/** 当前是否本方可以操作棋盘（观战 / 非本回合 / 断线等待时不可操作） */
+/** 当前是否本方可以操作棋盘（观战 / 非本回合 / 断线等待 / 残局已出结果时不可操作） */
 function canPlay(): boolean {
-  return !S.spectator && S.status === 'playing' && S.turn === S.side && !S.oppAway;
+  return !S.spectator && S.status === 'playing' && S.turn === S.side && !S.oppAway && !S.endgame?.result;
 }
 
 /** 组装棋盘渲染视图（纯展示，不含规则判定） */
@@ -252,6 +280,7 @@ function boardView(): BoardView {
     checkKing: S.check ? findKing(S.board, S.turn) : null,
     interactiveSide: playable ? S.side : null,
     hover: playable ? S.hover : null,
+    hint: S.hint,
   };
 }
 
@@ -311,6 +340,12 @@ function render(): void {
 function updateRoleHint(): void {
   if (S.spectator) {
     $('role-hint').textContent = `房间 ${S.roomId} · 观战 · 只读`;
+    return;
+  }
+  if (S.endgame) {
+    const p = S.endgame.puzzle;
+    $('role-hint').textContent =
+      `残局「${p.name}」· 你执${S.side === 'r' ? '红' : '黑'} · ${p.goalMoves} 步内取胜`;
     return;
   }
   if (S.offline) {
@@ -374,9 +409,12 @@ function updatePanel(): void {
   $('p-bottom-name').textContent = S.spectator ? sideName(S.side) : `${sideName(S.side)} · 你`;
 
   const active = S.status === 'playing';
-  const over = S.status === 'over';
-  // 操作组：观战者隐藏对局操作（只读），对局中与结束态互斥切换
-  $('actions-play').hidden = over || S.spectator;
+  // 残局挑战：出结果（成功 / 失败）后按终局处理（操作切换为「再来一局 / 返回首页」）
+  const eg = S.endgame;
+  const over = S.status === 'over' || !!eg?.result;
+  // 操作组：观战者隐藏对局操作（只读），残局用独立操作行，对局中与结束态互斥切换
+  $('actions-play').hidden = over || S.spectator || !!eg;
+  $('actions-endgame').hidden = !eg || over;
   $('actions-over').hidden = !over || S.spectator;
   $('actions-spectate').hidden = !S.spectator;
   rowTop.classList.toggle('active', active && S.turn === opp);
@@ -389,12 +427,24 @@ function updatePanel(): void {
   st.classList.toggle('mine', active && !S.check && !S.spectator && S.turn === S.side);
   st.classList.toggle('check', active && S.check);
   st.classList.toggle('over', over);
-  st.classList.toggle('win-red', over && S.winner === 'r');
-  st.classList.toggle('win-black', over && S.winner === 'b');
-  st.classList.toggle('draw', over && S.winner === null);
+  st.classList.toggle(
+    'win-red',
+    (S.status === 'over' && S.winner === 'r') || (eg?.result === 'win' && eg.puzzle.side === 'r'),
+  );
+  st.classList.toggle(
+    'win-black',
+    (S.status === 'over' && S.winner === 'b') || (eg?.result === 'win' && eg.puzzle.side === 'b'),
+  );
+  st.classList.toggle('draw', S.status === 'over' && S.winner === null);
+  st.classList.toggle('lose', eg?.result === 'fail');
   let statusText: string;
   const mate = S.status === 'over' ? mateInfo() : null;
-  if (S.status === 'over') {
+  if (eg?.result === 'win') {
+    // 达成目标：显示识别出的杀法名（无杀法名时退回「将死 / 困毙」）
+    statusText = `挑战成功 · ${mate ? mate.pattern.label : S.reason}`;
+  } else if (eg?.result === 'fail') {
+    statusText = `挑战失败 · ${eg.reason}`;
+  } else if (S.status === 'over') {
     statusText = overText(mate);
   } else if (active && S.oppAway) {
     statusText = '对手已断开，等待重连…';
@@ -407,13 +457,28 @@ function updatePanel(): void {
   } else if (active) {
     statusText = S.spectator
       ? `${sideName(S.turn)}行棋中…`
-      : S.turn === S.side
-        ? '轮到你走棋'
-        : '对方思考中…';
+      : eg
+        ? S.turn === S.side
+          ? `轮到你走棋（第 ${eg.used + 1} / ${eg.puzzle.goalMoves} 步）`
+          : `对手思考中…（已用 ${eg.used} / ${eg.puzzle.goalMoves} 步）`
+        : S.turn === S.side
+          ? '轮到你走棋'
+          : '对方思考中…';
   } else {
     statusText = S.spectator ? '等待对局开始' : (guessStatusText() ?? '准备开始');
   }
   st.textContent = active ? `${statusText}${remainText()}` : statusText;
+
+  // 残局目标：名称 / 难度 / 目标步数 / 已用步数 + 一句要点
+  const egBox = $('eg-box');
+  egBox.hidden = !eg;
+  if (eg) {
+    $('eg-info').innerHTML =
+      `<div>残局：${eg.puzzle.name} · ${LEVEL_LABEL[eg.puzzle.level]}</div>` +
+      `<div>目标：${eg.puzzle.goalMoves} 步内取胜</div>` +
+      `<div>已用：${eg.used} / ${eg.puzzle.goalMoves} 步</div>` +
+      `<div class="eg-intro">${eg.puzzle.intro}</div>`;
+  }
 
   // 终局杀法：将死时展示识别出的具体杀法名与解说（识别不到经典杀法时保持隐藏）
   const killBox = $('kill-box');
@@ -943,6 +1008,8 @@ function resetLocal(): void {
   S.oppAway = false;
   S.pending = null;
   S.guessPhase = null;
+  S.hint = null;
+  S.endgame = null;
   localGame = null;
   window.clearTimeout(localAiTimer);
   localAiTimer = 0;
@@ -1195,14 +1262,15 @@ function apiBase(): string {
 /** 默认取先方式：猜先（双方进入棋盘后再抓子 / 猜单双） */
 const FIRST_MODE_DEFAULT: FirstMode = 'guess';
 
-/** 首页板块：木质挂板（入口）与三个大面板互斥显示 */
-type HomePanel = 'index' | 'create' | 'ai' | 'acct';
+/** 首页板块：木质挂板（入口）与大面板互斥显示 */
+type HomePanel = 'index' | 'create' | 'ai' | 'endgame' | 'acct';
 
 function showHomePanel(panel: HomePanel): void {
   $('menu-board').hidden = panel !== 'index';
   $('menu-index').hidden = panel !== 'index';
   $('menu-create').hidden = panel !== 'create';
   $('menu-ai').hidden = panel !== 'ai';
+  $('menu-endgame').hidden = panel !== 'endgame';
   $('menu-acct').hidden = panel !== 'acct';
 }
 
@@ -1267,7 +1335,7 @@ function createAiRoom(): void {
   scheduleLocalAi();
 }
 
-/** 本地走子（offline 模式）：直接走本地状态机，AI 随后应答 */
+/** 本地走子（offline / 残局模式）：直接走本地状态机，AI 随后应答 */
 function localMove(from: Pos, to: Pos): void {
   const game = localGame;
   if (!game) return;
@@ -1277,26 +1345,225 @@ function localMove(from: Pos, to: Pos): void {
     return;
   }
   playClick();
+  S.hint = null; // 走子后清除提示环
   applySnapshot(game.snapshot());
+  if (S.endgame) {
+    endgameEvaluate();
+    return;
+  }
   scheduleLocalAi();
 }
 
-/** 本地 AI（黑方）自动应答 */
+/** AI 执子方：人机对弈固定黑方；残局挑战执玩家的对方 */
+function localAiSide(): Side {
+  return S.endgame ? (S.endgame.puzzle.side === 'r' ? 'b' : 'r') : 'b';
+}
+
+/** 本地 AI 自动应答（人机对弈黑方 / 残局挑战的防守方） */
 function scheduleLocalAi(): void {
   window.clearTimeout(localAiTimer);
   localAiTimer = 0;
   const game = localGame;
-  if (!game || game.status !== 'playing' || game.turn !== 'b') return;
+  const aiSide = localAiSide();
+  if (!game || game.status !== 'playing' || game.turn !== aiSide || S.endgame?.result) return;
   localAiTimer = window.setTimeout(() => {
     localAiTimer = 0;
     const g = localGame;
-    if (!g || g.status !== 'playing' || g.turn !== 'b') return;
-    const move = pickMove(g.board, 'b', { depth: aiDepth(), timeLimitMs: 1200 });
+    if (!g || g.status !== 'playing' || g.turn !== aiSide || S.endgame?.result) return;
+    const move = pickMove(g.board, aiSide, {
+      depth: S.endgame ? ENDGAME_AI_DEPTH : aiDepth(),
+      timeLimitMs: S.endgame ? 900 : 1200,
+    });
     if (!move) return;
-    g.applyMove(move.from, move.to, 'b');
+    g.applyMove(move.from, move.to, aiSide);
     playClick();
+    S.hint = null; // 走子后清除提示环
     applySnapshot(g.snapshot());
+    if (S.endgame) endgameEvaluate();
   }, 350);
+}
+
+// -------------------------------------------------------------- 残局挑战
+
+/** 残局防守 AI 的搜索深度（高手水平，尽量逼出玩家的正解） */
+const ENDGAME_AI_DEPTH = 4;
+
+/** 读取残局通关记录（id → 最好成绩步数） */
+function readEndgameRecord(): Record<string, number> {
+  const raw = readStore(ENDGAME_KEY);
+  if (!raw) return {};
+  try {
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [id, v] of Object.entries(data)) {
+      if (typeof v === 'number' && v > 0) out[id] = v;
+    }
+    return out;
+  } catch {
+    return {}; // 损坏的本地数据按「未通关」处理
+  }
+}
+
+/** 记录通关（保留最好成绩） */
+function recordEndgameClear(id: string, used: number): void {
+  const rec = readEndgameRecord();
+  if (!rec[id] || used < rec[id]) rec[id] = used;
+  writeStore(ENDGAME_KEY, JSON.stringify(rec));
+}
+
+/** 打开「残局挑战」面板（题库列表） */
+function openEndgamePanel(): void {
+  renderEndgameList();
+  showHomePanel('endgame');
+}
+
+/** 渲染题库列表：名称 + 难度 + 目标步数 + 通关标记（点击即开局） */
+function renderEndgameList(): void {
+  const box = $('endgame-list');
+  box.replaceChildren();
+  const done = readEndgameRecord();
+  for (const p of PUZZLES) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'eg-row';
+    const name = document.createElement('span');
+    name.className = 'eg-name';
+    name.textContent = p.name;
+    const level = document.createElement('span');
+    level.className = 'eg-level' + (p.level === 'hard' ? ' hard' : '');
+    level.textContent = LEVEL_LABEL[p.level];
+    const goal = document.createElement('span');
+    goal.className = 'eg-goal';
+    goal.textContent = `${p.goalMoves} 步内取胜`;
+    row.append(name, level, goal);
+    if (done[p.id]) {
+      const tag = document.createElement('span');
+      tag.className = 'eg-done';
+      tag.textContent = `已通关 · ${done[p.id]} 步`;
+      row.appendChild(tag);
+    }
+    row.addEventListener('click', () => startPuzzle(p));
+    box.appendChild(row);
+  }
+}
+
+/** 开始（或重开）一局残局：本地对弈，不依赖服务器 */
+function startPuzzle(p: EndgamePuzzle): void {
+  net?.close();
+  net = null;
+  window.clearTimeout(localAiTimer);
+  localAiTimer = 0;
+  S.offline = true;
+  S.aiMode = false;
+  S.spectator = false;
+  S.role = 'player';
+  S.roomId = '';
+  S.playerId = '';
+  S.name = '你';
+  S.isOwner = false;
+  S.locked = false;
+  S.firstMode = 'r';
+  S.side = p.side;
+  S.oppName = 'AI';
+  S.hint = null;
+  S.endgame = { puzzle: p, used: 0, result: null, reason: '' };
+  localGame = new Game();
+  localGame.setup(buildPuzzleBoard(p), p.side);
+  clearSession();
+  applySnapshot(localGame.snapshot());
+  backToIndex();
+  enterGame();
+  toast(`残局「${p.name}」：${p.goalMoves} 步内取胜`);
+  scheduleLocalAi();
+}
+
+/** 把当前残局恢复到初始局面 */
+function restartPuzzle(): void {
+  const eg = S.endgame;
+  if (!eg) return;
+  window.clearTimeout(localAiTimer);
+  localAiTimer = 0;
+  S.hint = null;
+  eg.used = 0;
+  eg.result = null;
+  eg.reason = '';
+  localGame = new Game();
+  localGame.setup(buildPuzzleBoard(eg.puzzle), eg.puzzle.side);
+  applySnapshot(localGame.snapshot());
+  render();
+  toast('已重来');
+  scheduleLocalAi();
+}
+
+/** 残局悔棋：连同 AI 的应着一起回退，已用步数随之回退 */
+function endgameUndo(): void {
+  const eg = S.endgame;
+  const game = localGame;
+  if (!eg || !game) return;
+  if (game.history.length === 0) return toast('当前没有可悔的棋');
+  window.clearTimeout(localAiTimer);
+  localAiTimer = 0;
+  game.undo();
+  if (game.turn !== eg.puzzle.side && game.history.length > 0) game.undo();
+  S.hint = null;
+  eg.used = game.history.filter((_, i) => i % 2 === 0).length;
+  applySnapshot(game.snapshot());
+  toast('已悔棋');
+}
+
+/** 残局提示：给出仍能在剩余步数内取胜的正解首着（已走离杀棋时提示重来） */
+function endgameHint(): void {
+  const eg = S.endgame;
+  if (!eg || S.status !== 'playing' || eg.result) return;
+  const mv = findMateMove(S.board, S.side, eg.puzzle.goalMoves - eg.used);
+  if (!mv) {
+    toast('当前局面已无法在剩余步数内取胜，建议「重来」');
+    return;
+  }
+  S.hint = mv;
+  paint();
+  toast(`提示：${describeMove(S.board, mv.from, mv.to)}`);
+}
+
+/** 残局：每步之后判定目标（我方取胜 = 成功；被将死 / 超出步数 = 失败） */
+function endgameEvaluate(): void {
+  const eg = S.endgame;
+  if (!eg || eg.result) return;
+  // 已用步数 = 玩家自己的着法数（玩家先行，隔一步一手）
+  eg.used = S.history.filter((_, i) => i % 2 === 0).length;
+  if (S.status === 'over') {
+    const won = S.winner === eg.puzzle.side;
+    eg.result = won ? 'win' : 'fail';
+    eg.reason = won ? S.reason : `被${S.reason}`;
+    if (won) recordEndgameClear(eg.puzzle.id, eg.used);
+  } else if (eg.used >= eg.puzzle.goalMoves) {
+    eg.result = 'fail';
+    eg.reason = '超出步数';
+  } else {
+    // 仍在进行中（未超出目标步数）：渲染后交给 AI 应招
+    render();
+    scheduleLocalAi();
+    return;
+  }
+  render();
+  showEndgameResult();
+}
+
+/** 残局结果弹层：成功可「下一关」，失败可「重来」 */
+function showEndgameResult(): void {
+  const eg = S.endgame;
+  if (!eg) return;
+  const won = eg.result === 'win';
+  const next = won ? nextPuzzle(eg.puzzle.id) : null;
+  showModal({
+    title: won ? '挑战成功' : '挑战失败',
+    sub: `「${eg.puzzle.name}」${won ? `${eg.reason} · 用时 ${eg.used} 步` : eg.reason}`,
+    buttons: [
+      ...(next ? [{ label: `下一关：${next.name}`, primary: true, onClick: () => startPuzzle(next) }] : []),
+      { label: won ? '再来一次' : '重　来', primary: !next, onClick: restartPuzzle },
+      { label: '返回首页', onClick: leaveToHome },
+    ],
+  });
 }
 
 // -------------------------------------------------------------- 账号（可选）
@@ -1744,6 +2011,8 @@ function offerDraw(): void {
 }
 
 function requestRestart(): void {
+  // 残局挑战：「再来一局 / 重来」都是把本局恢复到初始局面
+  if (S.endgame) return restartPuzzle();
   if (S.status !== 'over') return toast('对局结束后才能重开');
   if (S.offline) {
     localGame?.reset('playing');
@@ -1862,6 +2131,8 @@ function bindEvents(): void {
   $('btn-create-ai').addEventListener('click', () => showHomePanel('ai'));
   $('btn-ai-back').addEventListener('click', backToIndex);
   $('btn-ai-start').addEventListener('click', createAiRoom);
+  $('btn-endgame').addEventListener('click', openEndgamePanel);
+  $('btn-endgame-back').addEventListener('click', backToIndex);
   $('btn-acct-back').addEventListener('click', backToIndex);
   $('btn-login').addEventListener('click', () => void doAuth(false));
   $('btn-register').addEventListener('click', () => void doAuth(true));
@@ -1897,6 +2168,11 @@ function bindEvents(): void {
   $('btn-resign').addEventListener('click', resign);
   $('btn-draw').addEventListener('click', offerDraw);
   $('btn-undo').addEventListener('click', offerUndo);
+  // 残局挑战：悔棋 / 提示 / 重来 / 离开
+  $('btn-eg-undo').addEventListener('click', endgameUndo);
+  $('btn-eg-hint').addEventListener('click', endgameHint);
+  $('btn-eg-restart').addEventListener('click', restartPuzzle);
+  $('btn-eg-leave').addEventListener('click', leaveToHome);
   $('btn-play-again').addEventListener('click', requestRestart);
   $('btn-home').addEventListener('click', leaveToHome);
   $('btn-leave').addEventListener('click', leaveToHome);
@@ -1909,7 +2185,7 @@ function bindEvents(): void {
 
   boardEl.addEventListener('click', (e) => {
     if (S.spectator) return toast('观战模式只读');
-    if (S.status !== 'playing') return;
+    if (S.status !== 'playing' || S.endgame?.result) return;
     if (S.oppAway) return toast('对手已断开，等待重连');
     if (S.turn !== S.side) return toast('还没轮到你走棋');
     const pos = cellAt(e.clientX, e.clientY);

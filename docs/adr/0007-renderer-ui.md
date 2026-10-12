@@ -37,10 +37,10 @@
 
 | 屏 | id | 元素与入口 |
 |---|---|---|
-| 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「对局回顾」`btn-history`、「更换皮肤」`btn-skin`（5 个入口铺满挂板按钮区）；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`，面板与木框对齐见 §3.5.3）；本机地址提示 `home-hint` |
+| 首页 | `screen-home` | 木质挂板菜单 `menu-index`：「创建对局」`btn-create`、「加入对局」`btn-show-join`、「人机对弈」`btn-create-ai`、「残局挑战」`btn-endgame`、「对局回顾」`btn-history`、「更换皮肤」`btn-skin`（**v2.5 起 6 个入口铺满挂板按钮区**）；人机子菜单 `menu-ai`（难度单选 `ai-depth` 2/3/4 + `btn-ai-start` + 返回 `btn-ai-back`）、残局子菜单 `menu-endgame`（题库列表 `endgame-list` + 返回 `btn-endgame-back`，见 [ADR-0009 §3.12](./0009-c-d-extensions.md)）；本机地址提示 `home-hint` |
 | 主机等待 | `screen-host` | 版块与挂板内框对齐（实测 `init_bg.png` 内表面 x≈10..290、y≈158..395，面板 `280×237`）：标题 `info-title`（内含等待转圈 `spinner`）、地址大字显示 `host-ip`（**点击地址块 `ip-box` 即复制**，非安全上下文降级）、先手（红方）方式 `side-opts`（随机黑红 / 猜先 / 黑 / 红，选中态 `.active`）+ 说明 `side-hint`、等待文案 `host-wait`（猜先阶段显示进度）、取消 `btn-cancel-host`（素材返回箭头） |
 | 加入 | `screen-join` | 地址输入 `join-ip`、端口输入 `join-port`、连接 `btn-connect`（面板与内框对齐、限高保证按钮落在框内，见 §3.5.3）、观战 `btn-spectate`、搜索主机 `btn-scan` + 结果区 `scan-result`（面板内滚动）、返回 `btn-join-back`、提示 `join-msg` |
-| 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、请求等待提示 `req-hint`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint`（**棋谱面板已移除，改由「对局回顾」复盘**） |
+| 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；**v2.5 残局** `actions-endgame`：`btn-eg-undo/btn-eg-hint/btn-eg-restart/btn-eg-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、**残局目标块 `eg-box`（`eg-info`：残局名 / 难度 / 目标步数 / 已用步数 / 要点）**、请求等待提示 `req-hint`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint`（**棋谱面板已移除，改由「对局回顾」复盘**） |
 | 对局回顾 | `screen-history` | 列表 `history-list`（每行：红黑方 / 取先方式 / 时间 / 胜负，点击进入复盘）、返回 `btn-history-back`、刷新 `btn-history-refresh` |
 | 复盘 | `screen-replay` | 复盘棋盘 `replay-board`、步进按钮 `btn-replay-first/prev/next/last`、返回列表 `btn-replay-back`、对局信息 `replay-info`、当前步 `replay-step`、AI 推荐 `replay-hint` |
 | 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；用于和棋/重开/悔棋请求、认输确认、猜先应答、对手离开与断线提示，**不用于对局结束** |
@@ -165,7 +165,7 @@
 | 项 | 规格 |
 |---|---|
 | 整体放大 | `:root { --ui-scale: 1.25 }`；`.menu_box` 应用 `zoom: var(--ui-scale)` 等比缩放（背景图、按钮随 zoom 一起放大）；`@media (max-width: 480px)` 回退 `1`，避免手机浏览器入局时水平溢出（v2.2 起删除了页脚 `.home-hint`，缩放只作用于首页挂板） |
-| 挂板几何 | 背景 `init_bg.png` 316×422（内含美术标题与挂绳）；`box-sizing: content-box` + `padding-top: 158` + `height: 264`，padding box 恒为 422（背景图完整显示，含底框）；首页 5 个按钮由 `.menu_init { padding-top: 32 }` 保持原位置（y=190 起，5×46=230） |
+| 挂板几何 | 背景 `init_bg.png` 316×422（内含美术标题与挂绳）；`box-sizing: content-box` + `padding-top: 158` + `height: 264`，padding box 恒为 422（背景图完整显示，含底框）；首页入口由 `.menu_init { padding-top: 6 }` 起排，**v2.5 起 6 个入口按 `6×43 + 6 = 264` 铺满按钮区**（按钮素材 214×92 为正常 / 悬停两态各 46px，故 `background-size: 214px 86px` 等比压到 43px、悬停偏移同步改为 `center -43px`；v1.6 起为 5 个入口 × 46px + `padding-top: 32`） |
 | 木框内框 | 实测内表面 x≈10..290、y≈158..395（10px 深色边框）；内容区自 y=158 起，与内框上沿对齐 |
 | 面板对齐（**v2.2 已被「大面板」取代**） | `.menu_info` 统一 `width: 280`、`margin: 0 0 8px 10px`（与内框同宽、左/上对齐）：等待页版块 `.menu_info.wide` 另加 `height: 237` 铺满内框（280×237）；人机页面板自动高 + `8px` 间距的「开始对弈」；加入页 `#screen-join .menu_info` 限高 `183`（= 237 − 46 − 8）且内部滚动，保证面板 +「连接」按钮都落在内框内。**v2.2 起点击板块后的界面改用 `.panel-lg` 大面板（独立于木框，见 [ADR-0010 §10](./0010-room-server.md)），木质挂板只承载首页入口** |
 | 署名遮盖 | 主页背景 `init_bg.png` 底部原含参考项目作者署名「@一叶孤舟 QQ:28701884 欢迎交流」，已用目录中的 `cover.bmp` 中段木板条带（羽化边缘、就近映射回原调色板）覆盖；仍为 8bit 索引 PNG，透明区（画面四角与阴影）保持不变 |
