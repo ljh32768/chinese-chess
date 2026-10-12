@@ -133,6 +133,11 @@ export interface GameRecordSummary {
   /** 胜方；null 表示和棋 */
   winner: Side | null;
   reason: string;
+  /**
+   * 将死时识别出的杀法名（如「马后炮杀」；未识别到经典杀法时缺省）。
+   * 由共享层 checkmate.ts 依据终局局面判定。
+   */
+  killMethod?: string;
   moveCount: number;
 }
 

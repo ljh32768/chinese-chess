@@ -7,6 +7,7 @@
  */
 
 import { describeMove } from '../shared/notation.js';
+import { CheckmateInfo, classifyCheckmateFromHistory } from '../shared/checkmate.js';
 import { findKing, initBoard, isInCheck, makeMove } from '../shared/rules.js';
 import {
   AiHint,
@@ -40,10 +41,24 @@ export function formatTime(ts: number): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 结果文案：红胜（将死） / 和棋（同意和棋） */
-export function resultText(rec: { winner: Side | null; reason: string }): string {
+/**
+ * 结果文案：红胜（马后炮杀） / 和棋（同意和棋）。
+ * 「将死」时优先用记录中识别出的杀法名（旧记录无此字段时退回「将死」）。
+ */
+export function resultText(rec: { winner: Side | null; reason: string; killMethod?: string }): string {
   const who = rec.winner === 'r' ? '红胜' : rec.winner === 'b' ? '黑胜' : '和棋';
-  return `${who}（${rec.reason}）`;
+  return `${who}（${rec.killMethod ?? rec.reason}）`;
+}
+
+/**
+ * 复盘页的终局杀法：依据终局局面 + 完整着法即时识别。
+ * 与对局页 / 服务端落库共用同一实现，因此新老记录都能给出具体杀法。
+ */
+export function mateOf(rec: GameRecord): CheckmateInfo | null {
+  if (rec.reason !== '将死') return null;
+  const board = replayBoard(rec.moves, rec.moves.length);
+  const info = classifyCheckmateFromHistory(board, rec.moves, rec.winner);
+  return info?.recognized ? info : null;
 }
 
 /** 列表行文案 */
@@ -256,6 +271,17 @@ export function initReview(deps: ReviewDeps): ReviewController {
       `<div>${line.vs}</div><div>取先方式：${line.first}</div>` +
       guess +
       `<div>时间：${line.time}</div><div>结果：${line.result}</div><div>共 ${record.moveCount} 步</div>`;
+
+    // 终局杀法：将死时展示具体杀法名与解说（识别不到经典杀法时隐藏）
+    const mate = mateOf(record);
+    $('replay-mate-box').hidden = !mate;
+    if (mate) {
+      $('replay-mate-name').textContent = mate.pattern.label;
+      $('replay-mate-def').textContent = mate.pattern.definition;
+      $('replay-mate-also').textContent = mate.alsoMatched.length
+        ? `同时构成：${mate.alsoMatched.join('、')}`
+        : '';
+    }
 
     const stepText =
       index === 0

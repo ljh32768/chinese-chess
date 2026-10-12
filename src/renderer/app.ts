@@ -21,6 +21,7 @@ import {
 } from '../shared/types.js';
 import { Game } from '../shared/game.js';
 import { pickMove } from '../shared/ai.js';
+import { CheckmateInfo, classifyCheckmateFromHistory } from '../shared/checkmate.js';
 import { capturedPieces } from '../shared/notation.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
@@ -143,6 +144,19 @@ const skin = (): (typeof SKINS)[SkinId] => SKINS[S.skin];
 const flip = () => S.side === 'b';
 const sideName = (s: Side) => (s === 'r' ? '红方' : '黑方');
 const resultText = () => (S.winner === 'r' ? '红方胜' : S.winner === 'b' ? '黑方胜' : '和棋');
+
+/**
+ * 终局杀法（仅「将死」且识别到具体杀法时返回）。
+ * 识别依据终局局面与完整着法，在本地完成——联机、人机、观战结果一致。
+ */
+function mateInfo(): CheckmateInfo | null {
+  if (S.reason !== '将死') return null;
+  const info = classifyCheckmateFromHistory(S.board, S.history, S.winner);
+  return info?.recognized ? info : null;
+}
+
+/** 终局状态文案：识别到杀法时用杀法名替代泛指的「将死」 */
+const overText = (mate: CheckmateInfo | null) => `${resultText()} · ${mate ? mate.pattern.label : S.reason}`;
 
 // -------------------------------------------------------------- 基础 UI
 
@@ -379,8 +393,9 @@ function updatePanel(): void {
   st.classList.toggle('win-black', over && S.winner === 'b');
   st.classList.toggle('draw', over && S.winner === null);
   let statusText: string;
+  const mate = S.status === 'over' ? mateInfo() : null;
   if (S.status === 'over') {
-    statusText = `${resultText()} · ${S.reason}`;
+    statusText = overText(mate);
   } else if (active && S.oppAway) {
     statusText = '对手已断开，等待重连…';
   } else if (active && S.check) {
@@ -399,6 +414,17 @@ function updatePanel(): void {
     statusText = S.spectator ? '等待对局开始' : (guessStatusText() ?? '准备开始');
   }
   st.textContent = active ? `${statusText}${remainText()}` : statusText;
+
+  // 终局杀法：将死时展示识别出的具体杀法名与解说（识别不到经典杀法时保持隐藏）
+  const killBox = $('kill-box');
+  killBox.hidden = !mate;
+  if (mate) {
+    killBox.classList.toggle('win-red', S.winner === 'r');
+    killBox.classList.toggle('win-black', S.winner === 'b');
+    $('kill-name').textContent = mate.pattern.label;
+    $('kill-def').textContent = mate.pattern.definition;
+    $('kill-also').textContent = mate.alsoMatched.length ? `同时构成：${mate.alsoMatched.join('、')}` : '';
+  }
 
   // 请求等待状态（和棋 / 重开 / 悔棋发出后）
   const req = $('req-hint');

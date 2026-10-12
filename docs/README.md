@@ -5,9 +5,9 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.4（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修：设计令牌 / 层级 / 状态反馈 / 克制动效 / 键盘焦点 / 减少动态效果**）
-- 状态：v2.4 完成；229 项自动化测试通过，lint / format / build / CI 全绿
-- 更新日期：2026-10-11
+- 版本：v2.4（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修（设计令牌 / 层级 / 状态反馈 / 克制动效 / 键盘焦点 / 减少动态效果）+ 象棋杀法识别（将死不再只显示「将死」，而是给出具体杀法名与解说）**）
+- 状态：v2.4 完成；259 项自动化测试通过，lint / format / build / CI 全绿
+- 更新日期：2026-10-12
 
 版本里程碑：
 
@@ -25,6 +25,7 @@
 | **v2.2** | **点击板块后的界面改用「大面板」（参考对局回顾，不再与木质内框对齐）；「邀请玩家」改为宽版玩家列表（在线在前可一键邀请、离线 / 对局中置灰；等待阶段只邀请对局，开局后为邀请观战）；等待页取先方式改为下拉框（默认猜先），对手加入后双方直接进入棋盘再猜单双；删除首页底部「服务器 / 已登录」小字；人机对局不计入对局回顾** | 见 [ADR-0010 §10](./adr/0010-room-server.md) |
 | **v2.3** | **修复桌面客户端「对局回顾」一直 Failed to fetch：所有 `/api/*` 响应补上 CORS 头并放行 `OPTIONS` 预检（页面来自本机外壳服务，REST 访问真实服务器属跨源）；「对局回顾」新增「全部对局 / 我的历史」页签（`GET /api/history?user=`），登录按账号、游客按本机最近一次入座身份过滤** | 见 [ADR-0010 §11](./adr/0010-room-server.md) |
 | **v2.4** | **界面视觉与交互精修（不动结构、只精修表达）：`:root` 设计令牌（木色层次 / 强调金 / 焦点环 / 缓动）；面板头部分隔线与文本层级；切屏淡入、弹层缩放淡入与 `prefers-reduced-motion` 支持；按钮 / 列表行 / 输入框统一 hover / active / disabled / `:focus-visible` 金色焦点环；对局「轮到你走棋」浅金实底强调（将军 / 终局仍为警示配色）；房间号徽章、回顾页签幽灵态、单选按钮与滚动条配色、轻提示换行与 `role=status`、右上角入口超宽省略** | 见 [ADR-0007 §3.5.4](./adr/0007-renderer-ui.md) |
+| **v2.4** | **象棋杀法识别：新增共享模块 `shared/checkmate.ts`（18 种经典杀法 + 结构匹配），将死时状态框显示具体杀法名（如「马后炮杀」）并给出解说与「同时构成」；对局记录新增 `killMethod` 随对局回顾落库，列表与复盘页同步展示（复盘按着法即时识别，新老记录都可用）；终局杀法框沿用 v2.4 设计令牌与层级** | 见 [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -172,6 +173,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 10 | 渲染层 | 页面流转、棋盘 Canvas 渲染与交互、三套皮肤与音效、服务器选择 / 房间 / 账号 UI、对局回顾与复盘、本地人机对弈、WebSocket 客户端与心跳、服务器搜索 | [app.ts](../src/renderer/app.ts)、[board.ts](../src/renderer/board.ts)、[review.ts](../src/renderer/review.ts)、[sound.ts](../src/renderer/sound.ts)、[net.ts](../src/renderer/net.ts)、[servers.ts](../src/renderer/servers.ts)、[discover.ts](../src/renderer/discover.ts)、[index.html](../src/renderer/index.html) | [ADR-0007](./adr/0007-renderer-ui.md)、[ADR-0009](./adr/0009-c-d-extensions.md)、[ADR-0010](./adr/0010-room-server.md) |
 | 11 | 测试体系 | 单元测试、服务端集成测试、完整对局端到端回放 | [tests/](../tests/) | [ADR-0008](./adr/0008-testing-strategy.md) |
 | 12 | 记谱 / AI / 日志 | 中文记谱与吃子、negamax + α-β 搜索（服务端 AI 房间与客户端本地人机共用）、`LANSCHESS_DEBUG` 日志 | [notation.ts](../src/shared/notation.ts)、[ai.ts](../src/shared/ai.ts)、[log.ts](../src/server/log.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
+| 13 | 杀法识别 | 将死时判定具体杀法（18 种经典杀法 + 兜底「将死」）、给出杀法名与解说；服务端落库与客户端展示共用 | [checkmate.ts](../src/shared/checkmate.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -197,6 +199,9 @@ main / server-main（进程入口，装配 server 与页面）
 | 走子（选子/落点/发送） | 点击棋盘 | 联机：[app.ts `onCell()`](../src/renderer/app.ts) → `move` → [room.ts `applyAndBroadcast()`](../src/server/room.ts) → [game.ts `applyMove()`](../src/shared/game.ts)；本地人机：`localMove()` → [shared/game.ts](../src/shared/game.ts) | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
 | 规则裁判（将军/将死/困毙） | 走子后自动判定 | [rules.ts `judgeAfterMove()`](../src/shared/rules.ts)、[`validateMove()`](../src/shared/rules.ts) | [ADR-0002](./adr/0002-rules-engine.md) |
 | 将军/将死高亮 | 走子后自动 | [board.ts `computeDrawList()`](../src/renderer/board.ts)（被将军一方的将/帅红色脉冲警示环） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 杀法识别（将死时给出具体杀法名） | 走子致将死时自动 | [checkmate.ts `classifyCheckmate()`](../src/shared/checkmate.ts)（终局棋盘 + 最后一步/吃子 → 杀法名与解说） | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
+| 终局杀法展示（对局页 / 观战 / 本地人机） | 终局后右侧面板 | [app.ts `mateInfo()` / `updatePanel()`](../src/renderer/app.ts)（状态框显示「红方胜 · 夹车炮杀」，其下渲染杀法框：杀法名 + 定义 + 同时构成） | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
+| 终局杀法展示（对局回顾 / 复盘） | 回顾列表「胜负」列、复盘页「终局杀法」面板 | 落库：[room.ts `saveRecord()`](../src/server/room.ts) → `killMethod` → [history.ts `toSummary()`](../src/server/history.ts)；展示：[review.ts `resultText()` / `mateOf()`](../src/renderer/review.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 | 悬停预高亮 | 鼠标悬停棋盘 | [app.ts `bindEvents()`](../src/renderer/app.ts) + [board.ts `computeDrawList()`](../src/renderer/board.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 吃子统计 | 侧栏吃子面板自动更新 | [app.ts `renderCaptured()`](../src/renderer/app.ts) → [notation.ts `capturedPieces()`](../src/shared/notation.ts) | [ADR-0009 §3.2](./adr/0009-c-d-extensions.md) |
 | 悔棋（申请/同意） | 对局页「悔棋」 | 联机：[app.ts `offerUndo()`](../src/renderer/app.ts) → `undo_request` / `undo_response` → [room.ts `handleMessage()`](../src/server/room.ts) → [game.ts `undo()`](../src/shared/game.ts)；本地人机：直接回退到本方回合 | [ADR-0009 §3.6](./adr/0009-c-d-extensions.md) |
@@ -229,7 +234,8 @@ Chinese_chess/
 │   │   ├── rules.ts       #   规则引擎：走法/将军/将死/困毙/validateMove
 │   │   ├── game.ts        #   对局状态机：权威棋盘、走子校验、悔棋/超时/终局
 │   │   ├── ai.ts          #   人机引擎：negamax + α-β（服务端 AI 房间与客户端本地人机共用）
-│   │   └── notation.ts    #   中文记谱：describeMove/describeHistory/capturedPieces
+│   │   ├── notation.ts    #   中文记谱：describeMove/describeHistory/capturedPieces
+│   │   └── checkmate.ts   #   杀法识别：18 种经典杀法匹配（将死时给出具体杀法名与解说）
 │   ├── server/            # 服务端（中心服务器）
 │   │   ├── server.ts      #   服务器：HTTP 静态+API、WS 路由、房间表、在线玩家、邀请、空闲回收、局域网 IP
 │   │   ├── room.ts        #   单局房间：席位/先手/猜先/宽限/读秒/AI 房间/邀请口令豁免/落库/销毁倒计时
@@ -296,17 +302,18 @@ Chinese_chess/
 | [rules.test.ts](../tests/rules.test.ts) | 开局棋盘、各棋子走法、将军/照面、将死/困毙、validateMove |
 | [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照 |
 | [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转 |
-| [review.test.ts](../tests/review.test.ts) | 复盘局面还原与越界收敛、行棋方交替、列表文案（玩家名/取先方式/时间/胜负）、**列表请求路径 `historyUrl`（全部 / 我的历史 + URL 编码）** |
+| [checkmate.test.ts](../tests/checkmate.test.ts) | 杀法识别：18 种杀法各构造一个终局局面（先用规则引擎确认确为将死，再断言杀法名）、未匹配时兜底「将死」、红黑双方对称、同时成立的杀法进 `alsoMatched`、`capturedPieceAt` 推导吃子、杀法库条目唯一 |
+| [review.test.ts](../tests/review.test.ts) | 复盘局面还原与越界收敛、行棋方交替、列表文案（玩家名/取先方式/时间/胜负）、**结果文案优先显示杀法名（killMethod）**、**复盘按着法即时识别杀法（mateOf）**、**列表请求路径 `historyUrl`（全部 / 我的历史 + URL 编码）** |
 | [notation.test.ts](../tests/notation.test.ts) | 中文记谱（平/进/退/前后消歧/斜走目标列）、describeHistory 回放、capturedPieces 吃子统计 |
 | [ai.test.ts](../tests/ai.test.ts) | 一步杀、白吃子、无着法返回 null、开局着法合法与耗时 |
 | [net.test.ts](../tests/net.test.ts) | 连接建立与消息分发、pong 内部消化、心跳 5s、16s 无 pong 判离线、主动关闭不提示 |
-| [fullgame.test.ts](../tests/fullgame.test.ts) | 完整一盘棋 WS 回放：双方棋盘一致、seq 单调、history 一致、`game_over`「将死」、重开 |
+| [fullgame.test.ts](../tests/fullgame.test.ts) | 完整一盘棋 WS 回放：双方棋盘一致、seq 单调、history 一致、`game_over`「将死」、**对局记录带识别出的杀法名（killMethod）**、重开 |
 | [server.test.ts](../tests/server.test.ts) | 建房/加入/口令/房间列表/满员；走子与拒绝；认输/和棋/重开/悔棋/离开；观战；宽限重连与房间销毁；终局销毁；空闲回收；两房间隔离；先手方式与猜先；账号与记录归属；**API 跨源响应头与 OPTIONS 预检**、**`/api/history?user=` 我的历史过滤**；玩家列表与房间邀请（在线玩家、**离线账号 online=false 与不可邀请**、免口令加入、邀请校验）；**人机对局不计入对局回顾**；人机；计时；日志与端口回退；静态资源安全与 MIME |
-| [persistence.test.ts](../tests/persistence.test.ts) | 账号注册/登录/token 轮换、账号与对局记录落盘与重启读回、容量上限、损坏文件降级 |
+| [persistence.test.ts](../tests/persistence.test.ts) | 账号注册/登录/token 轮换、账号与对局记录落盘与重启读回（**含杀法名 killMethod**）、容量上限、损坏文件降级 |
 | [discover.test.ts](../tests/discover.test.ts) | 服务器探测、无服务端口返回 null、网段扫描聚合去重与进度 |
 | [servers.test.ts](../tests/servers.test.ts) | 服务器地址解析、网段推导、服务器键、页面地址回退与「浏览器 / 桌面客户端」判定 |
 | [lan-ip.test.ts](../tests/lan-ip.test.ts) | pickLanIp 网段优先级与虚拟网卡跳过 |
-| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）** |
+| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）** |
 
 验收标准见 [Product-plan.md 第 14 节](./Product-plan.md)、[ADR-0008](./adr/0008-testing-strategy.md)
 与 [ADR-0010 §6](./adr/0010-room-server.md)。

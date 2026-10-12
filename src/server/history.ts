@@ -24,6 +24,7 @@ export function toSummary(r: GameRecord): GameRecordSummary {
     guess: r.guess,
     winner: r.winner,
     reason: r.reason,
+    killMethod: r.killMethod,
     moveCount: r.moveCount,
   };
 }

@@ -123,6 +123,21 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | AI 推荐 | `GET /api/ai/hint?id=&index=&depth=`：按 `moves` 前 `index` 步用 `makeMove` 复原局面，行棋方 = `index % 2 === 0 ? 'r' : 'b'`，`pickMove`（depth 默认 2，上限 4，时限 1.2s）返回推荐着法 + `describeMove` 中文记谱；无着法回 `{ none: true }` |
 | 客户端 | `review.ts`：列表 → 复盘；复盘棋盘复用 `renderBoard`（`hint` 高亮起点/终点），步进一次一步，AI 推荐 120ms 防抖 + 序号防乱序 |
 
+### 3.11 杀法识别与终局展示（v2.4）
+
+| 项 | 规格 |
+|---|---|
+| 目标 | 将死时不再只显示泛指的「将死」，而是给出具体杀法名（如「马后炮杀」）与一句话解说 |
+| 识别模块 | 新增 [shared/checkmate.ts](../../src/shared/checkmate.ts)：纯函数、无 DOM / 网络依赖，服务端落库与渲染层展示共用同一实现，结果一致 |
+| 输入 | 终局棋盘 + 被将死方；可选「最后一步」与「最后一步被吃棋子」（后者由 `capturedPieceAt()` 按着法序列推导，供「大刀剜心」判定「车吃宫心士」） |
+| 输出 | `CheckmateInfo { pattern, alsoMatched, recognized }`；`pattern` 含 `id / name / label / definition`，未命中时兜底 `generic`（label 仍为「将死」） |
+| 杀法库 | 18 种：马后炮、重炮、大刀剜心、铁门栓、闷宫、天地炮、夹车炮、双将、白脸将（对面笑）、双马饮泉、卧槽马、挂角马、钓鱼马、侧面虎（高钓马）、八角马、双车错、海底捞月、闷杀；每条含一句定义，资料出处见模块注释（维基教科书《中国象棋/基本杀法列表》、维基百科「铁门闩 / 双车错 / 卧槽马 / 钓鱼马 / 挂角马」、百度百科「绝杀 / 闷杀 / 大刀剜心」等） |
+| 判定方式 | 先分析终局：列出正在将军的棋子，以及将（帅）在九宫内相邻各格的受阻原因（己方子力堵住 / 被对方子力攻击 / 将帅照面禁止）；再按「具体结构优先」顺序匹配杀法库，首个命中者为主杀法，其余命中者写入 `alsoMatched` |
+| 位置判据 | 卧槽位＝对方二路横线与三、七路交叉点（底象前一格）；士角位＝对方九宫四个士角；钓鱼马位＝三·八 / 七·八；侧面虎位＝三、七路卒（兵）位；将门＝将（帅）正前方一格（须在九宫内）；宫心＝对方九宫中心；底线行＝对方底线那一行 |
+| 记录落库 | `GameRecordSummary / GameRecord` 新增可选 `killMethod`（如「马后炮杀」）：`saveRecord()` 在 `reason === '将死'` 时判定并写入，未识别到经典杀法则缺省；容量与落盘沿用 [ADR-0010 §3.8](./0010-room-server.md) |
+| 对局页展示 | [app.ts `updatePanel()`](../../src/renderer/app.ts)：将死且识别到杀法时，状态框显示「红方胜 · 夹车炮杀」，其下渲染杀法框（杀法名 + 定义 + 「同时构成：…」）；联机、观战、本地人机共用同一判定 |
+| 回顾展示 | 列表「胜负」列优先显示记录中的 `killMethod`（旧记录退回「将死」）；复盘页新增「终局杀法」面板，按记录着法即时识别，因此新老记录都能给出具体杀法 |
+
 ## 4. 代码入口
 
 | 内容 | 位置 |
@@ -135,6 +150,9 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 先手方式 / 猜先 / 席位分配 | [host-server.ts `maybeStart()` / `beginFirst()` / `dispatchStart()`](../../src/server/host-server.ts)、[app.ts `chooseFirst()`](../../src/renderer/app.ts) |
 | 对局记录 / AI 推荐服务端 | [host-server.ts `saveRecord()` / `hintFor()`](../../src/server/host-server.ts) |
 | 对局回顾 / 复盘客户端 | [review.ts](../../src/renderer/review.ts) |
+| 杀法识别（杀法库 + 匹配） | [checkmate.ts](../../src/shared/checkmate.ts)（`CHECKMATE_PATTERNS` / `classifyCheckmate` / `classifyCheckmateFromHistory`） |
+| 杀法落库 | [room.ts `saveRecord()`](../../src/server/room.ts)、[history.ts `toSummary()`](../../src/server/history.ts)（`killMethod`） |
+| 杀法展示 | [app.ts `mateInfo()` / `kill-box`](../../src/renderer/app.ts)、[review.ts `mateOf()` / `replay-mate-box`](../../src/renderer/review.ts)、[index.html](../../src/renderer/index.html)、[styles.css](../../src/renderer/styles.css) |
 | 状态机扩展 | [game.ts](../../src/shared/game.ts)（`history` / `undo` / `timeout` / `deadline`） |
 | 渲染层扩展 | [app.ts](../../src/renderer/app.ts)（吃子面板 / 悔棋 / 观战 / 倒计时 / 搜索 / 先手方式）、[review.ts](../../src/renderer/review.ts)（对局回顾 / 复盘 / AI 推荐） |
 | 工程化配置 | [package.json](../../package.json)（dev/lint/format/dist）、[.github/workflows/ci.yml](../../.github/workflows/ci.yml) |
@@ -146,3 +164,5 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 - D 档（自动化）：见 [ADR-0008 §3.1](./0008-testing-strategy.md) 中 notation / ai / discover / server 新增用例。
 - D 档（浏览器实测）：人机对战自动应招与悔棋、观战只读与棋谱同步、双人悔棋请求-回应、
   吃子面板、计时倒计时、主机搜索并连接，全部通过（2026-10-03 验证）。
+- v2.4（杀法识别，浏览器实测 2026-10-11）：终局对局页状态框显示「红方胜 · 夹车炮杀」并在其下渲染杀法框；
+  对局回顾列表「胜负」列显示「红胜（夹车炮杀）」；复盘页「终局杀法」面板显示杀法名与解说；控制台无报错。

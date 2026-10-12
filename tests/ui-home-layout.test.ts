@@ -348,3 +348,38 @@ describe('v2.4 视觉与交互精修', () => {
     expect(HTML).toContain('id="toast" role="status" aria-live="polite"');
   });
 });
+
+describe('v2.4 终局杀法展示', () => {
+  it('对局侧栏含杀法框（杀法名 / 解说 / 同时构成），显隐由 app.ts 控制', () => {
+    for (const id of ['kill-box', 'kill-name', 'kill-def', 'kill-also']) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    expect(APP).toContain("const killBox = $('kill-box')");
+    expect(APP).toContain('killBox.hidden = !mate');
+    expect(APP).toContain('function mateInfo()');
+  });
+
+  it('复盘页含「终局杀法」面板（按记录着法即时识别）', () => {
+    for (const id of ['replay-mate-box', 'replay-mate-name', 'replay-mate-def', 'replay-mate-also']) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    expect(HTML).toContain('终局杀法');
+  });
+
+  it('杀法框沿用 v2.4 设计令牌（与状态框同款面板、单一强调金）', () => {
+    expect(decl('.kill-box', 'border')).toBe('1px solid var(--line)');
+    expect(decl('.kill-box', 'border-radius')).toBe('var(--radius-sm)');
+    expect(decl('.kill-name', 'color')).toBe('var(--gold)');
+    expect(decl('.kill-def', 'color')).toBe('var(--text-dim)');
+    expect(decl('.kill-also', 'color')).toBe('var(--text-mute)');
+    // 黑方致胜时杀法名换用冷色，与状态框的 win-black 呼应
+    expect(decl('.kill-box.win-black .kill-name', 'color')).toBe('#bcd2e8');
+    // 空的「同时构成」不占位
+    expect(decl('.kill-also:empty', 'display')).toBe('none');
+  });
+
+  it('小屏（<=900px）下杀法框与状态框同列铺满', () => {
+    const rule = RULES.find((r) => r.selectors.includes('.kill-box') && r.decls.includes('flex: 1 1 100%'));
+    expect(rule).toBeTruthy();
+  });
+});

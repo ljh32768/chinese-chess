@@ -574,6 +574,22 @@ body::before {
   border-radius: var(--radius-sm);
 }
 
+/* 终局杀法（将死时展示具体杀法名 / 解说 / 同时构成的其它杀法）：
+   与状态框同款面板 + 左侧金色发丝，作为终局信息的补充说明，样式沿用 v2.4 设计令牌 */
+.kill-box {
+  padding: 10px 12px;
+  text-align: center;
+  background: linear-gradient(180deg, #3d2d1d, #33251a);
+  border: 1px solid var(--line);
+  border-left: 3px solid rgba(255, 207, 122, 0.3);
+  border-radius: var(--radius-sm);
+}
+.kill-name { font-size: 15px; font-weight: 700; letter-spacing: 2px; color: var(--gold); }
+.kill-box.win-black .kill-name { color: #bcd2e8; }
+.kill-def { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--text-dim); word-break: break-all; }
+.kill-also { margin-top: 4px; font-size: 11px; letter-spacing: 1px; color: var(--text-mute); }
+.kill-also:empty { display: none; }
+
 .panel-box {
   padding: 10px 12px;
   font-size: 12px;
@@ -759,7 +775,7 @@ body::before {
   .game-layout { gap: 12px; }
   .panel { flex: 1 1 100%; min-width: 0; flex-direction: row; flex-wrap: wrap; }
   .player-row { flex: 1 1 45%; }
-  .status-box, .req-hint, .panel-box, .role-hint { flex: 1 1 100%; }
+  .status-box, .req-hint, .panel-box, .role-hint, .kill-box { flex: 1 1 100%; }
   #board { max-height: calc(100vh - 260px); }
 }
 

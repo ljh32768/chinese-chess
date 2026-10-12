@@ -3,7 +3,7 @@
  * 双方通过 WebSocket 轮流走子，直到红方将死黑方，验证：
  * 1. 每一步双方广播的棋盘一致，且与服务器权威棋盘一致；
  * 2. seq 单调递增，防乱序；
- * 3. 终局广播 game_over，原因为「将死」；
+ * 3. 终局广播 game_over，原因为「将死」（对局记录中带有识别出的杀法名）；
  * 4. 结束后可重开，回到初始局面。
  *
  * 着法序列由 scripts/find-mate.mjs 生成并逐步校验（见该脚本的回放校验输出）。
@@ -11,49 +11,9 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { GameServer } from '../src/server/server.js';
-import { Board, Pos } from '../src/shared/types.js';
+import { Board } from '../src/shared/types.js';
+import { MATE_LINE } from './mate-line.js';
 import { TestClient } from './ws-client.js';
-
-/** 红方先行，双方轮流；最后一步为红方将死黑方 */
-const MATE_LINE: Array<{ from: Pos; to: Pos }> = [
-  { from: [7, 1], to: [0, 1] },
-  { from: [3, 0], to: [4, 0] },
-  { from: [7, 7], to: [0, 7] },
-  { from: [4, 0], to: [5, 0] },
-  { from: [0, 1], to: [0, 3] },
-  { from: [5, 0], to: [5, 1] },
-  { from: [0, 3], to: [0, 0] },
-  { from: [0, 2], to: [2, 0] },
-  { from: [0, 7], to: [0, 5] },
-  { from: [5, 1], to: [6, 1] },
-  { from: [0, 5], to: [0, 8] },
-  { from: [0, 6], to: [2, 8] },
-  { from: [0, 8], to: [3, 8] },
-  { from: [6, 1], to: [7, 1] },
-  { from: [3, 8], to: [3, 4] },
-  { from: [7, 1], to: [8, 1] },
-  { from: [0, 0], to: [0, 3] },
-  { from: [8, 1], to: [8, 0] },
-  { from: [9, 0], to: [8, 0] },
-  { from: [3, 2], to: [4, 2] },
-  { from: [3, 4], to: [1, 4] },
-  { from: [4, 2], to: [5, 2] },
-  { from: [6, 2], to: [5, 2] },
-  { from: [3, 6], to: [4, 6] },
-  { from: [1, 4], to: [2, 4] },
-  { from: [4, 6], to: [5, 6] },
-  { from: [2, 4], to: [2, 0] },
-  { from: [5, 6], to: [5, 7] },
-  { from: [2, 0], to: [2, 7] },
-  { from: [5, 7], to: [6, 7] },
-  { from: [0, 3], to: [1, 3] },
-  { from: [6, 7], to: [7, 7] },
-  { from: [1, 3], to: [1, 4] },
-  { from: [7, 7], to: [8, 7] },
-  { from: [2, 7], to: [2, 4] },
-  { from: [0, 4], to: [0, 5] },
-  { from: [8, 0], to: [8, 5] },
-];
 
 let server: GameServer | null = null;
 const clients: TestClient[] = [];
@@ -163,6 +123,14 @@ describe('完整对局回放', () => {
     expect(overHost.state.moveSeq).toBe(MATE_LINE.length);
     expect(overHost.state.history).toHaveLength(MATE_LINE.length);
     expect(overHost.state.history[0]).toEqual(MATE_LINE[0]);
+
+    // 对局记录带识别出的杀法名（「将死」不再只有泛指文案）
+    const list = (await (await fetch(`http://127.0.0.1:${s.address.port}/api/history`)).json()) as {
+      games: { reason: string; killMethod?: string }[];
+    };
+    expect(list.games).toHaveLength(1);
+    expect(list.games[0].reason).toBe('将死');
+    expect(list.games[0].killMethod).toBe('夹车炮杀');
 
     // 终局后走子会被拒绝，程序不崩溃
     guest.send({ type: 'move', from: [9, 4], to: [8, 4] });
