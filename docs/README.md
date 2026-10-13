@@ -5,8 +5,8 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.6（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**）
-- 状态：v2.6 完成；288 项自动化测试通过，lint / format / build / CI 全绿
+- 版本：v2.7（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**）
+- 状态：v2.7 完成；296 项自动化测试通过，lint / format / build / CI 全绿
 - 更新日期：2026-10-13
 
 版本里程碑：
@@ -28,6 +28,7 @@
 | **v2.4** | **象棋杀法识别：新增共享模块 `shared/checkmate.ts`（18 种经典杀法 + 结构匹配），将死时状态框显示具体杀法名（如「马后炮杀」）并给出解说与「同时构成」；对局记录新增 `killMethod` 随对局回顾落库，列表与复盘页同步展示（复盘按着法即时识别，新老记录都可用）；终局杀法框沿用 v2.4 设计令牌与层级** | 见 [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 | **v2.5** | **残局挑战：新增共享模块 `shared/endgame.ts`（9 局经典杀法题库 + 强制将死求解器 `canForceMate` / `findMateMove`）；首页挂板新增「残局挑战」入口（5 → 6 入口，按钮按 43px 等比缩放铺满内框）；题库列表给出名称 / 难度 / 目标步数与通关标记，开局即本地对弈（AI 执玩家的对方、深度 4 防守），对局页残局操作行为「悔棋 / 提示 / 重来 / 离开」并新增残局目标信息块；在目标步数内将死即成功（超出步数 / 被将死则失败），通关记录存本机并显示「已通关 · N 步」；状态机新增 `Game.setup()` 以自定义局面开局** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | **v2.6** | **残局功能优化：对局页残局操作行新增「下一关」（`nextPuzzle` 跳转题库下一局，最后一关自动隐藏、无解时提示）；残局面板新增「自检题库」（`endgame.ts` 增 `checkPuzzle` / `checkEndgameBank` 纯函数，逐条核验局面合法 / 目标步数内可解 / 步数最少，结果以弹层逐条列出）** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| **v2.7** | **残局改为不限步数：把对方将死即挑战成功（不再按步数判负），题库给出的步数改为展示「最优步数」；「提示」改用 `minMateDepth` + `findMateMove` 给出当前局面仍能取胜的最快着法；列表新增状态标记——勾叉表示完成 / 失败 / 未完成（绿勾 / 红叉 / 白勾），外圈绿色表示已达成最优步数、灰色表示未达成；本机记录改为「取胜最少步数 + 是否曾失败」并兼容旧的数字格式** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -80,12 +81,12 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
    （红黑方 / 取先方式 / 时间 / 胜负），顶部页签可切换「全部对局 / 我的历史」（我的历史按账号或本机最近一次身份过滤，
    请求的是**当前所选服务器**的记录）；点进某一局即可「下一步 ▶」逐步复盘并查看每个局面的 AI 推荐着法。
    **人机对局（本地或服务器 AI 房间）不计入对局回顾。**
-8. 单人还可点首页「残局挑战」做杀法练习：面板里列出 9 局残局（入门 / 中等 / 困难，目标 1–3 步内取胜），
-   点一条即进入棋盘——你执红先行，AI（黑方）自动应招；侧栏「残局目标」显示目标与已用步数，
-   棋盘下可用「悔棋 / 提示 / 下一关 / 重来 / 离开」（提示给仍能取胜的正解首着；「下一关」直接跳到题库中的下一局，
-   最后一关时按钮自动隐藏）。
-   在目标步数内取胜即挑战成功（显示具体杀法名并可「下一关」），超出步数或被将死则挑战失败；
-   通关记录存在本机，列表显示「已通关 · N 步」。残局面板底部的「自检题库」会用求解器逐条核验每局的
+8. 单人还可点首页「残局挑战」做杀法练习：面板里列出 9 局残局（入门 / 中等 / 困难，并给出每局「最优 N 步」），
+   点一条即进入棋盘——你执红先行，AI（黑方）自动应招；**不限步数，把对方将死即挑战成功**（被对方将死 / 困毙则挑战失败）。
+   列表每条带状态标记：**勾叉表示完成 / 失败 / 未完成（绿勾 / 红叉 / 白勾），外圈绿色表示已达成最优步数、灰色表示未达成**。
+   侧栏「残局」信息块显示残局名、难度、最优步数与已用步数；棋盘下可用「悔棋 / 提示 / 下一关 / 重来 / 离开」
+   （提示给出当前局面仍能取胜的最快着法；「下一关」直接跳到题库中的下一局，最后一关时按钮自动隐藏）。
+   通关记录存在本机（取胜最少步数 + 是否曾失败）。残局面板底部的「自检题库」会用求解器逐条核验每局的
    局面合法性与可解性（目标步数内可解且步数最少），结果以弹层逐条列出。**残局同样是本地对弈，不需要连接服务器，也不计入对局回顾。**
 
 账号（可选）：点首页**右上角**的账号按钮（未登录时显示「登录 / 注册」，登录后显示用户名），
@@ -183,7 +184,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 11 | 测试体系 | 单元测试、服务端集成测试、完整对局端到端回放 | [tests/](../tests/) | [ADR-0008](./adr/0008-testing-strategy.md) |
 | 12 | 记谱 / AI / 日志 | 中文记谱与吃子、negamax + α-β 搜索（服务端 AI 房间与客户端本地人机共用）、`LANSCHESS_DEBUG` 日志 | [notation.ts](../src/shared/notation.ts)、[ai.ts](../src/shared/ai.ts)、[log.ts](../src/server/log.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 13 | 杀法识别 | 将死时判定具体杀法（18 种经典杀法 + 兜底「将死」）、给出杀法名与解说；服务端落库与客户端展示共用 | [checkmate.ts](../src/shared/checkmate.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
-| 14 | 残局挑战 | 内置经典杀法题库（9 局，入门 – 困难）+ 强制将死求解器；本地对弈、提示 / 悔棋 / 下一关 / 重来、目标步数判定、本机通关记录与题库自检 | [endgame.ts](../src/shared/endgame.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 14 | 残局挑战 | 内置经典杀法题库（9 局，入门 – 困难）+ 强制将死求解器与最快取胜步数 `minMateDepth`；本地对弈（**不限步数，将死即胜**）、提示（最快取胜着法）/ 悔棋 / 下一关 / 重来、最优步数展示、列表状态标记、本机胜负记录与题库自检 | [endgame.ts](../src/shared/endgame.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -224,11 +225,11 @@ main / server-main（进程入口，装配 server 与页面）
 | 复盘（逐步 + AI 推荐） | 列表点击某局 → 「下一步 ▶」/ → 键 | [review.ts](../src/renderer/review.ts) → `GET /api/history/:id` + `GET /api/ai/hint?id&index` | [ADR-0009 §3.10](./adr/0009-c-d-extensions.md) |
 | 人机对弈（本地） | 首页「人机对弈」→ 选难度 →「开始对弈」（**不计入对局回顾**） | [app.ts `createAiRoom()` / `localMove()` / `scheduleLocalAi()`](../src/renderer/app.ts) → [shared/game.ts](../src/shared/game.ts) + [shared/ai.ts `pickMove()`](../src/shared/ai.ts)；**不需要连接服务器** | [ADR-0009 §3.7](./adr/0009-c-d-extensions.md)、[ADR-0010 §9.5 / §10](./adr/0010-room-server.md) |
 | 人机对弈（服务器 AI 房间，协议保留；**不计入对局回顾**） | 可由 `create_room{mode:'ai'}` 触发 | [room.ts `startAiGame()` / `scheduleAiMove()`](../src/server/room.ts) → [shared/ai.ts](../src/shared/ai.ts) | [ADR-0010 §10](./adr/0010-room-server.md) |
-| 残局挑战（题库列表 → 开局） | 首页「残局挑战」→ 面板列表点某一条（**本地对弈，不需服务器**） | [app.ts `openEndgamePanel()` / `renderEndgameList()` / `startPuzzle()`](../src/renderer/app.ts) → [endgame.ts `PUZZLES` / `buildPuzzleBoard()`](../src/shared/endgame.ts) → [game.ts `setup()`](../src/shared/game.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
-| 残局提示 / 悔棋 / 重来 | 棋盘下「提示 / 悔棋 / 重来」 | [app.ts `endgameHint()` / `endgameUndo()` / `restartPuzzle()`](../src/renderer/app.ts) → [endgame.ts `findMateMove()`](../src/shared/endgame.ts)（棋盘金环高亮 + 中文记谱提示） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 残局挑战（题库列表 → 开局） | 首页「残局挑战」→ 面板列表点某一条（**本地对弈，不需服务器；不限步数，将死即胜**） | [app.ts `openEndgamePanel()` / `renderEndgameList()` / `startPuzzle()`](../src/renderer/app.ts) → [endgame.ts `PUZZLES` / `buildPuzzleBoard()`](../src/shared/endgame.ts) → [game.ts `setup()`](../src/shared/game.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 残局提示 / 悔棋 / 重来 | 棋盘下「提示 / 悔棋 / 重来」 | [app.ts `endgameHint()` / `endgameUndo()` / `restartPuzzle()`](../src/renderer/app.ts) → [endgame.ts `minMateDepth()` / `findMateMove()`](../src/shared/endgame.ts)（当前局面仍能取胜的最快着法，棋盘金环高亮 + 中文记谱 + 步数提示） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 残局「下一关」 | 棋盘下「下一关」（最后一关自动隐藏） | [app.ts `endgameNext()`](../src/renderer/app.ts) → [endgame.ts `nextPuzzle()`](../src/shared/endgame.ts) → `startPuzzle(next)`；结果弹层同样提供「下一关」 | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 残局题库自检 | 残局面板底部「自检题库」 | [app.ts `checkEndgameBankUI()`](../src/renderer/app.ts) → [endgame.ts `checkPuzzle()` / `checkEndgameBank()`](../src/shared/endgame.ts)（逐条核验局面合法 / 目标步数内可解 / 步数最少，弹层逐条列出） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
-| 残局胜负与通关记录 | 每步之后自动判定 | [app.ts `endgameEvaluate()` / `showEndgameResult()`](../src/renderer/app.ts)（目标步数内取胜 = 成功并记入 `localStorage`；超出步数 / 被将死 = 失败） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 残局胜负与列表状态标记 | 每步之后自动判定；打开面板时渲染列表 | [app.ts `endgameEvaluate()` / `showEndgameResult()` / `renderEndgameList()`](../src/renderer/app.ts)（将死即胜并记入 `localStorage` 的最少步数；被将死 / 困毙记失败；列表勾叉 = 完成 / 失败 / 未完成，外圈绿 / 灰 = 是否达成最优步数） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 更换皮肤 | 首页「更换皮肤」 | [app.ts `switchSkin()`](../src/renderer/app.ts) → [board.ts `nextSkin()` / `loadSkinImages()`](../src/renderer/board.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 选子 / 走子音效 | 点击棋子 / 收到走子广播时自动 | [sound.ts](../src/renderer/sound.ts)（`select.wav` / `click.wav`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 心跳保活 | 后台自动运行（5s 间隔） | [net.ts `startPing()`](../src/renderer/net.ts) → `ping` / `pong`（`pong` 携带服务器声明地址） | [ADR-0007](./adr/0007-renderer-ui.md) |
@@ -251,7 +252,7 @@ Chinese_chess/
 │   │   ├── ai.ts          #   人机引擎：negamax + α-β（服务端 AI 房间与客户端本地人机共用）
 │   │   ├── notation.ts    #   中文记谱：describeMove/describeHistory/capturedPieces
 │   │   ├── checkmate.ts   #   杀法识别：18 种经典杀法匹配（将死时给出具体杀法名与解说）
-│   │   └── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove）+ 题库自检（checkPuzzle/checkEndgameBank）
+│   │   └── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove/minMateDepth）+ 题库自检（checkPuzzle/checkEndgameBank）
 │   ├── server/            # 服务端（中心服务器）
 │   │   ├── server.ts      #   服务器：HTTP 静态+API、WS 路由、房间表、在线玩家、邀请、空闲回收、局域网 IP
 │   │   ├── room.ts        #   单局房间：席位/先手/猜先/宽限/读秒/AI 房间/邀请口令豁免/落库/销毁倒计时
@@ -309,7 +310,7 @@ Chinese_chess/
 
 - 测试命令：`npm test`（vitest run，node 环境）；配套 `npm run lint` 与 `npm run format:check`。
 - 覆盖范围：规则引擎单测、状态机单测（含自定义局面 `setup` / 悔棋 / 终局清理）、棋盘 Canvas 渲染计划与点击命中、中文记谱与吃子统计、
-  AI 引擎、**残局题库与强制将死求解器（含题库自检 `checkPuzzle` / `checkEndgameBank`）**、WebSocket 客户端心跳、完整对局端到端回放、服务器连接/消息/房间隔离/口令/宽限重连/观战/人机（含难度）/
+  AI 引擎、**残局题库与强制将死求解器（含最快取胜步数 `minMateDepth`、题库自检 `checkPuzzle` / `checkEndgameBank`）**、WebSocket 客户端心跳、完整对局端到端回放、服务器连接/消息/房间隔离/口令/宽限重连/观战/人机（含难度）/
   先手方式与猜先/对局回顾与 AI 推荐/计时/静态安全与素材 MIME 集成、账号与记录持久化、局域网 IP 与服务器发现、
   复盘局面还原、主界面布局（署名遮盖 / 放大范围 / 大面板 / **6 入口挂板几何** / v2.4 视觉精修契约）。
 
@@ -319,7 +320,7 @@ Chinese_chess/
 | [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照、**`setup()` 自定义局面（残局开局）与终局判定** |
 | [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转 |
 | [checkmate.test.ts](../tests/checkmate.test.ts) | 杀法识别：18 种杀法各构造一个终局局面（先用规则引擎确认确为将死，再断言杀法名）、未匹配时兜底「将死」、红黑双方对称、同时成立的杀法进 `alsoMatched`、`capturedPieceAt` 推导吃子、杀法库条目唯一 |
-| [endgame.test.ts](../tests/endgame.test.ts) | 残局挑战：题库自洽（id 唯一、难度有序、棋子不重叠、双方有将、对方有子可走）、**9 局逐条由求解器验证「目标步数内可强制取胜且步数最少」**、正解首着合法且走完仍在杀棋内、非退化（不是随便走都赢）；**题库自检（内置题库逐条通过，能否抓出缺将/越界/重叠/不可解/非最少步数/后手已被将死，且不改动传入题目）**；求解器语义（一步杀 / 多步杀 / **困毙同将死** / 不改动传入棋盘 / 黑方对称）；界面接线（首页 6 入口、残局面板、残局操作行与目标块、**「下一关」按钮与最后一关隐藏**、**「自检题库」入口与结果弹层**、**多步残局继续调度 AI 应招**、列表与样式契约） |
+| [endgame.test.ts](../tests/endgame.test.ts) | 残局挑战：题库自洽（id 唯一、难度有序、棋子不重叠、双方有将、对方有子可走）、**9 局逐条由求解器验证「目标步数内可强制取胜且步数最少」**、正解首着合法且走完仍在杀棋内、非退化（不是随便走都赢）；**题库自检（内置题库逐条通过，能否抓出缺将/越界/重叠/不可解/非最少步数/后手已被将死，且不改动传入题目）**；求解器语义（一步杀 / 多步杀 / **困毙同将死** / **`minMateDepth` 最快取胜步数（含题库逐局 = `goalMoves`）** / 不改动传入棋盘 / 黑方对称）；**本机记录（完成/失败/未完成、最优步数判定、旧版数字格式兼容、失败不覆盖已通关、取胜清除失败标记、纯函数不改动传入对象）**；界面接线（首页 6 入口、残局面板、残局操作行与信息块、**不限步数（无「超出步数」判负）**、**列表状态标记（绿勾/红叉/白勾 + 绿/灰外圈）**、**「下一关」按钮与最后一关隐藏**、**「自检题库」入口与结果弹层**、**多步残局继续调度 AI 应招**、列表与样式契约） |
 | [review.test.ts](../tests/review.test.ts) | 复盘局面还原与越界收敛、行棋方交替、列表文案（玩家名/取先方式/时间/胜负）、**结果文案优先显示杀法名（killMethod）**、**复盘按着法即时识别杀法（mateOf）**、**列表请求路径 `historyUrl`（全部 / 我的历史 + URL 编码）** |
 | [notation.test.ts](../tests/notation.test.ts) | 中文记谱（平/进/退/前后消歧/斜走目标列）、describeHistory 回放、capturedPieces 吃子统计 |
 | [ai.test.ts](../tests/ai.test.ts) | 一步杀、白吃子、无着法返回 null、开局着法合法与耗时 |

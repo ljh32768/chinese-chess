@@ -646,7 +646,24 @@ body::before {
 }
 .eg-row .eg-level.hard { color: #ffb9a6; background: rgba(255, 157, 138, 0.12); border-color: rgba(255, 157, 138, 0.34); }
 .eg-row .eg-goal { flex: none; font-size: 12px; color: var(--text-dim); }
-.eg-row .eg-done { flex: none; font-size: 11px; letter-spacing: 1px; color: var(--ok); }
+/* 状态标记：勾叉 = 完成（绿勾）/ 失败（红叉）/ 未完成（白勾）；外圈绿 = 已达成最优步数、灰 = 未达成 */
+.eg-row .eg-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-dim);
+  border: 2px solid #8f8f8f;
+  border-radius: 50%;
+}
+.eg-row .eg-mark.win { color: var(--ok); }
+.eg-row .eg-mark.fail { color: var(--err); }
+.eg-row .eg-mark.todo { color: #fff; }
+.eg-row .eg-mark.optimal { border-color: var(--ok); }
 
 /* 对局侧栏的残局目标（残局模式下取代常规信息块） */
 .eg-info { color: var(--text-dim); line-height: 1.85; word-break: break-all; }

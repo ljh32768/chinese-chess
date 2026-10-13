@@ -362,6 +362,17 @@ function cloneForSolve(board: Board): Board {
   return board.map((row) => row.map((p) => (p ? { t: p.t, s: p.s } : null)));
 }
 
+/**
+ * 从当前局面出发，最少几步可强制取胜（返回步数；max 步以内无解返回 0）。
+ * 残局不限步数，配合 `findMateMove()` 可在任意局面给出「仍能取胜」的最快着法
+ * （`minMateDepth` 返回的步数即该着法所需步数，也是当前局面的最优步数）。
+ */
+export function minMateDepth(board: Board, side: Side, max: number): number {
+  const cap = Math.floor(max);
+  for (let d = 1; d <= cap; d++) if (canForceMate(board, side, d)) return d;
+  return 0;
+}
+
 // ------------------------------------------------------------------ 题库自检
 
 /** 一道残局的自检结果 */
@@ -425,4 +436,72 @@ export function checkPuzzle(p: EndgamePuzzle): PuzzleCheck {
 /** 题库整体自检：逐条核验（返回顺序与 PUZZLES 一致） */
 export function checkEndgameBank(): PuzzleCheck[] {
   return PUZZLES.map(checkPuzzle);
+}
+
+// ------------------------------------------------------------------ 本机记录
+
+/** 单局残局的完成情况：已完成 / 失败 / 未完成 */
+export type EndgameOutcome = 'win' | 'fail' | 'todo';
+
+/** 单局残局记录：取胜时的最少步数 / 是否曾失败（被将死 / 困毙） */
+export interface EndgameRecord {
+  /** 已通关：取胜时的最少步数（未通关为 undefined） */
+  win?: number;
+  /** 是否曾挑战失败（被将死 / 困毙） */
+  fail?: boolean;
+}
+
+/** 解析本机残局记录 JSON（兼容旧版「id → 步数」数字格式，视为已通关；损坏数据按空处理） */
+export function parseEndgameRecords(raw: string | null): Record<string, EndgameRecord> {
+  if (!raw) return {};
+  try {
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, EndgameRecord> = {};
+    for (const [id, v] of Object.entries(data)) {
+      if (typeof v === 'number' && v > 0) {
+        out[id] = { win: v }; // 旧格式：数字 = 已通关的最少步数
+        continue;
+      }
+      if (v && typeof v === 'object') {
+        const o = v as { win?: unknown; fail?: unknown };
+        const win = typeof o.win === 'number' && o.win > 0 ? o.win : undefined;
+        const fail = o.fail === true;
+        if (win !== undefined || fail) out[id] = { win, fail };
+      }
+    }
+    return out;
+  } catch {
+    return {}; // 损坏数据按「未完成」处理
+  }
+}
+
+/** 记录一次取胜（保留最少步数，并清除失败标记；不修改传入对象） */
+export function recordWin(
+  records: Record<string, EndgameRecord>,
+  id: string,
+  used: number,
+): Record<string, EndgameRecord> {
+  const best = records[id]?.win;
+  return { ...records, [id]: { win: best !== undefined && best < used ? best : used } };
+}
+
+/** 记录一次失败（被将死 / 困毙）；已通关的局不再标记失败（不修改传入对象） */
+export function recordFail(
+  records: Record<string, EndgameRecord>,
+  id: string,
+): Record<string, EndgameRecord> {
+  if (records[id]?.win !== undefined) return records;
+  return { ...records, [id]: { fail: true } };
+}
+
+/** 完成情况（列表勾叉）：绿勾 = 已完成 / 红叉 = 失败 / 白勾 = 未完成 */
+export function endgameOutcome(rec: EndgameRecord | undefined): EndgameOutcome {
+  if (rec?.win !== undefined) return 'win';
+  if (rec?.fail) return 'fail';
+  return 'todo';
+}
+
+/** 是否达成最优步数（列表外圈：绿 = 是最优，灰 = 不是最优） */
+export function isOptimalSteps(rec: EndgameRecord | undefined, goalMoves: number): boolean {
+  return rec?.win !== undefined && rec.win === goalMoves;
 }

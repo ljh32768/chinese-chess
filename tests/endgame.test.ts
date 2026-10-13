@@ -12,15 +12,22 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  EndgameRecord,
   LEVEL_LABEL,
   PUZZLES,
   buildPuzzleBoard,
   canForceMate,
   checkEndgameBank,
   checkPuzzle,
+  endgameOutcome,
   findMateMove,
   findPuzzle,
+  isOptimalSteps,
+  minMateDepth,
   nextPuzzle,
+  parseEndgameRecords,
+  recordFail,
+  recordWin,
 } from '../src/shared/endgame.js';
 import { isInCheck, legalMoves, makeMove, sideHasAnyMove } from '../src/shared/rules.js';
 import { Board, Cell, Move, PieceType, Side } from '../src/shared/types.js';
@@ -244,6 +251,53 @@ describe('残局题库：自检（checkPuzzle / checkEndgameBank）', () => {
   });
 });
 
+// ---------------------------------------------------------------- 本机记录
+
+describe('残局本机记录：完成 / 失败 / 未完成与最优步数', () => {
+  it('endgameOutcome：已完成 / 失败 / 未完成（取胜优先于失败）', () => {
+    expect(endgameOutcome(undefined)).toBe('todo');
+    expect(endgameOutcome({})).toBe('todo');
+    expect(endgameOutcome({ fail: true })).toBe('fail');
+    expect(endgameOutcome({ win: 3 })).toBe('win');
+    expect(endgameOutcome({ win: 3, fail: true })).toBe('win');
+  });
+
+  it('isOptimalSteps：取胜步数等于最优步数才算达成（未通关 / 失败不算）', () => {
+    expect(isOptimalSteps(undefined, 2)).toBe(false);
+    expect(isOptimalSteps({ fail: true }, 2)).toBe(false);
+    expect(isOptimalSteps({ win: 3 }, 2)).toBe(false); // 赢过但非最优
+    expect(isOptimalSteps({ win: 2 }, 2)).toBe(true);
+  });
+
+  it('parseEndgameRecords：兼容旧版数字格式，容忍损坏数据', () => {
+    expect(parseEndgameRecords(null)).toEqual({});
+    expect(parseEndgameRecords('not json')).toEqual({});
+    expect(parseEndgameRecords('{"a":2}')).toEqual({ a: { win: 2 } }); // 旧格式：数字 = 已通关
+    expect(parseEndgameRecords('{"a":{"win":3,"fail":true},"b":{"fail":true},"c":"x","d":0}')).toEqual({
+      a: { win: 3, fail: true },
+      b: { fail: true },
+    });
+  });
+
+  it('recordWin / recordFail：保留最少步数、失败不覆盖已通关，且不修改传入对象', () => {
+    const base: Record<string, EndgameRecord> = {};
+
+    const win5 = recordWin(base, 'p', 5);
+    expect(win5).toEqual({ p: { win: 5 } });
+    expect(base).toEqual({}); // 纯函数：不改动传入对象
+
+    expect(recordWin(win5, 'p', 3).p.win).toBe(3); // 更快 → 更新
+    expect(recordWin(win5, 'p', 8).p.win).toBe(5); // 更慢 → 保留最好
+
+    const failed = recordFail(win5, 'p'); // 已通关的局不再标失败
+    expect(failed).toBe(win5);
+    expect(recordFail(base, 'q')).toEqual({ q: { fail: true } });
+
+    // 失败后再取胜：失败标记被清除（列表显示绿勾而非红叉）
+    expect(recordWin(recordFail(base, 'q'), 'q', 2)).toEqual({ q: { win: 2 } });
+  });
+});
+
 // ---------------------------------------------------------------- 求解器
 
 describe('强制将死求解器', () => {
@@ -328,6 +382,33 @@ describe('强制将死求解器', () => {
     expect(findMateMove(b, 'b', 1)).not.toBeNull();
     expect(legalMoves(b, 1, 8).length).toBeGreaterThan(0);
   });
+
+  it('minMateDepth：给出当前局面的最少取胜步数（超过搜索上限返回 0）', () => {
+    // 一步杀
+    const one = board(MATE_IN_1);
+    expect(minMateDepth(one, 'r', 1)).toBe(1);
+    expect(minMateDepth(one, 'r', 3)).toBe(1); // 已是「最少」，放宽上限也返回 1
+    expect(minMateDepth(one, 'r', 0)).toBe(0);
+
+    // 借帅封门：两步杀（上限不足时为 0）
+    const two = board([
+      [0, 4, 'K', 'b'],
+      [0, 3, 'A', 'b'],
+      [0, 5, 'A', 'b'],
+      [9, 4, 'K', 'r'],
+      [6, 2, 'R', 'r'],
+      [7, 4, 'N', 'r'],
+    ]);
+    expect(minMateDepth(two, 'r', 1)).toBe(0);
+    expect(minMateDepth(two, 'r', 2)).toBe(2);
+  });
+
+  it('残局题库：不限步数时，初始局面的最优步数即题库给出的 goalMoves', () => {
+    for (const p of PUZZLES) {
+      const b = buildPuzzleBoard(p);
+      expect(`${p.id}:${minMateDepth(b, p.side, 6)}`).toBe(`${p.id}:${p.goalMoves}`);
+    }
+  });
 });
 
 // ---------------------------------------------------------------- 界面接线
@@ -381,13 +462,14 @@ describe('残局挑战：界面接线', () => {
     expect(APP).toContain('r.ok ? ');
   });
 
-  it('渲染层接线：题库局面载入本机状态机、提示用求解器、AI 执玩家的对方、通关记入本地', () => {
+  it('渲染层接线：题库局面载入本机状态机、提示用求解器、AI 执玩家的对方、胜负记入本地', () => {
     expect(APP).toContain('buildPuzzleBoard(p)');
     expect(APP).toContain('findMateMove(S.board, S.side,');
     expect(APP).toContain('localGame.setup(');
     expect(APP).toContain('const ENDGAME_AI_DEPTH');
     expect(APP).toContain('ENDGAME_KEY');
-    expect(APP).toContain('recordEndgameClear');
+    expect(APP).toContain('recordEndgameWin');
+    expect(APP).toContain('recordEndgameFail');
     // 残局不依赖服务器：开局时关闭联机连接
     expect(APP).toContain('function startPuzzle(p: EndgamePuzzle)');
     // 残局走子后不再按人机对弈流程处理
@@ -400,7 +482,7 @@ describe('残局挑战：界面接线', () => {
       APP.indexOf('function showEndgameResult()'),
     );
     expect(body).toContain('scheduleLocalAi()');
-    // 只在「既没有终局、也没有超出步数」的分支里继续对局
+    // 只在「尚未终局」的分支里继续对局
     const elseBranch = body.slice(
       body.indexOf('} else {'),
       body.indexOf('render();\n  showEndgameResult();'),
@@ -409,11 +491,48 @@ describe('残局挑战：界面接线', () => {
     expect(elseBranch).toContain('return;');
   });
 
-  it('AI 应招后同样走残局判定（终局 / 超出步数都能正确收尾）', () => {
+  it('AI 应招后同样走残局判定（终局能正确收尾）', () => {
     const start = APP.indexOf('function scheduleLocalAi()');
     const ai = APP.slice(start, APP.indexOf('// ----', start));
     expect(ai).toContain('localAiSide()');
     expect(ai).toContain('if (S.endgame) endgameEvaluate();');
+  });
+
+  it('残局不限步数：将死即胜，不再按步数判负，并展示最优步数', () => {
+    const body = APP.slice(
+      APP.indexOf('function endgameEvaluate()'),
+      APP.indexOf('function showEndgameResult()'),
+    );
+    // 只按终局判定，不再有「超出步数」这一失败原因
+    expect(body).not.toContain('超出步数');
+    expect(body).toContain("if (S.status === 'over')");
+    expect(body).toContain('recordEndgameWin(eg.puzzle.id, eg.used)');
+    expect(body).toContain('recordEndgameFail(eg.puzzle.id)');
+    // 列表与侧栏都把「目标步数」改为「最优步数」
+    expect(APP).toContain('最优 ${p.goalMoves} 步');
+    expect(APP).toContain('最优：${eg.puzzle.goalMoves} 步');
+    // 侧栏角色提示也不再出现「N 步内取胜」的上限写法
+    expect(APP).toContain('不限步数 · 最优 ${p.goalMoves} 步');
+    expect(APP).not.toContain('${p.goalMoves} 步内取胜');
+    // 提示改为求当前局面最快取胜着法
+    expect(APP).toContain('minMateDepth(S.board, S.side, ENDGAME_HINT_MAX)');
+    expect(APP).toContain('const ENDGAME_HINT_MAX');
+  });
+
+  it('残局列表状态标记：绿勾 / 红叉 / 白勾 + 绿（最优）/ 灰（非最优）外圈', () => {
+    // 渲染层用纯函数判定状态与是否最优（行为见下方「本机记录」用例）
+    expect(APP).toContain('const status = endgameOutcome(r)');
+    expect(APP).toContain('const optimal = isOptimalSteps(r, p.goalMoves)');
+    expect(APP).toContain("mark.className = `eg-mark ${status}${optimal ? ' optimal' : ''}`");
+    expect(APP).toContain("mark.textContent = status === 'fail' ? '✗' : '✓'");
+    // 样式：绿勾 / 红叉 / 白勾 + 绿圈 / 灰圈
+    expect(CSS).toContain('.eg-mark.win');
+    expect(CSS).toContain('.eg-mark.fail');
+    expect(CSS).toContain('.eg-mark.todo');
+    expect(CSS).toContain('.eg-mark.optimal');
+    // 旧的「已通关 · N 步」标签已移除
+    expect(CSS).not.toContain('.eg-done');
+    expect(APP).not.toContain('已通关 · ');
   });
 
   it('残局样式沿用 v2.4 设计令牌，列表行可聚焦', () => {

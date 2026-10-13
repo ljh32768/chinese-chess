@@ -24,12 +24,19 @@ import { pickMove } from '../shared/ai.js';
 import { CheckmateInfo, classifyCheckmate, classifyCheckmateFromHistory } from '../shared/checkmate.js';
 import {
   EndgamePuzzle,
+  EndgameRecord,
   LEVEL_LABEL,
   PUZZLES,
   buildPuzzleBoard,
   checkEndgameBank,
+  endgameOutcome,
   findMateMove,
+  isOptimalSteps,
+  minMateDepth,
   nextPuzzle,
+  parseEndgameRecords,
+  recordFail,
+  recordWin,
 } from '../shared/endgame.js';
 import { capturedPieces, describeMove } from '../shared/notation.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
@@ -346,7 +353,7 @@ function updateRoleHint(): void {
   if (S.endgame) {
     const p = S.endgame.puzzle;
     $('role-hint').textContent =
-      `残局「${p.name}」· 你执${S.side === 'r' ? '红' : '黑'} · ${p.goalMoves} 步内取胜`;
+      `残局「${p.name}」· 你执${S.side === 'r' ? '红' : '黑'} · 不限步数 · 最优 ${p.goalMoves} 步`;
     return;
   }
   if (S.offline) {
@@ -460,8 +467,8 @@ function updatePanel(): void {
       ? `${sideName(S.turn)}行棋中…`
       : eg
         ? S.turn === S.side
-          ? `轮到你走棋（第 ${eg.used + 1} / ${eg.puzzle.goalMoves} 步）`
-          : `对手思考中…（已用 ${eg.used} / ${eg.puzzle.goalMoves} 步）`
+          ? `轮到你走棋（第 ${eg.used + 1} 步）`
+          : `对手思考中…（已用 ${eg.used} 步）`
         : S.turn === S.side
           ? '轮到你走棋'
           : '对方思考中…';
@@ -470,14 +477,14 @@ function updatePanel(): void {
   }
   st.textContent = active ? `${statusText}${remainText()}` : statusText;
 
-  // 残局目标：名称 / 难度 / 目标步数 / 已用步数 + 一句要点
+  // 残局信息：名称 / 难度 / 最优步数 / 已用步数 + 一句要点
   const egBox = $('eg-box');
   egBox.hidden = !eg;
   if (eg) {
     $('eg-info').innerHTML =
       `<div>残局：${eg.puzzle.name} · ${LEVEL_LABEL[eg.puzzle.level]}</div>` +
-      `<div>目标：${eg.puzzle.goalMoves} 步内取胜</div>` +
-      `<div>已用：${eg.used} / ${eg.puzzle.goalMoves} 步</div>` +
+      `<div>最优：${eg.puzzle.goalMoves} 步</div>` +
+      `<div>已用：${eg.used} 步</div>` +
       `<div class="eg-intro">${eg.puzzle.intro}</div>`;
   }
   // 残局「下一关」：题库中还有下一局时可用，最后一关隐藏（结果弹层另有「下一关」）
@@ -1391,27 +1398,22 @@ function scheduleLocalAi(): void {
 /** 残局防守 AI 的搜索深度（高手水平，尽量逼出玩家的正解） */
 const ENDGAME_AI_DEPTH = 4;
 
-/** 读取残局通关记录（id → 最好成绩步数） */
-function readEndgameRecord(): Record<string, number> {
-  const raw = readStore(ENDGAME_KEY);
-  if (!raw) return {};
-  try {
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, number> = {};
-    for (const [id, v] of Object.entries(data)) {
-      if (typeof v === 'number' && v > 0) out[id] = v;
-    }
-    return out;
-  } catch {
-    return {}; // 损坏的本地数据按「未通关」处理
-  }
+/** 「提示」求解的最大步数：在该步数以内给出仍能取胜的最快着法 */
+const ENDGAME_HINT_MAX = 6;
+
+/** 读取本机残局记录（纯逻辑见 shared/endgame.ts `parseEndgameRecords`） */
+function readEndgameRecord(): Record<string, EndgameRecord> {
+  return parseEndgameRecords(readStore(ENDGAME_KEY));
 }
 
-/** 记录通关（保留最好成绩） */
-function recordEndgameClear(id: string, used: number): void {
-  const rec = readEndgameRecord();
-  if (!rec[id] || used < rec[id]) rec[id] = used;
-  writeStore(ENDGAME_KEY, JSON.stringify(rec));
+/** 记录取胜（保留最少步数） */
+function recordEndgameWin(id: string, used: number): void {
+  writeStore(ENDGAME_KEY, JSON.stringify(recordWin(readEndgameRecord(), id, used)));
+}
+
+/** 记录失败（被将死 / 困毙）；已通关的局不再标记失败 */
+function recordEndgameFail(id: string): void {
+  writeStore(ENDGAME_KEY, JSON.stringify(recordFail(readEndgameRecord(), id)));
 }
 
 /** 打开「残局挑战」面板（题库列表） */
@@ -1420,15 +1422,35 @@ function openEndgamePanel(): void {
   showHomePanel('endgame');
 }
 
-/** 渲染题库列表：名称 + 难度 + 目标步数 + 通关标记（点击即开局） */
+/**
+ * 渲染题库列表：状态标记 + 名称 + 难度 + 最优步数（点击即开局）。
+ * 标记含义：勾叉表示完成 / 失败 / 未完成（绿勾 / 红叉 / 白勾），
+ * 外圈表示是否达成最优步数（绿圈 = 是最优，灰圈 = 不是最优）。
+ */
 function renderEndgameList(): void {
   const box = $('endgame-list');
   box.replaceChildren();
-  const done = readEndgameRecord();
+  const rec = readEndgameRecord();
   for (const p of PUZZLES) {
+    const r = rec[p.id];
+    const status = endgameOutcome(r);
+    const optimal = isOptimalSteps(r, p.goalMoves);
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'eg-row';
+
+    const mark = document.createElement('span');
+    mark.className = `eg-mark ${status}${optimal ? ' optimal' : ''}`;
+    mark.textContent = status === 'fail' ? '✗' : '✓';
+    mark.title =
+      status === 'win'
+        ? optimal
+          ? `已完成 · 最优 ${p.goalMoves} 步`
+          : '已完成（未达最优步数）'
+        : status === 'fail'
+          ? '失败'
+          : '未完成';
+
     const name = document.createElement('span');
     name.className = 'eg-name';
     name.textContent = p.name;
@@ -1437,14 +1459,9 @@ function renderEndgameList(): void {
     level.textContent = LEVEL_LABEL[p.level];
     const goal = document.createElement('span');
     goal.className = 'eg-goal';
-    goal.textContent = `${p.goalMoves} 步内取胜`;
-    row.append(name, level, goal);
-    if (done[p.id]) {
-      const tag = document.createElement('span');
-      tag.className = 'eg-done';
-      tag.textContent = `已通关 · ${done[p.id]} 步`;
-      row.appendChild(tag);
-    }
+    goal.textContent = `最优 ${p.goalMoves} 步`;
+    row.append(mark, name, level, goal);
+
     row.addEventListener('click', () => startPuzzle(p));
     box.appendChild(row);
   }
@@ -1476,7 +1493,7 @@ function startPuzzle(p: EndgamePuzzle): void {
   applySnapshot(localGame.snapshot());
   backToIndex();
   enterGame();
-  toast(`残局「${p.name}」：${p.goalMoves} 步内取胜`);
+  toast(`残局「${p.name}」：将死即胜（最优 ${p.goalMoves} 步）`);
   scheduleLocalAi();
 }
 
@@ -1514,21 +1531,30 @@ function endgameUndo(): void {
   toast('已悔棋');
 }
 
-/** 残局提示：给出仍能在剩余步数内取胜的正解首着（已走离杀棋时提示重来） */
+/**
+ * 残局提示：不限步数——给出当前局面下仍能取胜的最快着法（并报出该局面最优步数）；
+ * 若已走成无法强制取胜的局面则建议重来。先让「计算中」绘制出来再做同步求解。
+ */
 function endgameHint(): void {
   const eg = S.endgame;
   if (!eg || S.status !== 'playing' || eg.result) return;
-  const mv = findMateMove(S.board, S.side, eg.puzzle.goalMoves - eg.used);
-  if (!mv) {
-    toast('当前局面已无法在剩余步数内取胜，建议「重来」');
-    return;
-  }
-  S.hint = mv;
-  paint();
-  toast(`提示：${describeMove(S.board, mv.from, mv.to)}`);
+  toast('计算提示中…');
+  window.setTimeout(() => {
+    if (!S.endgame || S.endgame.result || S.status !== 'playing') return;
+    // 当前局面的最优取胜步数：0 表示在搜索上限内已无强制取胜着法
+    const depth = minMateDepth(S.board, S.side, ENDGAME_HINT_MAX);
+    const mv = depth > 0 ? findMateMove(S.board, S.side, depth) : null;
+    if (!mv) {
+      toast('当前局面已无强制取胜的着法，建议「重来」');
+      return;
+    }
+    S.hint = mv;
+    paint();
+    toast(`提示：${describeMove(S.board, mv.from, mv.to)}（${depth} 步内取胜）`);
+  }, 0);
 }
 
-/** 残局：每步之后判定目标（我方取胜 = 成功；被将死 / 超出步数 = 失败） */
+/** 残局：每步之后判定目标（不限步数，将死对方即成功；被将死 / 困毙即失败） */
 function endgameEvaluate(): void {
   const eg = S.endgame;
   if (!eg || eg.result) return;
@@ -1538,12 +1564,10 @@ function endgameEvaluate(): void {
     const won = S.winner === eg.puzzle.side;
     eg.result = won ? 'win' : 'fail';
     eg.reason = won ? S.reason : `被${S.reason}`;
-    if (won) recordEndgameClear(eg.puzzle.id, eg.used);
-  } else if (eg.used >= eg.puzzle.goalMoves) {
-    eg.result = 'fail';
-    eg.reason = '超出步数';
+    if (won) recordEndgameWin(eg.puzzle.id, eg.used);
+    else recordEndgameFail(eg.puzzle.id);
   } else {
-    // 仍在进行中（未超出目标步数）：渲染后交给 AI 应招
+    // 仍在进行中（不限步数）：渲染后交给 AI 应招
     render();
     scheduleLocalAi();
     return;
@@ -1552,15 +1576,20 @@ function endgameEvaluate(): void {
   showEndgameResult();
 }
 
-/** 残局结果弹层：成功可「下一关」，失败可「重来」 */
+/** 残局结果弹层：成功可「下一关」（并给出是否达成最优步数），失败可「重来」 */
 function showEndgameResult(): void {
   const eg = S.endgame;
   if (!eg) return;
   const won = eg.result === 'win';
   const next = won ? nextPuzzle(eg.puzzle.id) : null;
+  const optimal = eg.used === eg.puzzle.goalMoves;
   showModal({
     title: won ? '挑战成功' : '挑战失败',
-    sub: `「${eg.puzzle.name}」${won ? `${eg.reason} · 用时 ${eg.used} 步` : eg.reason}`,
+    sub: won
+      ? `「${eg.puzzle.name}」${eg.reason} · 用时 ${eg.used} 步（最优 ${eg.puzzle.goalMoves} 步${
+          optimal ? ' · 已达成最优' : ''
+        }）`
+      : `「${eg.puzzle.name}」${eg.reason}（最优 ${eg.puzzle.goalMoves} 步）`,
     buttons: [
       ...(next ? [{ label: `下一关：${next.name}`, primary: true, onClick: () => startPuzzle(next) }] : []),
       { label: won ? '再来一次' : '重　来', primary: !next, onClick: restartPuzzle },
