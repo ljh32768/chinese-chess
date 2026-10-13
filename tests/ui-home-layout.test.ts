@@ -396,3 +396,66 @@ describe('v2.4 终局杀法展示', () => {
     expect(rule).toBeTruthy();
   });
 });
+
+describe('v2.8 走子动画与棋盘正中提示条', () => {
+  it('画布包在 .board-stage 里，正中提示条压在棋盘之上且不接收事件', () => {
+    expect(HTML).toContain('class="board-stage"');
+    for (const id of ['board-banner', 'banner-card', 'banner-emblem', 'banner-name', 'banner-sub']) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    // 结构顺序：board-stage → canvas → 提示条
+    const stage = HTML.indexOf('class="board-stage"');
+    const canvas = HTML.indexOf('id="board"', stage);
+    const banner = HTML.indexOf('id="board-banner"', stage);
+    expect(canvas).toBeGreaterThan(stage);
+    expect(banner).toBeGreaterThan(canvas);
+    // 定位：相对画布容器铺满、居中、不可点击
+    expect(decl('.board-stage', 'position')).toBe('relative');
+    expect(decl('.board-banner', 'position')).toBe('absolute');
+    expect(decl('.board-banner', 'inset')).toBe('0');
+    expect(decl('.board-banner', 'pointer-events')).toBe('none');
+  });
+
+  it('提示条 1.5s 渐入渐出：0% 透明 → 18% 显现 → 74% 保持 → 100% 透明', () => {
+    expect(decl('.board-banner.show', 'animation')).toContain('banner-cycle 1.5s');
+    expect(CSS).toContain('@keyframes banner-cycle');
+    const kf = CSS.slice(CSS.indexOf('@keyframes banner-cycle'));
+    expect(kf).toContain('0% { opacity: 0');
+    expect(kf).toContain('18% { opacity: 1');
+    expect(kf).toContain('74% { opacity: 1');
+    expect(kf).toContain('100% { opacity: 0');
+  });
+
+  it('各杀法有各自的图案底纹（五种纹理）与统一强调色变量 --b-accent', () => {
+    for (const motif of ['ring', 'chevron', 'diamond', 'grid', 'stripe']) {
+      expect(RULES.some((r) => r.selectors.includes(`.banner-card[data-motif='${motif}']::before`))).toBe(
+        true,
+      );
+    }
+    expect(decl('.banner-card', 'border')).toContain('--b-accent');
+    expect(decl('.banner-emblem', 'background')).toContain('--b-accent');
+    expect(decl('.banner-name', 'color')).toContain('--b-accent');
+  });
+
+  it('「减少动态效果」下提示条仍可见（只去掉缩放淡入动效）', () => {
+    const rule = RULES.find(
+      (r) => r.selectors.includes('.board-banner.show') && r.decls.includes('animation: none'),
+    );
+    expect(rule).toBeTruthy();
+    expect(rule!.decls).toContain('opacity: 1');
+  });
+
+  it('app.ts：走子动画按 rAF 推进、提示条按局面触发并在 1.5s 后隐藏', () => {
+    expect(APP).toContain('const MOVE_ANIM_MS');
+    expect(APP).toContain('function animateMove(');
+    expect(APP).toContain('requestAnimationFrame');
+    expect(APP).toContain('const BANNER_MS = 1500');
+    expect(APP).toContain('function maybeBanner(');
+    expect(APP).toContain('function showBanner(');
+    expect(APP).toContain("bannerContent('check'");
+    expect(APP).toContain("bannerContent('mate'");
+    // 联机走子（move_applied / game_over）与本地走子都接上动画与提示条
+    expect(APP).toContain('animateMove(msg.from, msg.to)');
+    expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
+  });
+});
