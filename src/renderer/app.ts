@@ -27,6 +27,7 @@ import {
   LEVEL_LABEL,
   PUZZLES,
   buildPuzzleBoard,
+  checkEndgameBank,
   findMateMove,
   nextPuzzle,
 } from '../shared/endgame.js';
@@ -479,6 +480,8 @@ function updatePanel(): void {
       `<div>已用：${eg.used} / ${eg.puzzle.goalMoves} 步</div>` +
       `<div class="eg-intro">${eg.puzzle.intro}</div>`;
   }
+  // 残局「下一关」：题库中还有下一局时可用，最后一关隐藏（结果弹层另有「下一关」）
+  $<HTMLButtonElement>('btn-eg-next').hidden = !eg || !nextPuzzle(eg.puzzle.id);
 
   // 终局杀法：将死时展示识别出的具体杀法名与解说（识别不到经典杀法时保持隐藏）
   const killBox = $('kill-box');
@@ -1566,6 +1569,51 @@ function showEndgameResult(): void {
   });
 }
 
+/** 残局「下一关」：直接进入题库中的下一局（已是最后一关则提示） */
+function endgameNext(): void {
+  const eg = S.endgame;
+  if (!eg) return;
+  const next = nextPuzzle(eg.puzzle.id);
+  if (!next) return toast('已经是最后一关了');
+  startPuzzle(next);
+}
+
+/** 题库自检：逐条核验（局面合法 / 目标步数内可解 / 步数最少）并展示结果 */
+function checkEndgameBankUI(): void {
+  toast('题库自检中…');
+  // 先让「自检中」绘制出来，再做同步求解（多步杀求解较耗时）
+  window.setTimeout(() => {
+    const results = checkEndgameBank();
+    const bad = results.filter((r) => !r.ok);
+    const body = document.createElement('div');
+    body.className = 'eg-check-list';
+    for (const r of results) {
+      const row = document.createElement('div');
+      row.className = 'eg-check-row' + (r.ok ? '' : ' bad');
+      const mark = document.createElement('span');
+      mark.className = 'eg-check-mark';
+      mark.textContent = r.ok ? '✓' : '✗';
+      const name = document.createElement('span');
+      name.className = 'eg-check-name';
+      name.textContent = `${r.name} · ${LEVEL_LABEL[r.level]}`;
+      const detail = document.createElement('span');
+      detail.className = 'eg-check-detail';
+      detail.textContent = r.ok ? '局面合法 · 目标步数内可解 · 步数最少' : r.problems.join('；');
+      row.append(mark, name, detail);
+      body.appendChild(row);
+    }
+    showModal({
+      title: `题库自检：${results.length} 局`,
+      sub: bad.length
+        ? `${bad.length} 局未通过，详见下表`
+        : '全部通过：局面合法 · 目标步数内可解 · 均为最少步数',
+      body,
+      wide: true,
+      buttons: [{ label: '知道了', primary: true }],
+    });
+  }, 0);
+}
+
 // -------------------------------------------------------------- 账号（可选）
 
 /** 首页右上角账号区：未登录显示入口，登录后显示用户名 */
@@ -2133,6 +2181,7 @@ function bindEvents(): void {
   $('btn-ai-start').addEventListener('click', createAiRoom);
   $('btn-endgame').addEventListener('click', openEndgamePanel);
   $('btn-endgame-back').addEventListener('click', backToIndex);
+  $('btn-eg-check').addEventListener('click', checkEndgameBankUI);
   $('btn-acct-back').addEventListener('click', backToIndex);
   $('btn-login').addEventListener('click', () => void doAuth(false));
   $('btn-register').addEventListener('click', () => void doAuth(true));
@@ -2168,9 +2217,10 @@ function bindEvents(): void {
   $('btn-resign').addEventListener('click', resign);
   $('btn-draw').addEventListener('click', offerDraw);
   $('btn-undo').addEventListener('click', offerUndo);
-  // 残局挑战：悔棋 / 提示 / 重来 / 离开
+  // 残局挑战：悔棋 / 提示 / 下一关 / 重来 / 离开
   $('btn-eg-undo').addEventListener('click', endgameUndo);
   $('btn-eg-hint').addEventListener('click', endgameHint);
+  $('btn-eg-next').addEventListener('click', endgameNext);
   $('btn-eg-restart').addEventListener('click', restartPuzzle);
   $('btn-eg-leave').addEventListener('click', leaveToHome);
   $('btn-play-again').addEventListener('click', requestRestart);

@@ -16,6 +16,8 @@ import {
   PUZZLES,
   buildPuzzleBoard,
   canForceMate,
+  checkEndgameBank,
+  checkPuzzle,
   findMateMove,
   findPuzzle,
   nextPuzzle,
@@ -163,6 +165,85 @@ describe('残局题库：可解且步数最少', () => {
   });
 });
 
+// ---------------------------------------------------------------- 题库自检
+
+describe('残局题库：自检（checkPuzzle / checkEndgameBank）', () => {
+  it('内置题库逐条通过自检（局面合法 · 目标步数内可解 · 步数最少）', () => {
+    const res = checkEndgameBank();
+    expect(res.length).toBe(PUZZLES.length);
+    expect(res.map((r) => r.id)).toEqual(PUZZLES.map((p) => p.id));
+    for (const r of res) {
+      expect(`${r.id}:${r.ok}|${r.problems.join('、')}`).toBe(`${r.id}:true|`);
+      expect(r.solvable).toBe(true);
+      expect(r.minimal).toBe(true);
+      expect(r.problems).toEqual([]);
+    }
+  });
+
+  it('自检能抓出「缺少将/帅」与「棋子越界 / 重叠」', () => {
+    const base = PUZZLES[0];
+    const noBlackKing = { ...base, pieces: base.pieces.filter(([, , t, s]) => !(t === 'K' && s === 'b')) };
+    const r1 = checkPuzzle(noBlackKing);
+    expect(r1.ok).toBe(false);
+    expect(r1.problems).toContain('缺少黑将');
+
+    const outOfBounds = {
+      ...base,
+      pieces: [...base.pieces, [10, 0, 'P', 'b'] as [number, number, PieceType, Side]],
+    };
+    expect(checkPuzzle(outOfBounds).problems.some((p) => p.startsWith('棋子越界'))).toBe(true);
+
+    const overlapped = {
+      ...base,
+      pieces: [
+        ...base.pieces,
+        [base.pieces[0][0], base.pieces[0][1], 'P', 'b'] as [number, number, PieceType, Side],
+      ],
+    };
+    expect(checkPuzzle(overlapped).problems.some((p) => p.startsWith('棋子重叠'))).toBe(true);
+  });
+
+  it('自检能抓出「目标步数不可解」与「不是最少步数」', () => {
+    // 借帅封门是两步杀：把目标步数改成 1 步即不可解
+    const medium = PUZZLES.find((p) => p.id === 'jieshuaifengmen')!;
+    const unsolvable = checkPuzzle({ ...medium, goalMoves: 1 });
+    expect(unsolvable.ok).toBe(false);
+    expect(unsolvable.solvable).toBe(false);
+    expect(unsolvable.problems.some((p) => p.includes('无法在 1 步内强制取胜'))).toBe(true);
+
+    // 对面笑是一步杀：把目标步数放宽到 2 步就不是「最少步数」
+    const easy = PUZZLES.find((p) => p.id === 'bailianjiang')!;
+    const notMinimal = checkPuzzle({ ...easy, goalMoves: 2 });
+    expect(notMinimal.solvable).toBe(true);
+    expect(notMinimal.minimal).toBe(false);
+    expect(notMinimal.ok).toBe(false);
+    expect(notMinimal.problems.some((p) => p.includes('不是最少步数'))).toBe(true);
+  });
+
+  it('自检能抓出「后手方开局已被将死 / 困毙」', () => {
+    // 对面笑的终局构图（红车沉底后黑方无着可走），作为初始局面即「后手方已无子可走」
+    const dead = checkPuzzle({
+      ...PUZZLES[0],
+      pieces: [
+        [0, 4, 'K', 'b'],
+        [0, 2, 'P', 'b'],
+        [9, 3, 'K', 'r'],
+        [1, 5, 'P', 'r'],
+        [0, 0, 'R', 'r'],
+      ],
+    });
+    expect(dead.ok).toBe(false);
+    expect(dead.problems).toContain('后手方开局已被将死 / 困毙');
+  });
+
+  it('自检不修改传入的题目', () => {
+    const p = PUZZLES[0];
+    const before = JSON.stringify(p);
+    checkPuzzle(p);
+    expect(JSON.stringify(p)).toBe(before);
+  });
+});
+
 // ---------------------------------------------------------------- 求解器
 
 describe('强制将死求解器', () => {
@@ -265,13 +346,39 @@ describe('残局挑战：界面接线', () => {
     expect(APP).toContain("$('menu-endgame').hidden = panel !== 'endgame'");
   });
 
-  it('对局页含残局操作行（悔棋 / 提示 / 重来 / 离开）与残局目标信息块', () => {
-    for (const id of ['actions-endgame', 'btn-eg-undo', 'btn-eg-hint', 'btn-eg-restart', 'btn-eg-leave']) {
+  it('对局页含残局操作行（悔棋 / 提示 / 下一关 / 重来 / 离开）与残局目标信息块', () => {
+    for (const id of [
+      'actions-endgame',
+      'btn-eg-undo',
+      'btn-eg-hint',
+      'btn-eg-next',
+      'btn-eg-restart',
+      'btn-eg-leave',
+    ]) {
       expect(HTML).toContain(`id="${id}"`);
     }
     for (const id of ['eg-box', 'eg-info']) expect(HTML).toContain(`id="${id}"`);
     expect(APP).toContain("$('actions-play').hidden = over || S.spectator || !!eg");
     expect(APP).toContain("$('actions-endgame').hidden = !eg || over");
+  });
+
+  it('残局页面「下一关」按钮：题库还有下一局才显示，点击进入下一局', () => {
+    expect(APP).toContain('function endgameNext()');
+    expect(APP).toContain('const next = nextPuzzle(eg.puzzle.id)');
+    expect(APP).toContain("$('btn-eg-next').addEventListener('click', endgameNext)");
+    // 最后一关隐藏（结果弹层另有「下一关」）
+    expect(APP).toContain("$<HTMLButtonElement>('btn-eg-next').hidden = !eg || !nextPuzzle(eg.puzzle.id)");
+    expect(APP).toContain('已经是最后一关了');
+  });
+
+  it('残局面板「自检题库」入口：逐条核验并展示结果', () => {
+    expect(HTML).toContain('id="btn-eg-check"');
+    expect(APP).toContain("$('btn-eg-check').addEventListener('click', checkEndgameBankUI)");
+    expect(APP).toContain('function checkEndgameBankUI()');
+    expect(APP).toContain('checkEndgameBank()');
+    // 结果弹层逐条列出通过 / 不通过（含问题说明）
+    expect(APP).toContain("r.ok ? '✓' : '✗'");
+    expect(APP).toContain('r.ok ? ');
   });
 
   it('渲染层接线：题库局面载入本机状态机、提示用求解器、AI 执玩家的对方、通关记入本地', () => {
@@ -314,5 +421,9 @@ describe('残局挑战：界面接线', () => {
     expect(CSS).toContain('.eg-info');
     expect(CSS).toContain('.eg-row:focus-visible');
     expect(CSS).toContain('.status-box.over.lose');
+    // 题库自检结果列表
+    expect(CSS).toContain('.eg-check-list');
+    expect(CSS).toContain('.eg-check-row.bad');
+    expect(CSS).toContain('.eg-check-detail');
   });
 });

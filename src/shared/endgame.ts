@@ -6,11 +6,13 @@
  * - 求解器：`canForceMate()` / `findMateMove()` 用「我方着法 → 对方所有应着 → 递归」的方式判定
  *   是否存在不论对方如何应对都能在 N 步内将死的强制杀法；对方无着可走（将死或困毙）即算取胜。
  * - 题库由测试逐条校验：确为强制杀（`canForceMate(goalMoves)`）且步数不能再少（`goalMoves` 为最小步数）。
+ * - 自检：`checkPuzzle()` / `checkEndgameBank()` 复用同一求解器与规则引擎，对题库逐条核验
+ *   局面合法性 / 可解性 / 目标步数是否最少，供界面「自检」与新增题目时排查（纯函数，无副作用）。
  *
  * 棋盘坐标：10 行 9 列，黑方在上（九宫 0~2 行）、红方在下（九宫 7~9 行）。
  */
 
-import { isAttacked, pieceMoves } from './rules.js';
+import { isAttacked, isInCheck, pieceMoves, sideHasAnyMove } from './rules.js';
 import { Board, Cell, Move, PieceType, Pos, ROWS, COLS, Side } from './types.js';
 
 /** 难度档位 */
@@ -358,4 +360,69 @@ export function findMateMove(board: Board, side: Side, moves: number): Move | nu
 /** 求解不修改调用方棋盘（内部就地试走，故先深拷贝） */
 function cloneForSolve(board: Board): Board {
   return board.map((row) => row.map((p) => (p ? { t: p.t, s: p.s } : null)));
+}
+
+// ------------------------------------------------------------------ 题库自检
+
+/** 一道残局的自检结果 */
+export interface PuzzleCheck {
+  id: string;
+  name: string;
+  level: EndgameLevel;
+  /** 自检是否全部通过（problems 为空） */
+  ok: boolean;
+  /** 是否能在目标步数内强制取胜 */
+  solvable: boolean;
+  /** 目标步数是否为最少步数（少一步即不可解） */
+  minimal: boolean;
+  /** 自检发现的问题（空数组表示通过） */
+  problems: string[];
+}
+
+/**
+ * 逐条核验一道残局：局面合法、目标步数内可强制取胜、且步数不能再少。
+ * 复用规则引擎 + 求解器，不修改传入数据；新增题目时可用它先自检再入库。
+ */
+export function checkPuzzle(p: EndgamePuzzle): PuzzleCheck {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  let redKing = false;
+  let blackKing = false;
+  // 数据层：越界 / 重叠 / 缺将 / 步数——有问题时不构建棋盘（越界会导致构建失败）
+  for (const [r, c, t, s] of p.pieces) {
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) problems.push(`棋子越界：行 ${r} 列 ${c}`);
+    const key = `${r},${c}`;
+    if (seen.has(key)) problems.push(`棋子重叠：行 ${r} 列 ${c}`);
+    seen.add(key);
+    if (t === 'K' && s === 'r') redKing = true;
+    if (t === 'K' && s === 'b') blackKing = true;
+  }
+  if (!redKing) problems.push('缺少红帅');
+  if (!blackKing) problems.push('缺少黑将');
+  if (p.goalMoves < 1) problems.push('目标步数必须不少于 1 步');
+  const base = { id: p.id, name: p.name, level: p.level, solvable: false, minimal: false };
+  if (problems.length > 0) return { ...base, ok: false, problems };
+
+  // 规则层：开局双方均未被将军、均未无子可走
+  const board = buildPuzzleBoard(p);
+  const opp = other(p.side);
+  if (isInCheck(board, p.side)) problems.push('先手方开局被将军');
+  if (isInCheck(board, opp)) problems.push('后手方开局被将军');
+  if (!sideHasAnyMove(board, p.side)) problems.push('先手方开局无子可走');
+  if (!sideHasAnyMove(board, opp)) problems.push('后手方开局已被将死 / 困毙');
+  if (problems.length > 0) return { ...base, ok: false, problems };
+
+  // 求解层：目标步数内可强制取胜，且步数不能再少，并给出正解首着
+  const solvable = canForceMate(board, p.side, p.goalMoves);
+  const minimal = solvable && (p.goalMoves === 1 || !canForceMate(board, p.side, p.goalMoves - 1));
+  if (!solvable) problems.push(`无法在 ${p.goalMoves} 步内强制取胜`);
+  if (solvable && !minimal) problems.push(`目标步数不是最少步数（${p.goalMoves - 1} 步即可取胜）`);
+  if (solvable && !findMateMove(board, p.side, p.goalMoves)) problems.push('求解器给不出正解首着');
+
+  return { ...base, solvable, minimal, ok: problems.length === 0, problems };
+}
+
+/** 题库整体自检：逐条核验（返回顺序与 PUZZLES 一致） */
+export function checkEndgameBank(): PuzzleCheck[] {
+  return PUZZLES.map(checkPuzzle);
 }

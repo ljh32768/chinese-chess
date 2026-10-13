@@ -76,7 +76,8 @@
         <span class="panel-lg-title">残局挑战</span>
       </div>
       <div class="endgame-list" id="endgame-list"></div>
-      <p class="hint" id="endgame-hint">选一局开战：轮到你（红方）走，务必在目标步数内取胜；卡住了可用「提示」看正解首着。</p>
+      <button type="button" class="btn small block" id="btn-eg-check">自检题库</button>
+      <p class="hint" id="endgame-hint">选一局开战：轮到你（红方）走，务必在目标步数内取胜；卡住了可用「提示」看正解首着，想跳关可用棋盘下的「下一关」；「自检题库」会核验每局的局面合法性与可解性。</p>
     </div>
 
     <div class="panel-lg" id="menu-acct" hidden>
@@ -159,6 +160,7 @@
           <div id="actions-endgame" hidden>
             <input type="button" id="btn-eg-undo" value="悔　棋">
             <input type="button" id="btn-eg-hint" value="提　示">
+            <input type="button" id="btn-eg-next" value="下一关">
             <input type="button" id="btn-eg-restart" value="重　来">
             <input type="button" id="btn-eg-leave" value="离　开">
           </div>

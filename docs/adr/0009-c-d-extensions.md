@@ -1,6 +1,6 @@
 # ADR-0009：C/D 档与 v1.5 扩展模块规格（日志 / 记谱 / AI / 自动发现 / 先手方式 / 对局回顾）
 
-- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战）
+- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战；v2.6 更新 §3.12：残局「下一关」按钮 + 题库自检）
 - 日期：2026-10-03（v1.5 追加：2026-10-06；v2.5 追加：2026-10-12）
 - 关联入口：主机日志、棋谱与吃子、悔棋、观战、人机对战、计时读秒、局域网主机搜索、先手方式与猜先、对局回顾与 AI 推荐、残局挑战
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0004 状态机](./0004-game-state-machine.md)、[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0007 渲染层](./0007-renderer-ui.md)
@@ -138,7 +138,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 对局页展示 | [app.ts `updatePanel()`](../../src/renderer/app.ts)：将死且识别到杀法时，状态框显示「红方胜 · 夹车炮杀」，其下渲染杀法框（杀法名 + 定义 + 「同时构成：…」）；联机、观战、本地人机共用同一判定 |
 | 回顾展示 | 列表「胜负」列优先显示记录中的 `killMethod`（旧记录退回「将死」）；复盘页新增「终局杀法」面板，按记录着法即时识别，因此新老记录都能给出具体杀法 |
 
-### 3.12 残局挑战（v2.5）
+### 3.12 残局挑战（v2.5；v2.6 追加「下一关」与「自检题库」）
 
 | 项 | 规格 |
 |---|---|
@@ -146,9 +146,10 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 题库模块 | 新增 [shared/endgame.ts](../../src/shared/endgame.ts)：纯函数、无 DOM / 网络依赖。`EndgamePuzzle { id, name, level, side, goalMoves, intro, pieces }`，`pieces` 为 `[行, 列, 类型, 阵营]` 列表；`PUZZLES` 共 9 局（入门 5：对面笑 / 卧槽马 / 挂角马 / 重炮 / 双车错；中等 2：借帅封门 / 车马成杀 = 两步杀；困难 2：车炮冷着 / 车马残杀 = 三步杀），均为本项目自建的标准杀法构图 |
 | 求解器 | `canForceMate(board, side, moves)`：我方着法 → 对方**所有**应着 → 递归，判断能否不论对方如何应对都在 moves 步（我方着法数）内取胜；对方无着可走（将死或困毙）即算取胜。`findMateMove(board, side, moves)` 返回一步可强制取胜的着法（无解返回 null）。实现要点：就地试走 + `isAttacked` 还原、置换缓存（棋盘 + 行棋方 + 剩余步数）、对方无着可走与递归两层剪枝；不修改传入棋盘 |
 | 题库校验 | [tests/endgame.test.ts](../../tests/endgame.test.ts) 逐条断言：局面自洽（双方有将、无重叠、玩家先行方未被将军、对方有子可走）、`canForceMate(goalMoves) === true`、`goalMoves` 为最小步数（少一步即不可解）、`findMateMove` 首着合法且走完仍在杀棋之内、非退化（不是「随便走哪儿都赢」） |
+| 题库自检 | [endgame.ts `checkPuzzle(p)` / `checkEndgameBank()`](../../src/shared/endgame.ts) 为纯函数，复用规则引擎 + 求解器逐条核验：局面合法（双方有将 / 无重叠 / 越界 / 步数 ≥ 1）、开局双方均未被将军且均有子可走、目标步数内可强制取胜、步数为最少、求解器能给出正解首着；返回 `PuzzleCheck { id, name, level, ok, solvable, minimal, problems[] }`。界面入口在残局面板底部「自检题库」（`btn-eg-check` → [app.ts `checkEndgameBankUI()`](../../src/renderer/app.ts)），结果以弹层逐条列出通过 / 不通过与问题说明；新增题目可先用它自检再入库 |
 | 状态机 | [game.ts `setup(board, turn)`](../../src/shared/game.ts)：以自定义局面开局（清空着法 / 悔棋栈 / 待处理请求，标记先行方是否被将军），残局与既有 `applyMove` / `undo` / 终局判定完全复用 |
 | 入口 | 首页木质挂板「残局挑战」（`btn-endgame`，v2.5 由 5 入口改为 6 入口）→ 大面板 `menu-endgame` 列出题库（名称 / 难度徽章 / 目标步数 / 通关标记），点击任意一条即开局 |
-| 对局页 | 残局用独立操作行 `actions-endgame`：**悔棋**（连同 AI 应招一起回退）、**提示**（`findMateMove` 给出正解首着，棋盘高亮起点 / 终点金环 + 轻提示记谱；已走离杀棋则提示重来）、**重来**（恢复初始局面）、**离开**；隐藏「和棋 / 认输」。侧栏 `eg-box` 显示残局名、难度、目标步数、已用步数与本局要点；状态框显示「轮到你走棋（第 x / N 步）」 |
+| 对局页 | 残局用独立操作行 `actions-endgame`：**悔棋**（连同 AI 应招一起回退）、**提示**（`findMateMove` 给出正解首着，棋盘高亮起点 / 终点金环 + 轻提示记谱；已走离杀棋则提示重来）、**下一关**（`nextPuzzle` 直接进入题库中的下一局；题库中无下一局时按钮隐藏，已到末关点击提示「已经是最后一关了」）、**重来**（恢复初始局面）、**离开**；隐藏「和棋 / 认输」。侧栏 `eg-box` 显示残局名、难度、目标步数、已用步数与本局要点；状态框显示「轮到你走棋（第 x / N 步）」 |
 | 防守 AI | 复用 [shared/ai.ts `pickMove()`](../../src/shared/ai.ts)：执玩家的对方，搜索深度 4（高手水平）、时限 0.9s、延迟 0.35s 应招；玩家走完一步后由 `endgameEvaluate()` 继续调度 AI（未出结果时） |
 | 胜负判定 | 每步（玩家与 AI）之后：我方取胜（将死 / 困毙）→ 成功并记录通关；被将死 / 被困毙 → 失败（「被将死 / 被困毙」）；用完目标步数仍未取胜 → 失败（「超出步数」）。成功弹层可「下一关 / 再来一次 / 返回首页」，失败弹层可「重来 / 返回首页」 |
 | 通关记录 | 仅存本机 `localStorage['lanschess-endgame']`（`id → 最少用时步数`），列表行显示「已通关 · N 步」；损坏数据按未通关处理 |
@@ -167,9 +168,9 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 对局记录 / AI 推荐服务端 | [host-server.ts `saveRecord()` / `hintFor()`](../../src/server/host-server.ts) |
 | 对局回顾 / 复盘客户端 | [review.ts](../../src/renderer/review.ts) |
 | 杀法识别（杀法库 + 匹配） | [checkmate.ts](../../src/shared/checkmate.ts)（`CHECKMATE_PATTERNS` / `classifyCheckmate` / `classifyCheckmateFromHistory`） |
-| 残局题库与求解器 | [endgame.ts](../../src/shared/endgame.ts)（`PUZZLES` / `buildPuzzleBoard` / `canForceMate` / `findMateMove` / `findPuzzle` / `nextPuzzle`） |
-| 残局开局与判定 | [game.ts `setup()`](../../src/shared/game.ts)、[app.ts `startPuzzle()` / `restartPuzzle()` / `endgameUndo()` / `endgameHint()` / `endgameEvaluate()` / `showEndgameResult()`](../../src/renderer/app.ts) |
-| 残局界面 | [index.html `menu-endgame` / `actions-endgame` / `eg-box`](../../src/renderer/index.html)、[styles.css `.eg-row` / `.eg-info`](../../src/renderer/styles.css) |
+| 残局题库与求解器 | [endgame.ts](../../src/shared/endgame.ts)（`PUZZLES` / `buildPuzzleBoard` / `canForceMate` / `findMateMove` / `findPuzzle` / `nextPuzzle` / `checkPuzzle` / `checkEndgameBank`） |
+| 残局开局与判定 | [game.ts `setup()`](../../src/shared/game.ts)、[app.ts `startPuzzle()` / `restartPuzzle()` / `endgameUndo()` / `endgameHint()` / `endgameNext()` / `checkEndgameBankUI()` / `endgameEvaluate()` / `showEndgameResult()`](../../src/renderer/app.ts) |
+| 残局界面 | [index.html `menu-endgame`（含 `btn-eg-check`）/ `actions-endgame`（含 `btn-eg-next`）/ `eg-box`](../../src/renderer/index.html)、[styles.css `.eg-row` / `.eg-info` / `.eg-check-*`](../../src/renderer/styles.css) |
 | 杀法落库 | [room.ts `saveRecord()`](../../src/server/room.ts)、[history.ts `toSummary()`](../../src/server/history.ts)（`killMethod`） |
 | 杀法展示 | [app.ts `mateInfo()` / `kill-box`](../../src/renderer/app.ts)、[review.ts `mateOf()` / `replay-mate-box`](../../src/renderer/review.ts)、[index.html](../../src/renderer/index.html)、[styles.css](../../src/renderer/styles.css) |
 | 状态机扩展 | [game.ts](../../src/shared/game.ts)（`history` / `undo` / `timeout` / `deadline`） |
@@ -192,3 +193,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
     「提示」给出正解首着「马九进七」；走出正解后状态框「挑战成功 · 卧槽马杀」并渲染杀法框，弹层含「下一关：挂角马」；
     列表出现「已通关 · 1 步」；「重来」可复位。两步杀「借帅封门」：玩家将军 → AI 自动应招（士填将门）→ 平帅照面取胜，
     显示「挑战成功 · 困毙 · 用时 2 步」，列表记「已通关 · 2 步」。一步不杀则「挑战失败 · 超出步数」并弹出重来 / 返回首页。控制台无报错。
+- v2.6（残局优化：下一关 + 题库自检，2026-10-13）：
+  - 自动化：`npm test`（288 项，含 [tests/endgame.test.ts](../../tests/endgame.test.ts) 25 项）/ `npm run lint` / `npm run format:check` / `npm run build` 全绿；
+    自检用例覆盖内置题库逐条通过，以及缺将、越界、重叠、目标步数不可解、非最少步数、后手已被将死等异常题目的识别（且不改动传入题目）。
+  - 界面实测（浏览器）：残局对局页操作行出现「下一关」（末关隐藏），点击即进入题库中的下一局；残局面板底部「自检题库」点开后弹出逐条结果，全部为「✓ 局面合法 · 目标步数内可解 · 步数最少」；控制台无报错。

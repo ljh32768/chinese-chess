@@ -652,6 +652,24 @@ body::before {
 .eg-info { color: var(--text-dim); line-height: 1.85; word-break: break-all; }
 .eg-intro { margin-top: 4px; color: var(--text-mute); }
 
+/* 题库自检结果（弹层内逐条列表） */
+.eg-check-list { display: flex; flex-direction: column; gap: 6px; }
+.eg-check-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.eg-check-row.bad { border-color: var(--err); }
+.eg-check-mark { flex: none; width: 14px; color: var(--ok); text-align: center; }
+.eg-check-row.bad .eg-check-mark { color: var(--err); }
+.eg-check-name { flex: none; }
+.eg-check-detail { flex: 1; min-width: 0; color: var(--text-dim); word-break: break-all; }
+
 /* ---------- 复盘 ---------- */
 .replay-info { color: var(--text); line-height: 1.9; }
 .replay-info div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
