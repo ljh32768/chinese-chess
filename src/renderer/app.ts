@@ -14,6 +14,7 @@ import {
   GameSnapshot,
   GuessChoice,
   Move,
+  Piece,
   PieceType,
   Pos,
   RoomSummary,
@@ -65,6 +66,7 @@ import {
 import { initReview, ReviewController } from './review.js';
 import { playClick, playSelect } from './sound.js';
 import { Net } from './net.js';
+import { BannerContent, bannerContent } from './banner.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -150,6 +152,8 @@ const S = {
   skin: DEFAULT_SKIN as SkinId,
   /** 鼠标悬停的交叉点（仅用于预高亮） */
   hover: null as Pos | null,
+  /** 走子动画（抬起 → 移动 → 放下）；null 表示当前静止 */
+  anim: null as { from: Pos; to: Pos; piece: Piece; start: number } | null,
   /** 提示环（残局挑战的「提示」正解首着） */
   hint: null as Move | null,
   /** 残局挑战进度；null 表示当前不是残局模式 */
@@ -208,6 +212,71 @@ function toast(msg: string): void {
   el.classList.add('show');
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+// -------------------------------------------------------------- 正中提示条（将军 / 绝杀）
+
+/** 提示条显示时长（毫秒）：渐入 → 保持 → 渐出 */
+const BANNER_MS = 1500;
+let bannerTimer = 0;
+/** 上一帧提示条的局势键与时间：联机走子会连收 move_applied + game_over，按此去重 */
+let lastBannerKey = '';
+let lastBannerAt = 0;
+
+/** 在棋盘正中显示将军 / 绝杀提示条（各杀法一套图案样式），1.5s 后渐出消失 */
+function showBanner(c: BannerContent): void {
+  const el = $('board-banner');
+  const card = $('banner-card');
+  card.dataset.motif = c.style.motif;
+  card.dataset.pattern = c.style.pattern;
+  card.style.setProperty('--b-accent', c.style.accent);
+  $('banner-emblem').textContent = c.style.emblem;
+  $('banner-name').textContent = c.name;
+  $('banner-sub').textContent = c.sub;
+  el.classList.remove('show');
+  void el.offsetWidth; // 强制回流，让连续触发的动画能重新播放
+  el.hidden = false;
+  el.classList.add('show');
+  window.clearTimeout(bannerTimer);
+  bannerTimer = window.setTimeout(() => {
+    el.classList.remove('show');
+    el.hidden = true;
+  }, BANNER_MS);
+}
+
+/** 同一局势（seq + 类型）在短时间内重复触发时只显示一次 */
+function showBannerOnce(key: string, run: () => void): void {
+  const now = performance.now();
+  if (key === lastBannerKey && now - lastBannerAt < 800) return;
+  lastBannerKey = key;
+  lastBannerAt = now;
+  run();
+}
+
+/**
+ * 按当前局面决定是否弹提示条：「将死」→ 绝杀（杀法名 + 该杀法图案样式）；「将军」→ 将军警示。
+ * 在每次走子后调用（联机 move_applied / game_over、本地人机与残局）。
+ */
+function maybeBanner(): void {
+  if (!$('screen-game').classList.contains('active')) return;
+  const winner = S.winner;
+  if (S.status === 'over' && winner && S.reason === '将死') {
+    const mate = mateInfo();
+    const id = mate?.pattern.id ?? 'generic';
+    showBannerOnce(`mate:${id}:${S.moveSeq}`, () =>
+      showBanner(
+        bannerContent('mate', {
+          label: mate ? mate.pattern.label : '将死',
+          patternId: id,
+          sub: `${sideName(winner)}绝杀`,
+        }),
+      ),
+    );
+  } else if (S.status === 'playing' && S.check) {
+    showBannerOnce(`check:${S.turn}:${S.moveSeq}`, () =>
+      showBanner(bannerContent('check', { sub: `${sideName(S.turn)}被将军` })),
+    );
+  }
 }
 
 interface ModalButton {
@@ -276,6 +345,40 @@ function canPlay(): boolean {
   return !S.spectator && S.status === 'playing' && S.turn === S.side && !S.oppAway && !S.endgame?.result;
 }
 
+/** 走子动画时长（毫秒）；抬起 → 移动 → 放下 三段式 */
+const MOVE_ANIM_MS = 460;
+/** 走子动画的 rAF 句柄 */
+let animRAF = 0;
+
+/** 是否跟随系统「减少动态效果」（减少时不做走子动画，提示条也去掉缩放动效） */
+const prefersReducedMotion = (): boolean =>
+  typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * 启动一步走子的动画（棋子抬起 → 移动 → 放下）。
+ * 起点/终点取自刚更新的盘面：动画期间该棋子由 board.ts 单独绘制，落点格不静态贴图。
+ */
+function animateMove(from: Pos, to: Pos): void {
+  if (prefersReducedMotion()) return;
+  const piece = S.board[to[0]]?.[to[1]];
+  if (!piece) return;
+  S.anim = { from, to, piece, start: performance.now() };
+  paint(); // 先画起始帧，避免全量同步那一帧先闪现在终点
+  window.cancelAnimationFrame(animRAF);
+  const tick = (): void => {
+    const a = S.anim;
+    if (!a) return;
+    if (performance.now() - a.start >= MOVE_ANIM_MS) {
+      S.anim = null;
+      paint();
+      return;
+    }
+    paint();
+    animRAF = window.requestAnimationFrame(tick);
+  };
+  animRAF = window.requestAnimationFrame(tick);
+}
+
 /** 组装棋盘渲染视图（纯展示，不含规则判定） */
 function boardView(): BoardView {
   const playable = canPlay();
@@ -285,6 +388,14 @@ function boardView(): BoardView {
     moves: S.moves,
     lastMove: S.lastMove,
     flip: flip(),
+    anim: S.anim
+      ? {
+          from: S.anim.from,
+          to: S.anim.to,
+          piece: S.anim.piece,
+          t: Math.min(1, (performance.now() - S.anim.start) / MOVE_ANIM_MS),
+        }
+      : null,
     checkKing: S.check ? findKing(S.board, S.turn) : null,
     interactiveSide: playable ? S.side : null,
     hover: playable ? S.hover : null,
@@ -524,7 +635,7 @@ function renderCaptured(): void {
   $('cap-black-list').textContent = cap.byBlack.map((t) => PIECE_NAME.r[t]).join(' ') || '—';
 }
 
-function applySnapshot(s: GameSnapshot): void {
+function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void {
   S.board = s.board;
   S.turn = s.turn;
   S.moveSeq = s.moveSeq;
@@ -538,6 +649,8 @@ function applySnapshot(s: GameSnapshot): void {
   S.pending = null;
   S.oppAway = false;
   S.hover = null;
+  // 全量同步（含悔棋 / 重开）默认不做走子动画；terminal 的 game_over 紧跟 move_applied，需保留在跑的动画
+  if (!opts.keepAnim) S.anim = null;
   S.history = s.history ?? [];
   S.deadline = s.deadline ?? null;
   if ($('screen-game').classList.contains('active')) render();
@@ -703,8 +816,11 @@ function handleMessage(msg: ServerMessage): void {
       S.moves = [];
       S.history = msg.history;
       S.deadline = msg.deadline;
+      S.anim = null;
       playClick();
       render();
+      animateMove(msg.from, msg.to);
+      maybeBanner();
       return;
     case 'move_rejected':
       toast(`走子无效：${msg.reason}`);
@@ -720,7 +836,9 @@ function handleMessage(msg: ServerMessage): void {
       }
       return;
     case 'game_over':
-      applySnapshot(msg.state);
+      // 终局紧随 move_applied（同一步），保留正在播放的走子动画；将军 / 绝杀提示条按局面去重
+      applySnapshot(msg.state, { keepAnim: true });
+      maybeBanner();
       return;
     case 'draw_request':
       showModal({
@@ -1020,6 +1138,9 @@ function resetLocal(): void {
   S.guessPhase = null;
   S.hint = null;
   S.endgame = null;
+  S.anim = null;
+  window.cancelAnimationFrame(animRAF);
+  animRAF = 0;
   localGame = null;
   window.clearTimeout(localAiTimer);
   localAiTimer = 0;
@@ -1357,6 +1478,8 @@ function localMove(from: Pos, to: Pos): void {
   playClick();
   S.hint = null; // 走子后清除提示环
   applySnapshot(game.snapshot());
+  animateMove(from, to);
+  maybeBanner();
   if (S.endgame) {
     endgameEvaluate();
     return;
@@ -1389,6 +1512,8 @@ function scheduleLocalAi(): void {
     playClick();
     S.hint = null; // 走子后清除提示环
     applySnapshot(g.snapshot());
+    animateMove(move.from, move.to);
+    maybeBanner();
     if (S.endgame) endgameEvaluate();
   }, 350);
 }

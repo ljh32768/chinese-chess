@@ -1,6 +1,7 @@
 /**
  * 棋盘渲染测试（Canvas 绘制计划为纯数据，与 DOM 解耦）。
- * 覆盖：皮肤几何参数、素材路径、坐标换算与命中、棋子/落点/上一步/将军/悬停绘制计划、视角翻转。
+ * 覆盖：皮肤几何参数、素材路径、坐标换算与命中、棋子/落点/上一步/将军/悬停绘制计划、视角翻转、
+ * 走子动画（抬起 → 移动 → 放下）的一帧几何与绘制计划。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -16,15 +17,16 @@ import {
   computeDrawList,
   DrawOp,
   isSkinId,
+  moveAnimFrame,
   nextSkin,
   pickCell,
   RingOp,
   toLogic,
   toView,
 } from '../src/renderer/board.js';
-import { BoardView } from '../src/renderer/board.js';
+import { BoardView, MoveAnim } from '../src/renderer/board.js';
 import { initBoard } from '../src/shared/rules.js';
-import { Board } from '../src/shared/types.js';
+import { Board, Piece } from '../src/shared/types.js';
 
 const skin2 = SKINS.stype2;
 
@@ -248,5 +250,88 @@ describe('绘制计划 computeDrawList', () => {
     const ops = computeDrawList(view({ hint: { from: [9, 0], to: [3, 0] } }), skin2);
     expect(findImage(ops, 'dot')).toHaveLength(0);
     expect(rings(ops).filter((r) => r.color === '#f0b429')).toHaveLength(2);
+  });
+});
+
+describe('走子动画（抬起 → 移动 → 放下）', () => {
+  const rook: Piece = { t: 'R', s: 'r' };
+  /** 红车 [6,0] → [5,0] 的动画（起点 y=347，终点 y=290；格距 57、圆盘偏移 3/24） */
+  const anim = (t: number): MoveAnim => ({ from: [6, 0], to: [5, 0], piece: rook, t });
+
+  it('抬起前（t=0）：棋子仍在起点、未放大、无落影', () => {
+    const f = moveAnimFrame(anim(0), skin2, false);
+    expect(f.img).toBe('r_c');
+    expect(f.x).toBe(3);
+    expect(f.y).toBe(347);
+    expect(f.scale).toBe(1);
+    expect(f.lift).toBe(0);
+    expect(f.shadow).toBeNull();
+  });
+
+  it('移动中（t=0.5）：抬起高度与放大同时生效，落影出现在棋子下方的盘面上', () => {
+    const f = moveAnimFrame(anim(0.5), skin2, false);
+    // 平移进度 easeInOut(0.5)=0.5：x=3，y 基准 = (347+290)/2 = 318.5；抬起 57*0.42=23.94
+    expect(f.x).toBeCloseTo(3, 6);
+    expect(f.y).toBeCloseTo(318.5 - 23.94, 6);
+    expect(f.scale).toBeCloseTo(1.14, 6);
+    expect(f.lift).toBe(1);
+    expect(f.shadow).not.toBeNull();
+    // 落影贴在盘面（不含抬起位移）：cy = 318.5 + discY(24) = 342.5
+    expect(f.shadow!.cy).toBeCloseTo(342.5, 6);
+    expect(f.shadow!.rx).toBeCloseTo(47 * 0.64, 6);
+    expect(f.shadow!.alpha).toBeCloseTo(0.34, 6);
+  });
+
+  it('放下完成（t=1）：落回终点、恢复原大、落影消失', () => {
+    const f = moveAnimFrame(anim(1), skin2, false);
+    expect(f.x).toBe(3);
+    expect(f.y).toBe(290);
+    expect(f.scale).toBe(1);
+    expect(f.lift).toBe(0);
+    expect(f.shadow).toBeNull();
+  });
+
+  it('进度越界会被夹到 0..1', () => {
+    expect(moveAnimFrame(anim(-1), skin2, false).y).toBe(347);
+    expect(moveAnimFrame(anim(2), skin2, false).y).toBe(290);
+  });
+
+  it('黑方视角：动画坐标随翻转（[5,0] 翻转后为视图 [4,8]）', () => {
+    const f = moveAnimFrame(anim(1), skin2, true);
+    expect(f.x).toBe(459);
+    expect(f.y).toBe(233);
+  });
+
+  it('纯函数：不改动传入的动画对象', () => {
+    const a = anim(0.5);
+    moveAnimFrame(a, skin2, false);
+    expect(a.t).toBe(0.5);
+    expect(a.piece).toEqual(rook);
+  });
+
+  it('绘制计划：动画中的棋子在终点格不再静态贴图，改由动画帧单独绘制并带落影', () => {
+    const b = emptyBoard();
+    b[5][0] = rook;
+    const ops = computeDrawList(
+      view({ board: b, lastMove: { from: [6, 0], to: [5, 0] }, anim: anim(0.5) }),
+      skin2,
+    );
+    // 终点格静态贴图被跳过：全盘只剩动画帧这一枚 r_c
+    const pieces = draws(ops).filter((o) => o.img === 'r_c');
+    expect(pieces).toHaveLength(1);
+    expect(pieces[0].scale).toBeCloseTo(1.14, 6);
+    // 抬起时有落影，且落影画在棋子之前（棋子压在投影之上）
+    const shadowIdx = ops.findIndex((o) => 'shadow' in o);
+    const pieceIdx = ops.findIndex((o) => !('ring' in o) && !('shadow' in o) && o.img === 'r_c');
+    expect(shadowIdx).toBeGreaterThan(-1);
+    expect(pieceIdx).toBeGreaterThan(shadowIdx);
+  });
+
+  it('无动画时不产生落影，棋子也不带缩放', () => {
+    const b = emptyBoard();
+    b[5][0] = rook;
+    const ops = computeDrawList(view({ board: b, lastMove: { from: [6, 0], to: [5, 0] } }), skin2);
+    expect(ops.some((o) => 'shadow' in o)).toBe(false);
+    expect(draws(ops).every((o) => o.scale === undefined)).toBe(true);
   });
 });

@@ -126,6 +126,7 @@
 | 6 | 将军警示 | 被将军一方将帅加红色脉冲环（半径 `disc/2 + 6`，透明度随时间正弦变化，100ms 重绘一帧） |
 | 7 | 悬停预高亮 | 本方可操作时，己方棋子 / 合法落点画金色环（半径 `disc/2 + 3` / 13） |
 | 8 | AI 推荐（复盘） | `hint`：起点细金环（宽 2.5 / alpha 0.7）、终点粗金环（宽 3.5 / alpha 0.95）；落点为空时叠加素材提示点，吃子时不叠加 |
+| 9 | 走子动画 | `anim` 有值时：抬起的棋子连同椭圆落影画在最上层，终点格的静态贴图跳过（三段式，见 §3.5.5） |
 
 坐标换算：
 - 视觉中心 `cellCenter` = 贴图起点 + 素材圆盘偏移；
@@ -199,6 +200,25 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 追加断言：`:root` 令牌、`:focus-visible` 焦点环、切屏 / 弹层动效与 `prefers-reduced-motion`、
 `.status-box.mine`（含 `app.ts` 的 class 切换）、`.tag:empty`、toast 换行与 aria 语义、房间号徽章、暗角层、
 以及终局杀法框（HTML 结构 + 只引用令牌的样式 + 小屏同列铺满）。
+
+### 3.5.5 v2.8 走子动画与棋盘正中提示条
+
+在 v1.4 的 Canvas + 素材渲染之上，给「落子」与「将军 / 将死」补上动效反馈：
+走子本身做抬起 → 移动 → 放下的三段动画；将军 / 绝杀在棋盘**正中**弹一张带图案底纹的提示条，
+显示 1.5s 后渐出消失。原则同 v2.4：克制、可被 `prefers-reduced-motion` 关闭（提示条信息仍保留）。
+
+| 项 | 规格 |
+|---|---|
+| 走子动画（抬起 → 移动 → 放下） | `board.ts` 的 `BoardView.anim = { from, to, piece, t }`（`t` 为 0..1 进度）驱动；纯函数 `moveAnimFrame()` 给出该帧的贴图坐标 / 缩放 / 抬起量 / 落影。三段式：**抬起**（0→0.28：升高 `0.42×格距`、放大到 1.14、出现落影）→ **移动**（→0.72：保持抬起平移，缓动 `easeInOut`）→ **放下**（→1：回落、恢复原大、落影消失）。动画期间该棋子在终点格不再静态贴图，改由动画帧（`DrawOp.scale` 以圆盘中心为锚点缩放）连同椭圆落影（`ShadowOp`）画在最上层，先落影后棋子 |
+| 动画接线与时长 | `app.ts` 在联机 `move_applied`、本地人机 / 残局的走子后调用 `animateMove(from, to)`，用 `requestAnimationFrame` 在 `MOVE_ANIM_MS = 460ms` 内推进；`prefers-reduced-motion: reduce` 时不做动画。终局紧随 `move_applied` 到达的 `game_over` 用 `applySnapshot(state, { keepAnim: true })` 保留在跑的动画；悔棋 / 重开 / `state` 全量同步默认清空动画 |
+| 提示条内容（banner.ts） | 新增 `renderer/banner.ts`（纯数据、无 DOM）：`bannerStyle(patternId)` 给出该杀法的图案样式 `{ pattern, motif, accent, emblem }`（配置 `STYLES`，键为 `shared/checkmate.ts` 的杀法 id；未收录杀法回退 `generic`）；`bannerContent(kind, opts)` 组装内容——将军固定标题「将军」+ `CHECK_STYLE`，绝杀用具体杀法展示名（如「马后炮杀」）与对应样式 |
+| 显示与动效 | 结构：`index.html` 中 `.chess-box > .board-stage`（相对定位，仅包住画布）内，画布之后放 `.board-banner`（绝对定位铺满、居中、`pointer-events: none`）。`.board-banner.show` 触发 `@keyframes banner-cycle 1.5s`：渐入（0→18%）→ 保持（→74%）→ 渐出（→100%），`app.ts` 在 `BANNER_MS = 1500ms` 后移除并隐藏；每次走子按局面判定（`maybeBanner()`），联机的 `game_over` 与 `move_applied` 用 `moveSeq` + 类型去重，避免同一步弹两次 |
+| 图案样式（各种方式） | `.banner-card[data-motif=…]::before` 铺五种底纹：`ring / chevron / diamond / grid / stripe`；配合 `--b-accent`（各杀法的强调色，由 `showBanner()` 从 `bannerStyle().accent` 写入内联变量）+ `.banner-emblem` 圆形徽记（关键子力汉字），使 18 种杀法各有辨识度 |
+| 无障碍 / 减弱动效 | 提示条 `role="status" aria-live="assertive"`；`prefers-reduced-motion: reduce` 下**去掉缩放 / 淡入动效但保持可见**（信息不丢），1.5s 后由脚本隐藏 |
+
+验收（自动化）：[tests/board.test.ts](../../tests/board.test.ts)（动画一帧几何、落影、终点格跳过静态贴图、翻转与纯函数性）、
+[tests/banner.test.ts](../../tests/banner.test.ts)（各杀法图案样式唯一且五种底纹齐备、未知杀法回退、将军 / 绝杀内容组装）、
+[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减弱动效仍可见 / `app.ts` 接线）。
 
 ### 3.6 走子交互（app.ts `onCell`）
 

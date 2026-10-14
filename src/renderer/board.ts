@@ -6,7 +6,7 @@
  * 支持黑方视角翻转：逻辑坐标 (r,c) 与视图坐标互换。
  */
 
-import { Board, PieceType, Pos, Side } from '../shared/types.js';
+import { Board, Piece, PieceType, Pos, Side } from '../shared/types.js';
 
 /** 皮肤标识（与参考项目 stype1/2/3 对应） */
 export type SkinId = 'stype1' | 'stype2' | 'stype3';
@@ -134,12 +134,24 @@ export function toLogic([vr, vc]: Pos, flip: boolean): Pos {
   return flip ? [9 - vr, 8 - vc] : [vr, vc];
 }
 
+/** 走子动画：抬起 → 移动 → 放下（`t` 为 0..1 进度，由渲染层按时间推进） */
+export interface MoveAnim {
+  from: Pos;
+  to: Pos;
+  /** 被移动的棋子（动画期间在盘上单独绘制，起点/终点格不再静态贴图） */
+  piece: Piece;
+  /** 进度 0..1 */
+  t: number;
+}
+
 export interface BoardView {
   board: Board;
   selected: Pos | null;
   moves: Pos[];
   lastMove: { from: Pos; to: Pos } | null;
   flip: boolean;
+  /** 走子动画（有值时该棋子按动画帧绘制）；null / 省略表示静止盘面 */
+  anim?: MoveAnim | null;
   /** 被将军（含将死）一方的将/帅位置，用于警示高亮 */
   checkKing?: Pos | null;
   /**
@@ -151,6 +163,15 @@ export interface BoardView {
   hover?: Pos | null;
   /** AI 推荐着法（复盘用）：起点细金环 + 终点粗金环 */
   hint?: { from: Pos; to: Pos } | null;
+}
+
+/** 交叉点的贴图起点（视图坐标）：`space*坐标 + pointStart`，可再叠加固定偏移 */
+export function tileOrigin(pos: Pos, skin: Skin, flip: boolean, offset = 0): { x: number; y: number } {
+  const [vr, vc] = toView(pos, flip);
+  return {
+    x: skin.spaceX * vc + skin.pointStartX + offset,
+    y: skin.spaceY * vr + skin.pointStartY + offset,
+  };
 }
 
 /** 交叉点视觉中心（视图坐标）：贴图起点 + 素材内圆盘偏移 */
@@ -191,6 +212,8 @@ export interface DrawOp {
   y: number;
   /** 透明度（被选中的棋子压暗一档，参考项目做法） */
   alpha?: number;
+  /** 缩放倍数（走子动画抬起时放大；以素材圆盘中心为锚点，省略即 1） */
+  scale?: number;
 }
 
 /** 程序绘制的圆环（警示 / 悬停 / 可吃子提示） */
@@ -206,7 +229,88 @@ export interface RingOp {
   pulse?: boolean;
 }
 
-export type RenderOp = DrawOp | RingOp;
+/** 程序绘制的落影（走子抬起时棋子在盘面上的投影） */
+export interface ShadowOp {
+  shadow: true;
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  alpha: number;
+}
+
+export type RenderOp = DrawOp | RingOp | ShadowOp;
+
+// ------------------------------------------------------------ 走子动画
+
+/** 抬起阶段结束 / 放下阶段开始的进度分界（剩余区间为移动平移） */
+const ANIM_LIFT_END = 0.28;
+const ANIM_DROP_START = 0.72;
+/** 抬起高度（格距的比例）与抬起时的放大倍数 */
+const ANIM_LIFT_HEIGHT = 0.42;
+const ANIM_LIFT_SCALE = 1.14;
+
+const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
+const easeIn = (t: number): number => t * t;
+const easeInOut = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+/** 走子动画的一帧几何（纯数据，便于单测） */
+export interface AnimFrame {
+  /** 棋子素材键 */
+  img: string;
+  /** 贴图左边（已含平移与抬起位移） */
+  x: number;
+  y: number;
+  scale: number;
+  /** 抬起量 0..1（抬起 → 1，放下 → 0） */
+  lift: number;
+  /** 落影（抬起时才有；贴地时不画） */
+  shadow: { cx: number; cy: number; rx: number; ry: number; alpha: number } | null;
+}
+
+/**
+ * 计算走子动画在进度 `t` 时的一帧几何。
+ * 三段式：抬起（升高 + 放大 + 出现落影）→ 移动（保持抬起平移）→ 放下（回落 + 恢复大小 + 落影消失）。
+ */
+export function moveAnimFrame(anim: MoveAnim, skin: Skin, flip: boolean): AnimFrame {
+  const from = tileOrigin(anim.from, skin, flip);
+  const to = tileOrigin(anim.to, skin, flip);
+  const t = Math.min(1, Math.max(0, anim.t));
+
+  let tp = 0; // 平移进度
+  let lift: number; // 抬起量（三个阶段都会赋值）
+  if (t <= ANIM_LIFT_END) {
+    lift = easeOut(t / ANIM_LIFT_END);
+  } else if (t <= ANIM_DROP_START) {
+    tp = easeInOut((t - ANIM_LIFT_END) / (ANIM_DROP_START - ANIM_LIFT_END));
+    lift = 1;
+  } else {
+    tp = 1;
+    lift = 1 - easeIn((t - ANIM_DROP_START) / (1 - ANIM_DROP_START));
+  }
+
+  const x = from.x + (to.x - from.x) * tp;
+  const y = from.y + (to.y - from.y) * tp - skin.spaceY * ANIM_LIFT_HEIGHT * lift;
+  const cx = from.x + skin.discX + (to.x - from.x) * tp;
+  const cy = from.y + skin.discY + (to.y - from.y) * tp;
+  return {
+    img: `${anim.piece.s}_${PIECE_IMG[anim.piece.t]}`,
+    x,
+    y,
+    scale: 1 + (ANIM_LIFT_SCALE - 1) * lift,
+    lift,
+    shadow:
+      lift > 0.02
+        ? {
+            cx,
+            cy,
+            rx: skin.disc * (0.5 + 0.14 * lift),
+            ry: skin.disc * (0.22 + 0.08 * lift),
+            alpha: 0.34 * lift,
+          }
+        : null,
+  };
+}
 
 /**
  * 生成一帧的绘制计划（纯数据，便于单元测试）。
@@ -216,13 +320,7 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
   const ops: RenderOp[] = [{ img: 'bg', x: 0, y: 0 }];
 
   /** 贴图坐标：棋子/落点框用贴图起点，提示点再叠加固定偏移 */
-  const at = (pos: Pos, offset = 0): { x: number; y: number } => {
-    const [vr, vc] = toView(pos, v.flip);
-    return {
-      x: skin.spaceX * vc + skin.pointStartX + offset,
-      y: skin.spaceY * vr + skin.pointStartY + offset,
-    };
-  };
+  const at = (pos: Pos, offset = 0): { x: number; y: number } => tileOrigin(pos, skin, v.flip, offset);
   const center = (pos: Pos) => {
     const [vr, vc] = toView(pos, v.flip);
     return cellCenter([vr, vc], skin);
@@ -248,11 +346,13 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
     ops.push({ img: 'dot', x, y });
   }
 
-  // 棋子（被选中的棋子压暗一档）
+  // 棋子（被选中的棋子压暗一档；动画中的棋子在其终点格跳过，由动画帧单独绘制）
+  const animTo = v.anim ? v.anim.to : null;
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 9; c++) {
       const p = v.board[r][c];
       if (!p) continue;
+      if (animTo && animTo[0] === r && animTo[1] === c) continue;
       const { x, y } = at([r, c]);
       const selected = !!v.selected && v.selected[0] === r && v.selected[1] === c;
       ops.push({ img: `${p.s}_${PIECE_IMG[p.t]}`, x, y, alpha: selected ? 0.75 : 1 });
@@ -328,6 +428,13 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
     }
   }
 
+  // 走子动画：抬起的棋子与落影画在最上层（先落影后棋子，保证棋子压在投影之上）
+  if (v.anim) {
+    const f = moveAnimFrame(v.anim, skin, v.flip);
+    if (f.shadow) ops.push({ shadow: true, ...f.shadow });
+    ops.push({ img: f.img, x: f.x, y: f.y, alpha: 1, scale: f.scale });
+  }
+
   return ops;
 }
 
@@ -364,11 +471,30 @@ export function renderBoard(
       ctx.restore();
       continue;
     }
+    if ('shadow' in op) {
+      // 走子抬起时的落影：贴地的椭圆黑影，随抬起高度变淡变大
+      ctx.save();
+      ctx.globalAlpha = op.alpha;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(op.cx, op.cy, op.rx, op.ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      continue;
+    }
     const img = images[op.img];
     if (!img || !img.complete || img.naturalWidth === 0) continue;
     ctx.save();
     ctx.globalAlpha = op.alpha ?? 1;
-    ctx.drawImage(img, op.x, op.y);
+    const scale = op.scale ?? 1;
+    if (scale === 1) {
+      ctx.drawImage(img, op.x, op.y);
+    } else {
+      // 以素材圆盘中心为锚点缩放（抬起放大时棋子不跑位）
+      const w = img.naturalWidth * scale;
+      const h = img.naturalHeight * scale;
+      ctx.drawImage(img, op.x + skin.discX * (1 - scale), op.y + skin.discY * (1 - scale), w, h);
+    }
     ctx.restore();
   }
 }

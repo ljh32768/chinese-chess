@@ -149,7 +149,19 @@
   <section id="screen-game" class="screen">
     <div class="game-layout">
       <div class="chess-box">
-        <canvas id="board" width="523" height="580"></canvas>
+        <div class="board-stage">
+          <canvas id="board" width="523" height="580"></canvas>
+          <!-- 棋盘正中提示条：将军 / 绝杀（各杀法一套图案样式），显示 1.5s 渐入渐出 -->
+          <div class="board-banner" id="board-banner" role="status" aria-live="assertive" hidden>
+            <div class="banner-card" id="banner-card">
+              <span class="banner-emblem" id="banner-emblem" aria-hidden="true"></span>
+              <span class="banner-text">
+                <span class="banner-name" id="banner-name"></span>
+                <span class="banner-sub" id="banner-sub"></span>
+              </span>
+            </div>
+          </div>
+        </div>
         <div class="bn_box">
           <div id="actions-play">
             <input type="button" id="btn-undo" value="悔　棋">
