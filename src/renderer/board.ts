@@ -142,6 +142,17 @@ export interface MoveAnim {
   piece: Piece;
   /** 进度 0..1 */
   t: number;
+  /**
+   * 该棋子点击时已被「抬起」（选中态），走子动画直接从平移开始（不再重复起身）。
+   * 省略 / false 时走完整的起身 → 平移 → 放下（对手 / AI 走子用）。
+   */
+  startLifted?: boolean;
+}
+
+/** 点击选中的棋子「抬起」/ 取消选中「落下」的一帧状态（`t` 为 0..1 抬起进度） */
+export interface MoveLift {
+  pos: Pos;
+  t: number;
 }
 
 export interface BoardView {
@@ -152,6 +163,8 @@ export interface BoardView {
   flip: boolean;
   /** 走子动画（有值时该棋子按动画帧绘制）；null / 省略表示静止盘面 */
   anim?: MoveAnim | null;
+  /** 被点击抬起的棋子（含正在升起 / 落下）；这些格不再静态贴图，由抬起帧单独绘制 */
+  lifts?: MoveLift[] | null;
   /** 被将军（含将死）一方的将/帅位置，用于警示高亮 */
   checkKing?: Pos | null;
   /**
@@ -268,47 +281,77 @@ export interface AnimFrame {
   shadow: { cx: number; cy: number; rx: number; ry: number; alpha: number } | null;
 }
 
+/** 抬起量 → 贴图位置 / 缩放 / 落影（贴盘 0 ↔ 完全抬起 1 之间） */
+function liftedPose(
+  origin: { x: number; y: number },
+  lift: number,
+  skin: Skin,
+): { x: number; y: number; scale: number; shadow: AnimFrame['shadow'] } {
+  return {
+    x: origin.x,
+    y: origin.y - skin.spaceY * ANIM_LIFT_HEIGHT * lift,
+    scale: 1 + (ANIM_LIFT_SCALE - 1) * lift,
+    shadow:
+      lift > 0.02
+        ? {
+            cx: origin.x + skin.discX,
+            cy: origin.y + skin.discY,
+            rx: skin.disc * (0.5 + 0.14 * lift),
+            ry: skin.disc * (0.22 + 0.08 * lift),
+            alpha: 0.34 * lift,
+          }
+        : null,
+  };
+}
+
+/**
+ * 点击棋子「抬起」/ 取消选中「落下」的一帧几何：只在原交叉点垂直升降。
+ * @param t 抬起进度 0（贴盘）..1（完全抬起）
+ */
+export function liftFrame(pos: Pos, piece: Piece, t: number, skin: Skin, flip: boolean): AnimFrame {
+  const lift = Math.min(1, Math.max(0, t));
+  const pose = liftedPose(tileOrigin(pos, skin, flip), lift, skin);
+  return {
+    img: `${piece.s}_${PIECE_IMG[piece.t]}`,
+    x: pose.x,
+    y: pose.y,
+    scale: pose.scale,
+    lift,
+    shadow: pose.shadow,
+  };
+}
+
 /**
  * 计算走子动画在进度 `t` 时的一帧几何。
  * 三段式：抬起（升高 + 放大 + 出现落影）→ 移动（保持抬起平移）→ 放下（回落 + 恢复大小 + 落影消失）。
+ * `anim.startLifted` 为真（点击选中时已抬起）时省去起身段：直接从平移开始，落点再放下。
  */
 export function moveAnimFrame(anim: MoveAnim, skin: Skin, flip: boolean): AnimFrame {
   const from = tileOrigin(anim.from, skin, flip);
   const to = tileOrigin(anim.to, skin, flip);
   const t = Math.min(1, Math.max(0, anim.t));
 
+  const raiseEnd = anim.startLifted ? 0 : ANIM_LIFT_END; // 起身段结束（已抬起则为 0）
   let tp = 0; // 平移进度
-  let lift: number; // 抬起量（三个阶段都会赋值）
-  if (t <= ANIM_LIFT_END) {
-    lift = easeOut(t / ANIM_LIFT_END);
+  let lift: number;
+  if (raiseEnd > 0 && t <= raiseEnd) {
+    lift = easeOut(t / raiseEnd); // 起身
   } else if (t <= ANIM_DROP_START) {
-    tp = easeInOut((t - ANIM_LIFT_END) / (ANIM_DROP_START - ANIM_LIFT_END));
+    tp = easeInOut((t - raiseEnd) / (ANIM_DROP_START - raiseEnd)); // 平移（保持抬起）
     lift = 1;
   } else {
     tp = 1;
-    lift = 1 - easeIn((t - ANIM_DROP_START) / (1 - ANIM_DROP_START));
+    lift = 1 - easeIn((t - ANIM_DROP_START) / (1 - ANIM_DROP_START)); // 放下
   }
 
-  const x = from.x + (to.x - from.x) * tp;
-  const y = from.y + (to.y - from.y) * tp - skin.spaceY * ANIM_LIFT_HEIGHT * lift;
-  const cx = from.x + skin.discX + (to.x - from.x) * tp;
-  const cy = from.y + skin.discY + (to.y - from.y) * tp;
+  const pose = liftedPose({ x: from.x + (to.x - from.x) * tp, y: from.y + (to.y - from.y) * tp }, lift, skin);
   return {
     img: `${anim.piece.s}_${PIECE_IMG[anim.piece.t]}`,
-    x,
-    y,
-    scale: 1 + (ANIM_LIFT_SCALE - 1) * lift,
+    x: pose.x,
+    y: pose.y,
+    scale: pose.scale,
     lift,
-    shadow:
-      lift > 0.02
-        ? {
-            cx,
-            cy,
-            rx: skin.disc * (0.5 + 0.14 * lift),
-            ry: skin.disc * (0.22 + 0.08 * lift),
-            alpha: 0.34 * lift,
-          }
-        : null,
+    shadow: pose.shadow,
   };
 }
 
@@ -346,13 +389,16 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
     ops.push({ img: 'dot', x, y });
   }
 
-  // 棋子（被选中的棋子压暗一档；动画中的棋子在其终点格跳过，由动画帧单独绘制）
+  // 棋子（被选中的棋子压暗一档；动画中的棋子在其终点格跳过，抬起的棋子也跳过——均由动画帧单独绘制）
   const animTo = v.anim ? v.anim.to : null;
+  const lifted = (r: number, c: number): boolean =>
+    (v.lifts ?? []).some((l) => l.pos[0] === r && l.pos[1] === c);
   for (let r = 0; r < 10; r++) {
     for (let c = 0; c < 9; c++) {
       const p = v.board[r][c];
       if (!p) continue;
       if (animTo && animTo[0] === r && animTo[1] === c) continue;
+      if (lifted(r, c)) continue;
       const { x, y } = at([r, c]);
       const selected = !!v.selected && v.selected[0] === r && v.selected[1] === c;
       ops.push({ img: `${p.s}_${PIECE_IMG[p.t]}`, x, y, alpha: selected ? 0.75 : 1 });
@@ -426,6 +472,15 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
       const d = at(v.hint.to, DOT_OFFSET);
       ops.push({ img: 'dot', x: d.x, y: d.y, alpha: 0.9 });
     }
+  }
+
+  // 点击选中的棋子「抬起」：升起 / 落下的棋子与落影画在最上层（先落影后棋子）
+  for (const l of v.lifts ?? []) {
+    const p = v.board[l.pos[0]]?.[l.pos[1]];
+    if (!p) continue;
+    const f = liftFrame(l.pos, p, l.t, skin, v.flip);
+    if (f.shadow) ops.push({ shadow: true, ...f.shadow });
+    ops.push({ img: f.img, x: f.x, y: f.y, alpha: 1, scale: f.scale });
   }
 
   // 走子动画：抬起的棋子与落影画在最上层（先落影后棋子，保证棋子压在投影之上）

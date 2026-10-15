@@ -17,6 +17,7 @@ import {
   computeDrawList,
   DrawOp,
   isSkinId,
+  liftFrame,
   moveAnimFrame,
   nextSkin,
   pickCell,
@@ -333,5 +334,74 @@ describe('走子动画（抬起 → 移动 → 放下）', () => {
     const ops = computeDrawList(view({ board: b, lastMove: { from: [6, 0], to: [5, 0] } }), skin2);
     expect(ops.some((o) => 'shadow' in o)).toBe(false);
     expect(draws(ops).every((o) => o.scale === undefined)).toBe(true);
+  });
+
+  it('走子动画 startLifted：省去起身段，一开始就在抬起高度上平移', () => {
+    const lifted = moveAnimFrame({ ...anim(0), startLifted: true }, skin2, false);
+    expect(lifted.x).toBe(3); // 仍在起点
+    expect(lifted.y).toBeCloseTo(347 - 23.94, 6); // 但已抬到空中
+    expect(lifted.lift).toBe(1);
+    expect(lifted.scale).toBeCloseTo(1.14, 6);
+    // 同一进度下未抬起时还在贴盘 → 起身
+    expect(moveAnimFrame(anim(0), skin2, false).lift).toBe(0);
+    // 终点仍会正常放下
+    const landed = moveAnimFrame({ ...anim(1), startLifted: true }, skin2, false);
+    expect(landed.y).toBe(290);
+    expect(landed.lift).toBe(0);
+    expect(landed.shadow).toBeNull();
+  });
+});
+
+describe('点击棋子抬起（liftFrame / BoardView.lifts）', () => {
+  const rook: Piece = { t: 'R', s: 'r' };
+
+  it('抬起帧：原地升起 + 放大 + 出现落影，进度越界夹到 0..1', () => {
+    const rest = liftFrame([6, 0], rook, 0, skin2, false);
+    expect(rest).toMatchObject({ img: 'r_c', x: 3, y: 347, scale: 1, lift: 0, shadow: null });
+
+    const up = liftFrame([6, 0], rook, 1, skin2, false);
+    expect(up.y).toBeCloseTo(347 - 23.94, 6);
+    expect(up.scale).toBeCloseTo(1.14, 6);
+    expect(up.lift).toBe(1);
+    expect(up.shadow).not.toBeNull();
+    expect(up.shadow!.cy).toBeCloseTo(347 + 24, 6);
+
+    expect(liftFrame([6, 0], rook, -1, skin2, false).lift).toBe(0);
+    expect(liftFrame([6, 0], rook, 2, skin2, false).lift).toBe(1);
+  });
+
+  it('黑方视角：抬起帧坐标随翻转（[6,0] → 视图 [3,8]）', () => {
+    const up = liftFrame([6, 0], rook, 1, skin2, true);
+    expect(up.x).toBe(459); // 3 + 57*8
+    expect(up.y).toBeCloseTo(176 - 23.94, 6); // 5 + 57*3 − 抬起高度
+  });
+
+  it('绘制计划：抬起的棋子原地不再静态贴图，改由抬起帧绘制在最上层并带落影', () => {
+    const b = emptyBoard();
+    b[6][0] = rook;
+    const ops = computeDrawList(view({ board: b, selected: [6, 0], lifts: [{ pos: [6, 0], t: 1 }] }), skin2);
+    const pieces = draws(ops).filter((o) => o.img === 'r_c');
+    expect(pieces).toHaveLength(1);
+    expect(pieces[0].scale).toBeCloseTo(1.14, 6);
+    // 静态贴图（alpha 0.75 的选中压暗）已被跳过
+    expect(draws(ops).some((o) => o.img === 'r_c' && o.alpha === 0.75)).toBe(false);
+    const shadowIdx = ops.findIndex((o) => 'shadow' in o);
+    const pieceIdx = ops.findIndex((o) => !('ring' in o) && !('shadow' in o) && o.img === 'r_c');
+    expect(pieceIdx).toBeGreaterThan(shadowIdx);
+  });
+
+  it('无抬起时棋子照常静态贴图（含选中压暗）', () => {
+    const b = emptyBoard();
+    b[6][0] = rook;
+    const ops = computeDrawList(view({ board: b, selected: [6, 0] }), skin2);
+    expect(draws(ops)).toContainEqual({ img: 'r_c', x: 3, y: 347, alpha: 0.75 });
+    expect(ops.some((o) => 'shadow' in o)).toBe(false);
+  });
+
+  it('抬起帧找不到棋子时跳过（起子已离场的过渡帧）', () => {
+    const b = emptyBoard();
+    const ops = computeDrawList(view({ board: b, lifts: [{ pos: [6, 0], t: 1 }] }), skin2);
+    expect(ops.some((o) => 'shadow' in o)).toBe(false);
+    expect(draws(ops).every((o) => !o.img.startsWith('r_'))).toBe(true);
   });
 });

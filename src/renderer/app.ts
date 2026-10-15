@@ -103,6 +103,14 @@ const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
   b: { K: '将', A: '士', B: '象', N: '马', R: '车', C: '炮', P: '卒' },
 };
 
+/** 选中棋子的抬起动画：进度在 from → to 之间推进（to=1 保持抬起，to=0 落回原处） */
+interface LiftAnim {
+  pos: Pos;
+  from: number;
+  to: number;
+  start: number;
+}
+
 /** 客户端本地视图状态（仅用于渲染，非权威） */
 const S = {
   /** 当前连接的服务器；未选择时为 null */
@@ -153,7 +161,9 @@ const S = {
   /** 鼠标悬停的交叉点（仅用于预高亮） */
   hover: null as Pos | null,
   /** 走子动画（抬起 → 移动 → 放下）；null 表示当前静止 */
-  anim: null as { from: Pos; to: Pos; piece: Piece; start: number } | null,
+  anim: null as { from: Pos; to: Pos; piece: Piece; start: number; startLifted?: boolean } | null,
+  /** 被点击抬起的棋子（升起 / 保持 / 落下）；同一时刻只抬起一枚 */
+  lifts: [] as LiftAnim[],
   /** 提示环（残局挑战的「提示」正解首着） */
   hint: null as Move | null,
   /** 残局挑战进度；null 表示当前不是残局模式 */
@@ -345,43 +355,109 @@ function canPlay(): boolean {
   return !S.spectator && S.status === 'playing' && S.turn === S.side && !S.oppAway && !S.endgame?.result;
 }
 
-/** 走子动画时长（毫秒）；抬起 → 移动 → 放下 三段式 */
+/** 点击抬起 / 落下的一帧时长（毫秒） */
+const LIFT_MS = 200;
+/** 走子动画时长（毫秒）；已抬起时直接从平移开始，否则 起身 → 移动 → 放下 */
 const MOVE_ANIM_MS = 460;
-/** 走子动画的 rAF 句柄 */
+/** 动画（抬起 / 落下 / 走子）的 rAF 句柄 */
 let animRAF = 0;
 
-/** 是否跟随系统「减少动态效果」（减少时不做走子动画，提示条也去掉缩放动效） */
+/** 是否跟随系统「减少动态效果」（减少时不做抬起 / 走子动画，提示条也去掉缩放动效） */
 const prefersReducedMotion = (): boolean =>
   typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+const easeLift = (k: number): number => 1 - (1 - k) * (1 - k);
+
+/** 抬起动画的当前进度（0 贴盘 / 1 完全抬起） */
+function liftProgress(a: LiftAnim, now: number): number {
+  const k = Math.min(1, (now - a.start) / LIFT_MS);
+  return a.from + (a.to - a.from) * easeLift(k);
+}
+
+/** 某格棋子当前的抬起进度（无抬起记录时为 0） */
+function liftOf(pos: Pos): number {
+  const a = S.lifts.find((x) => x.pos[0] === pos[0] && x.pos[1] === pos[1]);
+  return a ? liftProgress(a, performance.now()) : 0;
+}
+
+/** 某格是否处于「已抬起」状态（联机等待服务器确认期间保持抬起） */
+function hasLiftAt(pos: Pos): boolean {
+  return S.lifts.some((a) => a.pos[0] === pos[0] && a.pos[1] === pos[1]);
+}
+
 /**
- * 启动一步走子的动画（棋子抬起 → 移动 → 放下）。
- * 起点/终点取自刚更新的盘面：动画期间该棋子由 board.ts 单独绘制，落点格不静态贴图。
+ * 动画帧：推进抬起 / 落下 / 走子动画，直到全部结束。
+ * 只有「正在动」的抬起（到达 1 保持抬起的不算）与走子动画会持续请求重绘。
  */
-function animateMove(from: Pos, to: Pos): void {
+function tickAnim(): void {
+  const now = performance.now();
+  const animBusy = !!S.anim && now - S.anim.start < MOVE_ANIM_MS;
+  const liftBusy = S.lifts.some((a) => now - a.start < LIFT_MS);
+  // 落回原处（to=0）且已跑完的记录即可丢弃；保持抬起（to=1）的留着
+  S.lifts = S.lifts.filter((a) => a.to === 1 || now - a.start < LIFT_MS);
+  paint();
+  if (animBusy || liftBusy) {
+    animRAF = window.requestAnimationFrame(tickAnim);
+  } else {
+    S.anim = null;
+    animRAF = 0;
+  }
+}
+
+/** 启动动画帧循环（已在运行时不重复启动） */
+function kickAnim(): void {
+  if (!animRAF) animRAF = window.requestAnimationFrame(tickAnim);
+}
+
+/** 让当前抬起的棋子全部落回原处 */
+function lowerAllLifts(): void {
+  const now = performance.now();
+  for (const a of S.lifts) {
+    if (a.to === 1) {
+      a.from = liftProgress(a, now);
+      a.to = 0;
+      a.start = now;
+    }
+  }
+  kickAnim();
+}
+
+/** 点击棋子：把它抬起（同一时刻只抬起一枚，其它先落下） */
+function liftPiece(pos: Pos): void {
+  if (prefersReducedMotion()) return;
+  const cur = S.lifts.find((a) => a.pos[0] === pos[0] && a.pos[1] === pos[1]);
+  if (cur && cur.to === 1) return; // 已抬起：保持
+  lowerAllLifts();
+  S.lifts = S.lifts.filter((a) => a.pos[0] !== pos[0] || a.pos[1] !== pos[1]);
+  S.lifts.push({ pos, from: 0, to: 1, start: performance.now() });
+  kickAnim();
+}
+
+/** 清空抬起状态（全量同步 / 离开对局时立即复位） */
+function clearLifts(): void {
+  S.lifts = [];
+}
+
+/**
+ * 启动一步走子的动画（抬起 → 移动 → 放下）。
+ * 起点/终点取自刚更新的盘面：动画期间该棋子由 board.ts 单独绘制，落点格不静态贴图。
+ * @param startLifted 该棋子点击时已抬起（选中态）时置真：直接从平移开始，不再重复起身
+ */
+function animateMove(from: Pos, to: Pos, startLifted = false): void {
   if (prefersReducedMotion()) return;
   const piece = S.board[to[0]]?.[to[1]];
   if (!piece) return;
-  S.anim = { from, to, piece, start: performance.now() };
+  S.anim = { from, to, piece, start: performance.now(), startLifted };
+  // 起点的「点击抬起」交给走子动画接管（避免同格画两次）
+  S.lifts = S.lifts.filter((a) => a.pos[0] !== from[0] || a.pos[1] !== from[1]);
   paint(); // 先画起始帧，避免全量同步那一帧先闪现在终点
-  window.cancelAnimationFrame(animRAF);
-  const tick = (): void => {
-    const a = S.anim;
-    if (!a) return;
-    if (performance.now() - a.start >= MOVE_ANIM_MS) {
-      S.anim = null;
-      paint();
-      return;
-    }
-    paint();
-    animRAF = window.requestAnimationFrame(tick);
-  };
-  animRAF = window.requestAnimationFrame(tick);
+  kickAnim();
 }
 
 /** 组装棋盘渲染视图（纯展示，不含规则判定） */
 function boardView(): BoardView {
   const playable = canPlay();
+  const now = performance.now();
   return {
     board: S.board,
     selected: S.selected,
@@ -393,9 +469,11 @@ function boardView(): BoardView {
           from: S.anim.from,
           to: S.anim.to,
           piece: S.anim.piece,
-          t: Math.min(1, (performance.now() - S.anim.start) / MOVE_ANIM_MS),
+          t: Math.min(1, (now - S.anim.start) / MOVE_ANIM_MS),
+          startLifted: S.anim.startLifted,
         }
       : null,
+    lifts: S.lifts.length ? S.lifts.map((a) => ({ pos: a.pos, t: liftProgress(a, now) })) : null,
     checkKing: S.check ? findKing(S.board, S.turn) : null,
     interactiveSide: playable ? S.side : null,
     hover: playable ? S.hover : null,
@@ -649,8 +727,9 @@ function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void
   S.pending = null;
   S.oppAway = false;
   S.hover = null;
-  // 全量同步（含悔棋 / 重开）默认不做走子动画；terminal 的 game_over 紧跟 move_applied，需保留在跑的动画
+  // 全量同步（含悔棋 / 重开）默认不做走子动画；终局的 game_over 紧跟 move_applied，需保留在跑的动画
   if (!opts.keepAnim) S.anim = null;
+  clearLifts(); // 抬起状态由本端交互驱动，全量同步后一律复位
   S.history = s.history ?? [];
   S.deadline = s.deadline ?? null;
   if ($('screen-game').classList.contains('active')) render();
@@ -817,13 +896,15 @@ function handleMessage(msg: ServerMessage): void {
       S.history = msg.history;
       S.deadline = msg.deadline;
       S.anim = null;
+      // 本端点选时已把该子抬起（等待服务器确认期间保持抬起）→ 走子动画直接从平移开始
       playClick();
       render();
-      animateMove(msg.from, msg.to);
+      animateMove(msg.from, msg.to, hasLiftAt(msg.from));
       maybeBanner();
       return;
     case 'move_rejected':
       toast(`走子无效：${msg.reason}`);
+      lowerAllLifts(); // 抬起中的棋子落回原处
       return;
     case 'state':
       applySnapshot(msg.state);
@@ -1139,6 +1220,7 @@ function resetLocal(): void {
   S.hint = null;
   S.endgame = null;
   S.anim = null;
+  clearLifts();
   window.cancelAnimationFrame(animRAF);
   animRAF = 0;
   localGame = null;
@@ -1467,18 +1549,19 @@ function createAiRoom(): void {
 }
 
 /** 本地走子（offline / 残局模式）：直接走本地状态机，AI 随后应答 */
-function localMove(from: Pos, to: Pos): void {
+function localMove(from: Pos, to: Pos, opts: { startLifted?: boolean } = {}): void {
   const game = localGame;
   if (!game) return;
   const result = game.applyMove(from, to, S.side);
   if (!result.ok) {
     toast(result.reason ?? '非法走子');
+    lowerAllLifts();
     return;
   }
   playClick();
   S.hint = null; // 走子后清除提示环
   applySnapshot(game.snapshot());
-  animateMove(from, to);
+  animateMove(from, to, opts.startLifted);
   maybeBanner();
   if (S.endgame) {
     endgameEvaluate();
@@ -2251,11 +2334,12 @@ function offerUndo(): void {
   toast('已发送悔棋请求…');
 }
 
-/** 取消当前选中（ESC / 右键触发） */
+/** 取消当前选中（ESC / 右键触发）：抬起的棋子落回原处 */
 function clearSelection(): void {
   if (!S.selected) return;
   S.selected = null;
   S.moves = [];
+  lowerAllLifts();
   render();
 }
 
@@ -2263,9 +2347,11 @@ function clearSelection(): void {
 
 function onCell([r, c]: Pos): void {
   const p = S.board[r][c];
+  // 点击己方棋子 = 选中：棋子抬起（同一时刻只抬起一枚）
   const pick = (): void => {
     S.selected = [r, c];
     S.moves = legalMoves(S.board, r, c);
+    liftPiece([r, c]);
     playSelect();
     render();
   };
@@ -2273,10 +2359,12 @@ function onCell([r, c]: Pos): void {
   if (S.selected) {
     if (S.moves.some(([rr, cc]) => rr === r && cc === c)) {
       const from = S.selected;
+      const startLifted = liftOf(from) > 0.5; // 本端已把该子抬起
       S.selected = null;
       S.moves = [];
       render();
-      if (S.offline) localMove(from, [r, c]);
+      // 本地对局立即走子（抬起交给走子动画）；联机则保持抬起，等服务器确认后再走动画
+      if (S.offline) localMove(from, [r, c], { startLifted });
       else net?.send({ type: 'move', from, to: [r, c] });
       return;
     }
@@ -2286,6 +2374,7 @@ function onCell([r, c]: Pos): void {
     }
     S.selected = null;
     S.moves = [];
+    lowerAllLifts(); // 点到空位 / 对方棋子：取消选中，棋子落回
     render();
     return;
   }

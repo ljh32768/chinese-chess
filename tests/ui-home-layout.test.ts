@@ -455,7 +455,23 @@ describe('v2.8 走子动画与棋盘正中提示条', () => {
     expect(APP).toContain("bannerContent('check'");
     expect(APP).toContain("bannerContent('mate'");
     // 联机走子（move_applied / game_over）与本地走子都接上动画与提示条
-    expect(APP).toContain('animateMove(msg.from, msg.to)');
+    expect(APP).toContain('animateMove(msg.from, msg.to, hasLiftAt(msg.from))');
     expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
+  });
+
+  it('点击棋子抬起：点击选中即抬起、取消落回、走子从抬起态直接平移', () => {
+    // 抬起时长与状态
+    expect(APP).toContain('const LIFT_MS');
+    expect(APP).toContain('lifts: [] as LiftAnim[]');
+    // 点击己方棋子 → 抬起（onCell 的 pick）
+    expect(APP).toContain('liftPiece([r, c])');
+    expect(APP).toContain('function liftPiece(');
+    // 取消选中 / 点到空位 → 落回
+    expect(APP).toContain('lowerAllLifts()');
+    // 走子：本地对局把抬起交给走子动画，联机保持抬起等服务器确认
+    expect(APP).toContain('localMove(from, [r, c], { startLifted })');
+    expect(APP).toContain('applySnapshot(game.snapshot());\n  animateMove(from, to, opts.startLifted);');
+    // 绘制侧：抬起帧与走子动画帧
+    expect(APP).toContain('lifts: S.lifts.length ? S.lifts.map');
   });
 });
