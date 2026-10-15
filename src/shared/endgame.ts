@@ -7,7 +7,9 @@
  *   是否存在不论对方如何应对都能在 N 步内将死的强制杀法；对方无着可走（将死或困毙）即算取胜。
  * - 题库由测试逐条校验：确为强制杀（`canForceMate(goalMoves)`）且步数不能再少（`goalMoves` 为最小步数）。
  * - 自检：`checkPuzzle()` / `checkEndgameBank()` 复用同一求解器与规则引擎，对题库逐条核验
- *   局面合法性 / 可解性 / 目标步数是否最少，供界面「自检」与新增题目时排查（纯函数，无副作用）。
+ *   局面合法性 / 可解性 / 目标步数是否最少，供测试与新增题目时排查（纯函数，无副作用）。
+ * - 自建残局：玩家用编辑器摆出的局面存成同一结构（`level: 'custom'`），保存前由
+ *   `checkCustomEndgame()` 自动核验（局面合法性 + 求解出最优步数），不通过则不允许保存。
  *
  * 棋盘坐标：10 行 9 列，黑方在上（九宫 0~2 行）、红方在下（九宫 7~9 行）。
  */
@@ -15,17 +17,18 @@
 import { isAttacked, isInCheck, pieceMoves, sideHasAnyMove } from './rules.js';
 import { Board, Cell, Move, PieceType, Pos, ROWS, COLS, Side } from './types.js';
 
-/** 难度档位 */
-export type EndgameLevel = 'easy' | 'medium' | 'hard';
+/** 难度档位（`custom` = 玩家自建残局，不参与难度分组） */
+export type EndgameLevel = 'easy' | 'medium' | 'hard' | 'custom';
 
 /** 难度档位中文名（列表分组用） */
 export const LEVEL_LABEL: Record<EndgameLevel, string> = {
   easy: '入门',
   medium: '中等',
   hard: '困难',
+  custom: '自建',
 };
 
-/** 难度档位顺序（列表按此排序） */
+/** 难度档位顺序（内置题库按此排序；自建残局在列表中单独成组） */
 export const LEVEL_ORDER: readonly EndgameLevel[] = ['easy', 'medium', 'hard'];
 
 /** 一道残局 */
@@ -204,11 +207,38 @@ export function nextPuzzle(id: string): EndgamePuzzle | null {
   return i >= 0 && i + 1 < PUZZLES.length ? PUZZLES[i + 1] : null;
 }
 
+/** 棋子表 → 棋盘（空格为 null）；越界坐标忽略（保存前的核验会先拦下越界局面） */
+export function piecesToBoard(pieces: Array<[number, number, PieceType, Side]>): Board {
+  const board: Board = Array.from({ length: ROWS }, () => Array<Cell>(COLS).fill(null));
+  for (const [r, c, t, s] of pieces) {
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+    board[r][c] = { t, s };
+  }
+  return board;
+}
+
 /** 由题库条目构造初始棋盘（空格为 null） */
 export function buildPuzzleBoard(p: EndgamePuzzle): Board {
-  const board: Board = Array.from({ length: ROWS }, () => Array<Cell>(COLS).fill(null));
-  for (const [r, c, t, s] of p.pieces) board[r][c] = { t, s };
-  return board;
+  return piecesToBoard(p.pieces);
+}
+
+/** 棋盘 → 棋子表（编辑器「保存」时把摆好的局面转成题目） */
+export function boardToPieces(board: Board): Array<[number, number, PieceType, Side]> {
+  const pieces: Array<[number, number, PieceType, Side]> = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const p = board[r][c];
+      if (p) pieces.push([r, c, p.t, p.s]);
+    }
+  }
+  return pieces;
+}
+
+/** 红黑互换：位置不变、阵营对调（编辑器「红黑互换」用；不修改传入数组） */
+export function swapPieceSides(
+  pieces: Array<[number, number, PieceType, Side]>,
+): Array<[number, number, PieceType, Side]> {
+  return pieces.map(([r, c, t, s]) => [r, c, t, other(s)] as [number, number, PieceType, Side]);
 }
 
 // ------------------------------------------------------------------ 求解器
@@ -391,16 +421,17 @@ export interface PuzzleCheck {
 }
 
 /**
- * 逐条核验一道残局：局面合法、目标步数内可强制取胜、且步数不能再少。
- * 复用规则引擎 + 求解器，不修改传入数据；新增题目时可用它先自检再入库。
+ * 局面层面的问题（数据 + 规则）：越界 / 重叠 / 缺将、开局双方的状态。
+ * 题库自检与自建残局的保存前核验共用（纯函数，不修改传入数据）。
+ * 有数据层问题时不再构建棋盘（越界坐标会被丢弃，继续判定没有意义）。
  */
-export function checkPuzzle(p: EndgamePuzzle): PuzzleCheck {
+function positionProblems(pieces: Array<[number, number, PieceType, Side]>, side: Side): string[] {
   const problems: string[] = [];
   const seen = new Set<string>();
   let redKing = false;
   let blackKing = false;
-  // 数据层：越界 / 重叠 / 缺将 / 步数——有问题时不构建棋盘（越界会导致构建失败）
-  for (const [r, c, t, s] of p.pieces) {
+  // 数据层：越界 / 重叠 / 缺将
+  for (const [r, c, t, s] of pieces) {
     if (r < 0 || r >= ROWS || c < 0 || c >= COLS) problems.push(`棋子越界：行 ${r} 列 ${c}`);
     const key = `${r},${c}`;
     if (seen.has(key)) problems.push(`棋子重叠：行 ${r} 列 ${c}`);
@@ -410,20 +441,30 @@ export function checkPuzzle(p: EndgamePuzzle): PuzzleCheck {
   }
   if (!redKing) problems.push('缺少红帅');
   if (!blackKing) problems.push('缺少黑将');
+  if (problems.length > 0) return problems;
+
+  // 规则层：开局双方均未被将军、均未无子可走
+  const board = piecesToBoard(pieces);
+  const opp = other(side);
+  if (isInCheck(board, side)) problems.push('先手方开局被将军');
+  if (isInCheck(board, opp)) problems.push('后手方开局被将军');
+  if (!sideHasAnyMove(board, side)) problems.push('先手方开局无子可走');
+  if (!sideHasAnyMove(board, opp)) problems.push('后手方开局已被将死 / 困毙');
+  return problems;
+}
+
+/**
+ * 逐条核验一道残局：局面合法、目标步数内可强制取胜、且步数不能再少。
+ * 复用规则引擎 + 求解器，不修改传入数据；新增题目时可用它先自检再入库。
+ */
+export function checkPuzzle(p: EndgamePuzzle): PuzzleCheck {
+  const problems = positionProblems(p.pieces, p.side);
   if (p.goalMoves < 1) problems.push('目标步数必须不少于 1 步');
   const base = { id: p.id, name: p.name, level: p.level, solvable: false, minimal: false };
   if (problems.length > 0) return { ...base, ok: false, problems };
 
-  // 规则层：开局双方均未被将军、均未无子可走
-  const board = buildPuzzleBoard(p);
-  const opp = other(p.side);
-  if (isInCheck(board, p.side)) problems.push('先手方开局被将军');
-  if (isInCheck(board, opp)) problems.push('后手方开局被将军');
-  if (!sideHasAnyMove(board, p.side)) problems.push('先手方开局无子可走');
-  if (!sideHasAnyMove(board, opp)) problems.push('后手方开局已被将死 / 困毙');
-  if (problems.length > 0) return { ...base, ok: false, problems };
-
   // 求解层：目标步数内可强制取胜，且步数不能再少，并给出正解首着
+  const board = buildPuzzleBoard(p);
   const solvable = canForceMate(board, p.side, p.goalMoves);
   const minimal = solvable && (p.goalMoves === 1 || !canForceMate(board, p.side, p.goalMoves - 1));
   if (!solvable) problems.push(`无法在 ${p.goalMoves} 步内强制取胜`);
@@ -436,6 +477,124 @@ export function checkPuzzle(p: EndgamePuzzle): PuzzleCheck {
 /** 题库整体自检：逐条核验（返回顺序与 PUZZLES 一致） */
 export function checkEndgameBank(): PuzzleCheck[] {
   return PUZZLES.map(checkPuzzle);
+}
+
+// ------------------------------------------------------------------ 自建残局
+
+/** 自建残局的难度档（列表中单独成组，不参与内置题库的难度排序） */
+export const CUSTOM_LEVEL: EndgameLevel = 'custom';
+
+/**
+ * 保存前自动核验的求解上限（步）：核验会逐深度枚举强制杀，步数越大越慢，
+ * 故自建残局限定「4 步以内可强制取胜」（足够覆盖常见的一 / 二 / 三步杀构图）。
+ */
+export const CUSTOM_CHECK_MAX = 4;
+
+/** 自建残局保存前的自动核验结果 */
+export interface CustomCheck {
+  /** 全部通过（problems 为空，且已求出最优步数） */
+  ok: boolean;
+  /** 求解出的最优步数（最少几步可强制取胜；0 表示核验上限内无法取胜） */
+  goalMoves: number;
+  /** 发现的问题（空数组表示通过） */
+  problems: string[];
+}
+
+/**
+ * 自建残局保存前的自动核验：局面合法性 + 由求解器求出最优步数。
+ * 与题库自检同一套判定，只是步数不预设——在 `limit` 步以内能强制取胜即通过。
+ * 纯函数，不修改传入数据。
+ */
+export function checkCustomEndgame(
+  pieces: Array<[number, number, PieceType, Side]>,
+  side: Side,
+  limit = CUSTOM_CHECK_MAX,
+): CustomCheck {
+  const cap = Math.max(1, Math.floor(limit));
+  const problems = positionProblems(pieces, side);
+  if (problems.length > 0) return { ok: false, goalMoves: 0, problems };
+  const board = piecesToBoard(pieces);
+  const goalMoves = minMateDepth(board, side, cap);
+  if (goalMoves === 0) return { ok: false, goalMoves: 0, problems: [`无法在 ${cap} 步内强制取胜`] };
+  if (!findMateMove(board, side, goalMoves)) problems.push('求解器给不出正解首着');
+  return { ok: problems.length === 0, goalMoves, problems };
+}
+
+/** 由编辑器状态生成一道自建残局（`level` 固定为「自建」，id 由调用方给出） */
+export function makeCustomEndgame(
+  id: string,
+  name: string,
+  side: Side,
+  pieces: Array<[number, number, PieceType, Side]>,
+  goalMoves: number,
+): EndgamePuzzle {
+  return {
+    id,
+    name,
+    level: CUSTOM_LEVEL,
+    side,
+    goalMoves,
+    intro: `自建残局：你执${side === 'r' ? '红' : '黑'}先行，${goalMoves} 步内可强制将死对方（保存时已自动核验）。`,
+    pieces: pieces.map(([r, c, t, s]) => [r, c, t, s] as [number, number, PieceType, Side]),
+  };
+}
+
+/** 存档条目的结构（存档校验与解析共用） */
+const PIECE_TYPES: readonly PieceType[] = ['K', 'A', 'B', 'N', 'R', 'C', 'P'];
+
+/** 存档条目 → 自建残局（字段缺失 / 类型不符返回 null，丢弃该条） */
+function toCustomEndgame(v: unknown): EndgamePuzzle | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.id !== 'string' || !o.id || typeof o.name !== 'string' || !o.name) return null;
+  if (o.side !== 'r' && o.side !== 'b') return null;
+  if (typeof o.goalMoves !== 'number' || !Number.isInteger(o.goalMoves) || o.goalMoves < 1) return null;
+  if (!Array.isArray(o.pieces)) return null;
+  const pieces: Array<[number, number, PieceType, Side]> = [];
+  for (const x of o.pieces) {
+    if (!Array.isArray(x) || x.length !== 4) return null;
+    const [r, c, t, s] = x as unknown[];
+    if (!Number.isInteger(r) || !Number.isInteger(c)) return null;
+    if (!PIECE_TYPES.includes(t as PieceType)) return null;
+    if (s !== 'r' && s !== 'b') return null;
+    pieces.push([r as number, c as number, t as PieceType, s]);
+  }
+  return {
+    id: o.id,
+    name: o.name,
+    level: CUSTOM_LEVEL,
+    side: o.side,
+    goalMoves: o.goalMoves,
+    intro: typeof o.intro === 'string' ? o.intro : '',
+    pieces,
+  };
+}
+
+/** 解析本机自建残局存档（损坏数据按空处理；结构不符的条目丢弃，不抛出） */
+export function parseCustomEndgames(raw: string | null): EndgamePuzzle[] {
+  if (!raw) return [];
+  try {
+    const data = JSON.parse(raw) as unknown;
+    if (!Array.isArray(data)) return [];
+    const out: EndgamePuzzle[] = [];
+    for (const v of data) {
+      const p = toCustomEndgame(v);
+      if (p) out.push(p);
+    }
+    return out;
+  } catch {
+    return []; // 损坏数据按「没有自建残局」处理
+  }
+}
+
+/** 新增 / 覆盖一道自建残局（同 id 覆盖，其余保持原顺序；不修改传入数组） */
+export function upsertCustomEndgame(list: EndgamePuzzle[], p: EndgamePuzzle): EndgamePuzzle[] {
+  return list.some((x) => x.id === p.id) ? list.map((x) => (x.id === p.id ? p : x)) : [...list, p];
+}
+
+/** 删除一道自建残局（不修改传入数组） */
+export function removeCustomEndgame(list: EndgamePuzzle[], id: string): EndgamePuzzle[] {
+  return list.filter((x) => x.id !== id);
 }
 
 // ------------------------------------------------------------------ 本机记录

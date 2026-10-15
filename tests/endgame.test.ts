@@ -4,7 +4,9 @@
  * 2) 可解性：每条残局都能在目标步数内强制取胜，且步数不能再少（由求解器逐条验证）；
  * 3) 正解首着：findMateMove 给出的着法合法，走完仍在杀棋之内；已无解时返回 null；
  * 4) 求解器语义：一步杀 / 多步杀 / 困毙（对方无着可走同样算胜）/ 不修改传入棋盘；
- * 5) 界面接线：首页入口、残局面板、对局页残局操作行与目标信息块、渲染层调用关系。
+ * 5) 自建残局：保存前自动核验（局面合法性 + 由求解器求出最优步数）、题目构造与本机存档
+ *    （解析 / 新增 / 同 id 覆盖 / 删除，均不修改传入数组）、棋盘与棋子表互转；
+ * 6) 界面接线：首页入口、残局面板与自建残局编辑器、对局页残局操作行与目标信息块、渲染层调用关系。
  */
 
 import { readFileSync } from 'node:fs';
@@ -12,22 +14,32 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  CUSTOM_CHECK_MAX,
+  CUSTOM_LEVEL,
   EndgameRecord,
   LEVEL_LABEL,
   PUZZLES,
+  boardToPieces,
   buildPuzzleBoard,
   canForceMate,
+  checkCustomEndgame,
   checkEndgameBank,
   checkPuzzle,
   endgameOutcome,
   findMateMove,
   findPuzzle,
   isOptimalSteps,
+  makeCustomEndgame,
   minMateDepth,
   nextPuzzle,
+  parseCustomEndgames,
   parseEndgameRecords,
+  piecesToBoard,
   recordFail,
   recordWin,
+  removeCustomEndgame,
+  swapPieceSides,
+  upsertCustomEndgame,
 } from '../src/shared/endgame.js';
 import { isInCheck, legalMoves, makeMove, sideHasAnyMove } from '../src/shared/rules.js';
 import { Board, Cell, Move, PieceType, Side } from '../src/shared/types.js';
@@ -36,6 +48,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HTML = readFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), 'utf8');
 const CSS = readFileSync(path.join(ROOT, 'src', 'renderer', 'styles.css'), 'utf8');
 const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8');
+const EDITOR = readFileSync(path.join(ROOT, 'src', 'renderer', 'endgame-editor.ts'), 'utf8');
 
 const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
 
@@ -251,6 +264,176 @@ describe('残局题库：自检（checkPuzzle / checkEndgameBank）', () => {
   });
 });
 
+// ---------------------------------------------------------------- 自建残局
+
+describe('自建残局：保存前自动核验（checkCustomEndgame）', () => {
+  it('合法且能强制取胜的局面：通过核验并求出最优步数', () => {
+    // 直接拿内置题目的局面当自建残局（一步杀 / 两步杀）
+    const one = PUZZLES.find((p) => p.id === 'wocaoma')!;
+    const r1 = checkCustomEndgame(one.pieces, 'r');
+    expect(r1.ok).toBe(true);
+    expect(r1.problems).toEqual([]);
+    expect(r1.goalMoves).toBe(1);
+
+    const two = PUZZLES.find((p) => p.id === 'jieshuaifengmen')!;
+    const r2 = checkCustomEndgame(two.pieces, 'r');
+    expect(r2.ok).toBe(true);
+    expect(r2.goalMoves).toBe(2);
+  });
+
+  it('核验上限默认 4 步：上限内没有强制杀法即不通过', () => {
+    // 双方各只有将/帅，外加一颗远处的红兵：红方无法在 4 步内强制将死
+    const pieces: Array<[number, number, PieceType, Side]> = [
+      [9, 3, 'K', 'r'],
+      [0, 4, 'K', 'b'],
+      [5, 0, 'P', 'r'],
+    ];
+    expect(CUSTOM_CHECK_MAX).toBe(4);
+    const r = checkCustomEndgame(pieces, 'r');
+    expect(r.ok).toBe(false);
+    expect(r.goalMoves).toBe(0);
+    expect(r.problems).toContain('无法在 4 步内强制取胜');
+  });
+
+  it('核验上限可调：两步杀在 1 步上限下不通过', () => {
+    const two = PUZZLES.find((p) => p.id === 'jieshuaifengmen')!;
+    const r = checkCustomEndgame(two.pieces, 'r', 1);
+    expect(r.ok).toBe(false);
+    expect(r.goalMoves).toBe(0);
+    expect(r.problems).toContain('无法在 1 步内强制取胜');
+  });
+
+  it('局面不合法（缺将 / 重叠 / 越界）会被拦下，且不给步数', () => {
+    const base = PUZZLES.find((p) => p.id === 'wocaoma')!;
+    const noBlackKing = base.pieces.filter(([, , t, s]) => !(t === 'K' && s === 'b'));
+    const r1 = checkCustomEndgame(noBlackKing, 'r');
+    expect(r1.ok).toBe(false);
+    expect(r1.goalMoves).toBe(0);
+    expect(r1.problems).toContain('缺少黑将');
+
+    const overlapped: Array<[number, number, PieceType, Side]> = [
+      ...base.pieces,
+      [base.pieces[0][0], base.pieces[0][1], 'P', 'b'],
+    ];
+    expect(checkCustomEndgame(overlapped, 'r').problems.some((p) => p.startsWith('棋子重叠'))).toBe(true);
+
+    const outOfBounds: Array<[number, number, PieceType, Side]> = [...base.pieces, [10, 0, 'P', 'b']];
+    expect(checkCustomEndgame(outOfBounds, 'r').problems.some((p) => p.startsWith('棋子越界'))).toBe(true);
+  });
+
+  it('后手方开局已被将死 / 困毙同样拦下（与题库自检同一套判定）', () => {
+    // 对面笑的终局构图（红车已沉底、黑方无着可走）当初始局面
+    const dead: Array<[number, number, PieceType, Side]> = [
+      [0, 4, 'K', 'b'],
+      [0, 2, 'P', 'b'],
+      [9, 3, 'K', 'r'],
+      [1, 5, 'P', 'r'],
+      [0, 0, 'R', 'r'],
+    ];
+    const r = checkCustomEndgame(dead, 'r');
+    expect(r.ok).toBe(false);
+    expect(r.problems).toContain('后手方开局已被将死 / 困毙');
+  });
+
+  it('核验不修改传入的棋子表', () => {
+    const p = PUZZLES[0];
+    const before = JSON.stringify(p.pieces);
+    checkCustomEndgame(p.pieces, p.side);
+    expect(JSON.stringify(p.pieces)).toBe(before);
+  });
+});
+
+describe('自建残局：题目构造与本机存档', () => {
+  it('makeCustomEndgame：等级固定为「自建」、含最优步数与要点', () => {
+    const pieces: Array<[number, number, PieceType, Side]> = [
+      [0, 4, 'K', 'b'],
+      [9, 3, 'K', 'r'],
+      [1, 5, 'P', 'r'],
+      [8, 0, 'R', 'r'],
+    ];
+    const p = makeCustomEndgame('custom-1', '我的残局', 'r', pieces, 1);
+    expect(p.id).toBe('custom-1');
+    expect(p.name).toBe('我的残局');
+    expect(p.level).toBe(CUSTOM_LEVEL);
+    expect(LEVEL_LABEL[p.level]).toBe('自建');
+    expect(p.side).toBe('r');
+    expect(p.goalMoves).toBe(1);
+    expect(p.intro).toContain('1 步内可强制将死对方');
+    expect(p.pieces).toEqual(pieces);
+    expect(buildPuzzleBoard(p)[0][4]).toEqual({ t: 'K', s: 'b' });
+    // 题目与传入数组解耦：改题目盘面不会影响调用方
+    const board = buildPuzzleBoard(p);
+    board[0][4] = null;
+    expect(p.pieces).toEqual(pieces);
+  });
+
+  it('parseCustomEndgames：损坏数据 / 结构不符的条目一律丢弃', () => {
+    expect(parseCustomEndgames(null)).toEqual([]);
+    expect(parseCustomEndgames('不是 JSON')).toEqual([]);
+    expect(parseCustomEndgames('{"a":1}')).toEqual([]); // 非数组
+    const pieces: Array<[number, number, PieceType, Side]> = [
+      [0, 4, 'K', 'b'],
+      [9, 3, 'K', 'r'],
+    ];
+    const good = makeCustomEndgame('custom-good', '好题', 'b', pieces, 2);
+    const bad = [
+      { ...good, id: '' }, // 缺 id
+      { ...good, side: 'x' }, // 阵营非法
+      { ...good, goalMoves: 0 }, // 步数非法
+      { ...good, pieces: [[0, 4, 'K']] }, // 棋子表不是四元组
+      { ...good, pieces: [[0, 4, 'Z', 'b']] }, // 棋子类型非法
+      { ...good, pieces: [[0.5, 4, 'K', 'b']] }, // 坐标非整数
+    ];
+    expect(parseCustomEndgames(JSON.stringify([good]))).toEqual([good]);
+    expect(parseCustomEndgames(JSON.stringify([good, ...bad]))).toEqual([good]);
+  });
+
+  it('upsertCustomEndgame / removeCustomEndgame：新增、同 id 覆盖、删除，且都不修改传入数组', () => {
+    const pieces: Array<[number, number, PieceType, Side]> = [
+      [0, 4, 'K', 'b'],
+      [9, 3, 'K', 'r'],
+    ];
+    const a = makeCustomEndgame('custom-a', 'A', 'r', pieces, 1);
+    const b = makeCustomEndgame('custom-b', 'B', 'r', pieces, 2);
+    const list = [a];
+    const added = upsertCustomEndgame(list, b);
+    expect(added.map((x) => x.id)).toEqual(['custom-a', 'custom-b']);
+    expect(list.length).toBe(1); // 原数组不动
+
+    const updated = upsertCustomEndgame(added, makeCustomEndgame('custom-a', 'A2', 'b', pieces, 3));
+    expect(updated.map((x) => x.name)).toEqual(['A2', 'B']);
+    expect(updated[0].side).toBe('b');
+    expect(added[0].name).toBe('A'); // 原数组不动
+
+    expect(removeCustomEndgame(updated, 'custom-a').map((x) => x.id)).toEqual(['custom-b']);
+    expect(removeCustomEndgame(updated, 'nope').length).toBe(2);
+    expect(updated.length).toBe(2);
+  });
+});
+
+describe('自建残局：棋盘与棋子表互转（编辑器局面按钮共用）', () => {
+  it('boardToPieces / piecesToBoard：往返一致（空位不落子）', () => {
+    const board = buildPuzzleBoard(PUZZLES[0]);
+    const pieces = boardToPieces(board);
+    expect(pieces.length).toBe(PUZZLES[0].pieces.length);
+    expect(piecesToBoard(pieces)).toEqual(board);
+  });
+
+  it('swapPieceSides：位置不变、阵营对调，且不修改传入数组', () => {
+    const pieces: Array<[number, number, PieceType, Side]> = [
+      [0, 4, 'K', 'b'],
+      [9, 3, 'K', 'r'],
+      [1, 5, 'P', 'r'],
+    ];
+    expect(swapPieceSides(pieces)).toEqual([
+      [0, 4, 'K', 'r'],
+      [9, 3, 'K', 'b'],
+      [1, 5, 'P', 'b'],
+    ]);
+    expect(pieces[0][3]).toBe('b'); // 原数组不动
+  });
+});
+
 // ---------------------------------------------------------------- 本机记录
 
 describe('残局本机记录：完成 / 失败 / 未完成与最优步数', () => {
@@ -452,14 +635,66 @@ describe('残局挑战：界面接线', () => {
     expect(APP).toContain('已经是最后一关了');
   });
 
-  it('残局面板「自检题库」入口：逐条核验并展示结果', () => {
-    expect(HTML).toContain('id="btn-eg-check"');
-    expect(APP).toContain("$('btn-eg-check').addEventListener('click', checkEndgameBankUI)");
-    expect(APP).toContain('function checkEndgameBankUI()');
-    expect(APP).toContain('checkEndgameBank()');
-    // 结果弹层逐条列出通过 / 不通过（含问题说明）
-    expect(APP).toContain("r.ok ? '✓' : '✗'");
-    expect(APP).toContain('r.ok ? ');
+  it('残局面板「自建残局」入口：打开编辑器，保存时自动核验（不再有「自检题库」入口）', () => {
+    expect(HTML).toContain('id="btn-eg-create"');
+    // 「自检题库」的手动入口已移除：改为保存自建残局时自动核验
+    expect(HTML).not.toContain('btn-eg-check');
+    expect(APP).not.toContain('checkEndgameBankUI');
+    expect(APP).toContain("$('btn-eg-create').addEventListener('click', openEndgameEditor)");
+    expect(APP).toContain('function openEndgameEditor()');
+    expect(APP).toContain('editor?.open(null)');
+    // 保存：自动核验 → 通过才落盘（写本机存档），不通过逐条列出问题
+    expect(APP).toContain('function saveCustomEndgame(p: EndgamePuzzle)');
+    expect(APP).toContain('upsertCustomEndgame(readCustomEndgames(), p)');
+    expect(APP).toContain('function showCustomProblems(name: string, problems: string[])');
+    expect(APP).toContain("row.className = 'eg-check-row bad'");
+    expect(EDITOR).toContain('checkCustomEndgame(pieces, state.first, CUSTOM_CHECK_MAX)');
+    expect(EDITOR).toContain('deps.onInvalid(name, check.problems)');
+    expect(EDITOR).toContain(
+      'deps.onSave(makeCustomEndgame(state.id, name, state.first, pieces, check.goalMoves))',
+    );
+  });
+
+  it('自建残局编辑器：棋盘摆子 + 局面面板 + 棋子栏 + 红先/黑先，并并入残局列表', () => {
+    // 界面结构：棋盘 / 棋子栏（红黑两排）/ 红先黑先 / 局面面板 / 保存
+    for (const id of [
+      'screen-endgame-editor',
+      'eg-board',
+      'eg-pal-red',
+      'eg-pal-black',
+      'eg-first-r',
+      'eg-first-b',
+      'eg-reset',
+      'eg-clear',
+      'eg-swap',
+      'eg-name',
+      'eg-cancel',
+      'eg-save',
+    ]) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    for (const text of ['初始局面', '清空', '红黑互换', '红先', '黑先']) expect(HTML).toContain(text);
+    // 棋子栏两排（红黑各 7 种棋子）、局面按钮走共享层纯函数
+    expect(EDITOR).toContain('btn.className = `eg-piece ${s}`');
+    expect(EDITOR).toContain('piecesToBoard(swapPieceSides(boardToPieces(board)))');
+    expect(EDITOR).toContain('state.board = initBoard()');
+    expect(EDITOR).toContain('state.board = emptyBoard()');
+    // 落子 / 右键拿走 / 悬停落点提示 / 切屏
+    expect(EDITOR).toContain("canvas.addEventListener('click'");
+    expect(EDITOR).toContain("canvas.addEventListener('contextmenu'");
+    expect(EDITOR).toContain("deps.show('screen-endgame-editor')");
+    // app.ts 接线：装配编辑器、自建条目可再次编辑 / 删除、并入列表
+    expect(APP).toContain('editor = initEndgameEditor({');
+    expect(APP).toContain('editor?.open(p)');
+    expect(APP).toContain('removeCustomEndgame(readCustomEndgames(), p.id)');
+    expect(APP).toContain('for (const p of readCustomEndgames())');
+    expect(APP).toContain('function endgameRow(');
+    expect(APP).toContain('function backToEndgamePanel()');
+    // 样式契约
+    expect(CSS).toContain('.editor-layout');
+    expect(CSS).toContain('.eg-piece');
+    expect(CSS).toContain('.editor-act');
+    expect(CSS).toContain('.eg-item .eg-mini');
   });
 
   it('渲染层接线：题库局面载入本机状态机、提示用求解器、AI 执玩家的对方、胜负记入本地', () => {
@@ -521,8 +756,8 @@ describe('残局挑战：界面接线', () => {
 
   it('残局列表状态标记：绿勾 / 红叉 / 白勾 + 绿（最优）/ 灰（非最优）外圈', () => {
     // 渲染层用纯函数判定状态与是否最优（行为见下方「本机记录」用例）
-    expect(APP).toContain('const status = endgameOutcome(r)');
-    expect(APP).toContain('const optimal = isOptimalSteps(r, p.goalMoves)');
+    expect(APP).toContain('const status = endgameOutcome(rec)');
+    expect(APP).toContain('const optimal = isOptimalSteps(rec, p.goalMoves)');
     expect(APP).toContain("mark.className = `eg-mark ${status}${optimal ? ' optimal' : ''}`");
     expect(APP).toContain("mark.textContent = status === 'fail' ? '✗' : '✓'");
     // 样式：绿勾 / 红叉 / 白勾 + 绿圈 / 灰圈

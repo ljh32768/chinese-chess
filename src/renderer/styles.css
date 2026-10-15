@@ -944,12 +944,157 @@ body::before {
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(201, 150, 60, 0.7); background-clip: content-box; }
 
+/* ---------- 自建残局编辑器（棋盘摆子 + 右侧「局面」面板 + 棋盘下方棋子栏 + 红先/黑先） ---------- */
+.editor-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.editor-main { flex: 0 1 auto; max-width: 100%; }
+/* 编辑器棋盘与对局棋盘同款等比缩放（矮窗口按高度收缩） */
+.editor-main #eg-board {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 260px);
+  margin: 0 auto;
+  border-radius: 6px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
+  background: #e9cb8d;
+  touch-action: manipulation;
+  cursor: default;
+}
+.editor-bottom { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; }
+.eg-palette { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.eg-pal-row { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 棋子栏按钮：圆形棋子盘（红/黑两套用字与配色） */
+.eg-piece {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font: 700 22px/1 inherit;
+  color: #8c1d12;
+  background: radial-gradient(circle at 34% 28%, #fff8e6, #e8d3a6 62%, #c9ad78);
+  border: 2px solid #b98f4e;
+  border-radius: 50%;
+  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.eg-piece.b { color: #14161a; }
+.eg-piece:hover { transform: translateY(-2px); }
+.eg-piece.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255, 207, 122, 0.38), 0 6px 14px rgba(0, 0, 0, 0.5);
+  transform: translateY(-3px);
+}
+/* 先手方：红先 / 黑先（棋盘点色块 + 文字） */
+.eg-first { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.eg-first-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  font: 500 14px/1.2 inherit;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.eg-first-btn .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); }
+.eg-first-btn#eg-first-b .dot { background: #1b1e24; border: 1px solid #7d8ba0; }
+.eg-first-btn:hover { border-color: var(--accent); }
+.eg-first-btn.on { color: var(--text); background: var(--surface-3-hover); border-color: var(--accent); }
+.eg-first-btn:focus-visible,
+.eg-piece:focus-visible,
+.editor-act:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.editor-side {
+  flex: 0 1 260px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+.editor-side input[type="text"] {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  font: 14px/1.5 inherit;
+  color: var(--text);
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.editor-side input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(201, 150, 60, 0.22); }
+.editor-side input::placeholder { color: #9c8461; }
+.editor-acts { display: flex; flex-direction: column; gap: 6px; }
+/* 局面按钮（初始局面 / 清空 / 红黑互换）：长条按钮 + 左侧图标 */
+.editor-act {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  font: 500 13px/1.4 inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.editor-act:hover { background: var(--surface-3-hover); border-color: var(--accent); transform: translateX(2px); }
+.editor-act .ico { flex: none; width: 20px; font-style: normal; color: var(--gold); text-align: center; }
+.editor-actions { display: flex; gap: 10px; }
+.editor-actions .btn { flex: 1; }
+
+/* 自建残局列表行：行 + 「编辑 / 删除」（仅自建条目） */
+.eg-item { display: flex; align-items: stretch; gap: 6px; margin-top: 4px; }
+.eg-item .eg-row { margin-top: 0; }
+.eg-item .eg-row .eg-level.custom {
+  color: #bcd2e8;
+  background: rgba(188, 210, 232, 0.12);
+  border-color: rgba(188, 210, 232, 0.3);
+}
+.eg-item .eg-mini {
+  flex: none;
+  width: 34px;
+  font-size: 13px;
+  color: var(--text-mute);
+  background: var(--surface-1);
+  border: 1px solid #5c472c;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.eg-item .eg-mini:hover { color: var(--gold); border-color: var(--accent); }
+.eg-item .eg-mini.del:hover { color: var(--err); border-color: var(--err); }
+.eg-item .eg-mini:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
 @media (max-width: 900px) {
   .game-layout { gap: 12px; }
   .panel { flex: 1 1 100%; min-width: 0; flex-direction: row; flex-wrap: wrap; }
   .player-row { flex: 1 1 45%; }
   .status-box, .req-hint, .panel-box, .role-hint, .kill-box { flex: 1 1 100%; }
   #board { max-height: calc(100vh - 260px); }
+  /* 自建残局编辑器：面板移到棋盘下方，棋盘再收一档 */
+  .editor-layout { gap: 12px; }
+  .editor-main #eg-board { max-height: calc(100vh - 300px); }
+  .editor-side { flex: 1 1 100%; min-width: 0; }
 }
 
 /* 小屏（手机浏览器入局）：首页挂板回退原始尺寸，避免水平溢出；面板内边距收紧 */
@@ -958,6 +1103,8 @@ body::before {
   .panel-lg,
   .review_box { padding: 14px 14px 16px; }
   .home-corner { top: 8px; right: 8px; }
+  /* 小屏棋子栏收一档，两排棋子不至于换行溢出 */
+  .eg-piece { width: 36px; height: 36px; font-size: 19px; }
   /* 小屏棋盘也小：提示条整体收一档，避免盖住整个盘面 */
   .banner-card { gap: 10px; padding: 11px 18px 11px 12px; }
   .banner-emblem { width: 38px; height: 38px; font-size: 15px; }
