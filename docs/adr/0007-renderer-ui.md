@@ -220,6 +220,23 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 [tests/banner.test.ts](../../tests/banner.test.ts)（各杀法图案样式唯一且五种底纹齐备、未知杀法回退、将军 / 绝杀内容组装）、
 [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减弱动效仍可见 / `app.ts` 接线）。
 
+### 3.5.6 v2.9 被吃掉的棋子展示（棋盘两侧灰色缩略图）
+
+把「吃子」从侧栏的**文字列表**改为棋盘**两侧的灰色棋子缩略图**：删除侧栏文字面板，被吃掉的子以素材缩略图
+摆到棋盘左右两侧并统一置灰。
+
+| 项 | 规格 |
+|---|---|
+| 数据 | 沿用 `shared/notation.ts` 的 `capturedPieces(history)`（红黑各自吃掉的对方棋子，按发生顺序）；侧栏原「红方吃子 / 黑方吃子」文字面板删除 |
+| 结构 | `index.html` 对局页 `.chess-box > .board-row`（三栏 flex 居中）：左 `.cap-strip#cap-red`（红方所吃 = 黑子）+ 中间 `.board-stage`（画布 + 提示条）+ 右 `.cap-strip#cap-black`（黑方所吃 = 红子） |
+| 渲染 | `app.ts renderCaptured()` → `fillCapStrip()`：按 `assetUrl(skin(), side + '_' + PIECE_IMG[t])` 生成 `<img class="cap-piece">`；以「皮肤 + 棋子序列」为签名，未变则跳过重建避免闪烁。素材映射 `PIECE_IMG` 由 `board.ts` 导出复用 |
+| 置灰 | `.cap-piece { filter: grayscale(1) opacity(0.55) }`：去色 + 压暗，与盘上棋子的红黑配色区分 |
+| 布局 | `.cap-strip { align-self: stretch; flex-direction: column; flex-wrap: wrap; justify-content: center }`：随棋盘高度拉伸并纵向居中；条宽 30px、缩略图 26px。空条仍占位（左右对称，棋盘保持居中） |
+| 无障碍 | 吃子条 `aria-hidden="true"`、缩略图 `alt=""`：与盘面重复的纯装饰信息，不进入可访问性树 |
+
+验收（自动化）：[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（侧栏文字面板与其样式已删除、
+两侧吃子条结构顺序与三栏居中、缩略图置灰、`app.ts` 用素材渲染且不再有文字映射）。
+
 ### 3.6 走子交互（app.ts `onCell`）
 
 | 场景 | 行为 |

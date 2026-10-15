@@ -459,3 +459,49 @@ describe('v2.8 走子动画与棋盘正中提示条', () => {
     expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
   });
 });
+
+describe('v2.9 被吃掉的棋子显示：棋盘两侧灰色缩略图（取代侧栏吃子文字）', () => {
+  it('侧栏吃子文字面板已删除', () => {
+    expect(HTML).not.toContain('cap-red-list');
+    expect(HTML).not.toContain('cap-black-list');
+    expect(HTML).not.toContain('红方吃子');
+    expect(HTML).not.toContain('黑方吃子');
+    // 旧样式规则同步移除
+    for (const sel of ['.cap-row', '.cap-label', '.cap-list']) {
+      expect(RULES.some((r) => r.selectors.includes(sel))).toBe(false);
+    }
+  });
+
+  it('棋盘两侧各有一条吃子条，夹在 .board-row 里、位于棋盘左右', () => {
+    expect(HTML).toContain('class="board-row"');
+    for (const id of ['cap-red', 'cap-black']) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    // 结构顺序：board-row → 左吃子条 → 棋盘 → 右吃子条
+    const row = HTML.indexOf('class="board-row"');
+    const left = HTML.indexOf('id="cap-red"', row);
+    const stage = HTML.indexOf('class="board-stage"', row);
+    const right = HTML.indexOf('id="cap-black"', row);
+    expect(left).toBeGreaterThan(row);
+    expect(stage).toBeGreaterThan(left);
+    expect(right).toBeGreaterThan(stage);
+    // 三栏 flex 居中、吃子条随棋盘高度拉伸并纵向居中
+    expect(decl('.board-row', 'display')).toBe('flex');
+    expect(decl('.board-row', 'justify-content')).toBe('center');
+    expect(decl('.cap-strip', 'align-self')).toBe('stretch');
+    expect(decl('.cap-strip', 'justify-content')).toBe('center');
+  });
+
+  it('被吃棋子一律置灰（去色 + 压暗）', () => {
+    const filter = decl('.cap-piece', 'filter');
+    expect(filter).toContain('grayscale(1)');
+    expect(px('.cap-piece', 'width')).toBeGreaterThan(0);
+  });
+
+  it('app.ts：用棋子素材渲染吃子条，不再输出文字', () => {
+    expect(APP).toContain('function fillCapStrip(');
+    expect(APP).toContain('assetUrl(skin()');
+    expect(APP).toContain('PIECE_IMG[');
+    expect(APP).not.toContain('PIECE_NAME');
+  });
+});

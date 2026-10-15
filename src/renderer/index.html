@@ -149,18 +149,23 @@
   <section id="screen-game" class="screen">
     <div class="game-layout">
       <div class="chess-box">
-        <div class="board-stage">
-          <canvas id="board" width="523" height="580"></canvas>
-          <!-- 棋盘正中提示条：将军 / 绝杀（各杀法一套图案样式），显示 1.5s 渐入渐出 -->
-          <div class="board-banner" id="board-banner" role="status" aria-live="assertive" hidden>
-            <div class="banner-card" id="banner-card">
-              <span class="banner-emblem" id="banner-emblem" aria-hidden="true"></span>
-              <span class="banner-text">
-                <span class="banner-name" id="banner-name"></span>
-                <span class="banner-sub" id="banner-sub"></span>
-              </span>
+        <div class="board-row">
+          <!-- 被吃掉的棋子：棋盘两侧的灰色缩略图（左 = 红方所吃，右 = 黑方所吃），纯装饰 -->
+          <div class="cap-strip" id="cap-red" aria-hidden="true"></div>
+          <div class="board-stage">
+            <canvas id="board" width="523" height="580"></canvas>
+            <!-- 棋盘正中提示条：将军 / 绝杀（各杀法一套图案样式），显示 1.5s 渐入渐出 -->
+            <div class="board-banner" id="board-banner" role="status" aria-live="assertive" hidden>
+              <div class="banner-card" id="banner-card">
+                <span class="banner-emblem" id="banner-emblem" aria-hidden="true"></span>
+                <span class="banner-text">
+                  <span class="banner-name" id="banner-name"></span>
+                  <span class="banner-sub" id="banner-sub"></span>
+                </span>
+              </div>
             </div>
           </div>
+          <div class="cap-strip" id="cap-black" aria-hidden="true"></div>
         </div>
         <div class="bn_box">
           <div id="actions-play">
@@ -207,10 +212,6 @@
           <div class="kill-also" id="kill-also"></div>
         </div>
         <div class="req-hint" id="req-hint" hidden></div>
-        <div class="panel-box">
-          <div class="cap-row"><span class="cap-label">红方吃子</span><span class="cap-list" id="cap-red-list">—</span></div>
-          <div class="cap-row"><span class="cap-label">黑方吃子</span><span class="cap-list" id="cap-black-list">—</span></div>
-        </div>
         <div class="role-hint" id="role-hint"></div>
         <input type="button" id="btn-invite" value="邀请玩家" hidden>
       </aside>

@@ -471,6 +471,28 @@ body::before {
 }
 #board { cursor: default; }
 
+/* ---------- 被吃掉的棋子：棋盘两侧的灰色缩略图（左 = 红方所吃，右 = 黑方所吃） ---------- */
+/* 三栏：左吃子条 + 棋盘 + 右吃子条，整体居中；条随棋盘高度拉伸并纵向居中排列 */
+.board-row { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.cap-strip {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 3px;
+  width: 30px;
+}
+/* 被吃子一律置灰：去色 + 压暗，与盘上棋子的红黑配色区分 */
+.cap-piece {
+  display: block;
+  width: 26px;
+  height: auto;
+  filter: grayscale(1) opacity(0.55);
+}
+
 /* ---------- 棋盘正中提示条：将军 / 绝杀（各杀法一套图案样式，显示 1.5s 渐入渐出） ---------- */
 /* 画布外层容器：把提示条精确压在棋盘正中（而非连同棋盘下方按钮一起居中） */
 .board-stage { position: relative; display: flex; justify-content: center; }
@@ -692,9 +714,6 @@ body::before {
   border-radius: var(--radius-sm);
 }
 .box-title { margin-bottom: 4px; font-size: 12px; letter-spacing: 2px; color: var(--gold); }
-.cap-row { display: flex; gap: 6px; align-items: baseline; }
-.cap-label { flex: none; color: var(--text-mute); letter-spacing: 1px; }
-.cap-list { color: #fff; font-size: 13px; letter-spacing: 2px; word-break: break-all; }
 .role-hint { font-size: 12px; color: #ffe0a8; text-align: center; letter-spacing: 1px; }
 
 /* ---------- 残局挑战：题库列表（名称 / 难度 / 目标 / 通关标记） ---------- */
