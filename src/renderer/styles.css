@@ -397,18 +397,11 @@ body::before {
 .player-item.busy .btn,
 .player-item.offline .btn { display: none; }
 
-/* 对局面板内的「邀请玩家 / 邀请观战」按钮 */
-#btn-invite {
-  padding: 9px 10px;
-  font: 500 13px/1.4 inherit;
-  color: var(--gold);
-  background: var(--surface-1);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease);
-}
-#btn-invite:hover { border-color: var(--accent); color: var(--gold-bright); transform: translateY(-1px); }
+/* 邀请列表常驻展示（等待页右栏 / 对局页侧栏）：不再用弹层，改由面板自身承载 */
+.invite-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.invite-head .box-title { margin-bottom: 0; }
+/* 对局侧栏窄，列表限高可滚动，不把棋盘挤下去 */
+.panel-box .player-list { margin: 8px 0 0; max-height: 208px; overflow-y: auto; }
 
 /* ---------- 通用按钮（弹层 / 面板内小按钮） ---------- */
 .btn {
@@ -438,7 +431,6 @@ body::before {
 .room-row:focus-visible,
 .eg-row:focus-visible,
 .review_row:focus-visible,
-#btn-invite:focus-visible,
 .panel-lg input:focus-visible,
 .panel-lg select:focus-visible {
   outline: none;
@@ -453,6 +445,24 @@ body::before {
   align-items: flex-start;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+/* 等待页：左侧等待信息 + 右侧常驻邀请列表（两栏等宽，容器不足时自动堆叠） */
+.wait-layout {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 960px;
+  margin: 12px auto;
+}
+.wait-layout > .panel-lg {
+  flex: 1 1 0;
+  min-width: 300px;
+  max-width: none;
+  margin: 0;
 }
 .chess-box { flex: 0 1 auto; max-width: 100%; }
 /* 对局页与复盘页共用：棋盘画布按皮肤尺寸等比缩放，矮窗口按高度收缩 */

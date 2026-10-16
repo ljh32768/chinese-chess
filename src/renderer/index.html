@@ -98,30 +98,39 @@
     </div>
   </section>
 
-  <!-- ========== 等待对手 ========== -->
+  <!-- ========== 等待对手：左侧等待信息 + 右侧邀请列表（常驻，不再用弹层） ========== -->
   <section id="screen-host" class="screen">
-    <div class="panel-lg">
-      <div class="panel-lg-head">
-        <span class="menu_fh" id="btn-cancel-host" title="返回首页"></span>
-        <span class="panel-lg-title">等待对手加入<i class="spinner" aria-hidden="true"></i></span>
+    <div class="wait-layout">
+      <div class="panel-lg">
+        <div class="panel-lg-head">
+          <span class="menu_fh" id="btn-cancel-host" title="返回首页"></span>
+          <span class="panel-lg-title">等待对手加入<i class="spinner" aria-hidden="true"></i></span>
+        </div>
+        <div class="ip-box" id="ip-box" title="点击复制房间号">
+          <div class="ip-label">房间号（点击复制）</div>
+          <div class="ip-value" id="host-ip">—</div>
+        </div>
+        <p class="hint" id="room-pass-hint"></p>
+        <div class="form-row">
+          <label for="first-mode">取先方式</label>
+          <select id="first-mode">
+            <option value="guess" selected>猜先</option>
+            <option value="random">随机黑红</option>
+            <option value="r">房主执红</option>
+            <option value="b">房主执黑</option>
+          </select>
+        </div>
+        <p class="side_hint" id="side-hint"></p>
+        <p class="hint" id="host-wait">让对方在「加入房间」中选择本房间</p>
       </div>
-      <div class="ip-box" id="ip-box" title="点击复制房间号">
-        <div class="ip-label">房间号（点击复制）</div>
-        <div class="ip-value" id="host-ip">—</div>
+      <div class="panel-lg" id="invite-panel-host" hidden>
+        <div class="panel-lg-head">
+          <span class="panel-lg-title" id="invite-title-host">邀请玩家</span>
+          <button type="button" class="btn small ghost" id="btn-invite-refresh-host">刷新</button>
+        </div>
+        <div class="player-list" id="player-list-host"></div>
+        <p class="hint" id="invite-hint-host"></p>
       </div>
-      <p class="hint" id="room-pass-hint"></p>
-      <div class="form-row">
-        <label for="first-mode">取先方式</label>
-        <select id="first-mode">
-          <option value="guess" selected>猜先</option>
-          <option value="random">随机黑红</option>
-          <option value="r">房主执红</option>
-          <option value="b">房主执黑</option>
-        </select>
-      </div>
-      <p class="side_hint" id="side-hint"></p>
-      <button type="button" class="btn block" id="btn-invite-host">邀请玩家</button>
-      <p class="hint" id="host-wait">让对方在「加入房间」中选择本房间</p>
     </div>
   </section>
 
@@ -212,8 +221,15 @@
           <div class="kill-also" id="kill-also"></div>
         </div>
         <div class="req-hint" id="req-hint" hidden></div>
+        <div class="panel-box" id="invite-panel-game" hidden>
+          <div class="invite-head">
+            <span class="box-title" id="invite-title-game">邀请玩家</span>
+            <button type="button" class="btn small ghost" id="btn-invite-refresh-game">刷新</button>
+          </div>
+          <div class="player-list" id="player-list-game"></div>
+          <p class="hint" id="invite-hint-game"></p>
+        </div>
         <div class="role-hint" id="role-hint"></div>
-        <input type="button" id="btn-invite" value="邀请玩家" hidden>
       </aside>
     </div>
   </section>
