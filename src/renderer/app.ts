@@ -6,7 +6,7 @@
  * 客户端只发送「走子意图」，联机对局一切以服务器广播为准。
  */
 
-import { findKing, initBoard, legalMoves } from '../shared/rules.js';
+import { findKing, initBoard, legalMoves, validateMove } from '../shared/rules.js';
 import { ClientMessage, OnlinePlayer, ServerMessage } from '../shared/protocol.js';
 import {
   Board,
@@ -22,6 +22,7 @@ import {
 } from '../shared/types.js';
 import { Game } from '../shared/game.js';
 import { pickMove } from '../shared/ai.js';
+import { boardToFen } from '../shared/uci.js';
 import { CheckmateInfo, classifyCheckmate, classifyCheckmateFromHistory } from '../shared/checkmate.js';
 import {
   EndgamePuzzle,
@@ -1597,21 +1598,59 @@ function scheduleLocalAi(): void {
   if (!game || game.status !== 'playing' || game.turn !== aiSide || S.endgame?.result) return;
   localAiTimer = window.setTimeout(() => {
     localAiTimer = 0;
-    const g = localGame;
-    if (!g || g.status !== 'playing' || g.turn !== aiSide || S.endgame?.result) return;
-    const move = pickMove(g.board, aiSide, {
-      depth: S.endgame ? ENDGAME_AI_DEPTH : aiDepth(),
-      timeLimitMs: S.endgame ? 900 : 1200,
-    });
-    if (!move) return;
-    g.applyMove(move.from, move.to, aiSide);
-    playClick();
-    S.hint = null; // 走子后清除提示环
-    applySnapshot(g.snapshot());
-    animateMove(move.from, move.to);
-    maybeBanner();
-    if (S.endgame) endgameEvaluate();
+    void runLocalAi(aiSide);
   }, 350);
+}
+
+/**
+ * 取一步 AI 着法并落子。
+ *
+ * 优先请求「承载页面的服务器」的 `/api/ai/move`（由 Node 侧调用皮卡鱼引擎）；
+ * 请求失败（离线 / 页面经 `file://` 打开 / 引擎不可用）时回退本机纯 TS 引擎。
+ * 引擎异步返回期间局面可能已变（悔棋 / 重来 / 终局），故返回后必须复核再落子。
+ */
+async function runLocalAi(aiSide: Side): Promise<void> {
+  const g = localGame;
+  if (!g || g.status !== 'playing' || g.turn !== aiSide || S.endgame?.result) return;
+  const seq = g.moveSeq;
+  const level = S.endgame ? ENDGAME_AI_DEPTH : aiDepth();
+  const move = await requestAiMove(g, aiSide, level);
+  if (!move) return;
+  // 复核：游戏实例 / 步数 / 回合均未变才落子
+  if (localGame !== g || g.moveSeq !== seq || g.status !== 'playing' || g.turn !== aiSide) return;
+  if (S.endgame?.result) return;
+  g.applyMove(move.from, move.to, aiSide);
+  playClick();
+  S.hint = null; // 走子后清除提示环
+  applySnapshot(g.snapshot());
+  animateMove(move.from, move.to);
+  maybeBanner();
+  if (S.endgame) endgameEvaluate();
+}
+
+/**
+ * 向承载页面的服务器请求一步 AI 着法（`{ fen, level }` → `{ from, to }`）；
+ * 请求失败时回退本机纯 TS 引擎 `pickMove`，保证无服务器 / 无引擎也能对弈。
+ */
+async function requestAiMove(g: Game, side: Side, level: number): Promise<Move | null> {
+  const board: Board = g.board;
+  try {
+    const res = await fetch('/api/ai/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fen: boardToFen(board, side), level }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { from?: Pos; to?: Pos; none?: boolean };
+    if (data.none) return null;
+    if (!data.from || !data.to) throw new Error('响应缺少着法');
+    const move: Move = { from: data.from, to: data.to };
+    // 服务器返回的着法必须在规则引擎中合法，否则视为失败并回退本机引擎
+    if (validateMove(board, move.from, move.to, side) !== null) throw new Error('着法非法');
+    return move;
+  } catch {
+    return pickMove(board, side, { depth: level, timeLimitMs: level >= 4 ? 900 : 1200 });
+  }
 }
 
 // -------------------------------------------------------------- 残局挑战

@@ -30,6 +30,9 @@
       "dist/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "dist/engine/**"
+    ],
     "win": {
       "target": [
         {
