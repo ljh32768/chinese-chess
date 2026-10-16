@@ -107,6 +107,15 @@ export const PIECE_IMG: Record<PieceType, string> = {
 /** 提示点贴图相对交叉点的偏移（参考项目固定 +10） */
 const DOT_OFFSET = 10;
 
+/** AI 推荐标记的蓝色（与木质底色的暖色形成对比，便于一眼分辨） */
+export const HINT_COLOR = '#4aa3ff';
+/** 推荐落点圆盘半径相对棋子直径的比例（蓝盘略大于棋子，覆盖落点） */
+const HINT_DISC_SCALE = 0.62;
+/** 箭头杆末端与落点中心的间距（= 落点半径 + 该值，保证箭头停在蓝盘外缘） */
+const ARROW_GAP = 7;
+/** 箭头头部长度 */
+const ARROW_HEAD = 17;
+
 /** 单套皮肤需要预加载的素材键 */
 export const IMAGE_KEYS: readonly string[] = [
   'bg',
@@ -218,6 +227,22 @@ export function canvasPoint(
   return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
 }
 
+/**
+ * 箭头杆的几何：`a → b` 的线段按 `gap` 收进末端（留给箭头头部与落点标记）。
+ * 两点重合（或 gap 超出线段长度）时退化为零长线段，不会出现反向箭头。
+ */
+export function arrowSegment(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  gap: number,
+): { x1: number; y1: number; x2: number; y2: number } {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const k = Math.max(0, (len - Math.max(0, gap)) / len);
+  return { x1: a.x, y1: a.y, x2: a.x + dx * k, y2: a.y + dy * k };
+}
+
 /** 贴图指令（img 为素材键，坐标已算出，直接 drawImage 即可） */
 export interface DrawOp {
   img: string;
@@ -252,7 +277,29 @@ export interface ShadowOp {
   alpha: number;
 }
 
-export type RenderOp = DrawOp | RingOp | ShadowOp;
+/** 程序绘制的箭头（复盘 AI 推荐：从原棋子指向推荐落点） */
+export interface ArrowOp {
+  arrow: true;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  width: number;
+  alpha: number;
+}
+
+/** 程序绘制的实心圆盘（复盘 AI 推荐的蓝色落点标记） */
+export interface DiscOp {
+  disc: true;
+  cx: number;
+  cy: number;
+  radius: number;
+  color: string;
+  alpha: number;
+}
+
+export type RenderOp = DrawOp | RingOp | ShadowOp | ArrowOp | DiscOp;
 
 // ------------------------------------------------------------ 走子动画
 
@@ -446,7 +493,7 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
     }
   }
 
-  // AI 推荐（复盘）：起点细金环、终点粗金环；落点为空时叠加素材提示点
+  // AI 推荐（复盘）：原棋子细蓝环 + 指向推荐落点的箭头 + 落点蓝色圆盘（点击可查看后续变化）
   if (v.hint) {
     const origin = center(v.hint.from);
     ops.push({
@@ -454,24 +501,25 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
       cx: origin.x,
       cy: origin.y,
       radius: skin.disc / 2 + 3,
-      color: '#f0b429',
+      color: HINT_COLOR,
       width: 2.5,
       alpha: 0.7,
     });
     const dest = center(v.hint.to);
+    const radius = skin.disc * HINT_DISC_SCALE;
+    const seg = arrowSegment(origin, dest, radius + ARROW_GAP);
+    ops.push({ arrow: true, ...seg, color: HINT_COLOR, width: 4, alpha: 0.9 });
+    // 先画蓝盘（压在落点棋子上形成蓝色棋子观感）再画亮环
+    ops.push({ disc: true, cx: dest.x, cy: dest.y, radius, color: HINT_COLOR, alpha: 0.32 });
     ops.push({
       ring: true,
       cx: dest.x,
       cy: dest.y,
-      radius: skin.disc / 2 + 3,
-      color: '#f0b429',
-      width: 3.5,
+      radius: radius + 2,
+      color: HINT_COLOR,
+      width: 3,
       alpha: 0.95,
     });
-    if (!v.board[v.hint.to[0]][v.hint.to[1]]) {
-      const d = at(v.hint.to, DOT_OFFSET);
-      ops.push({ img: 'dot', x: d.x, y: d.y, alpha: 0.9 });
-    }
   }
 
   // 点击选中的棋子「抬起」：升起 / 落下的棋子与落影画在最上层（先落影后棋子）
@@ -523,6 +571,47 @@ export function renderBoard(
       ctx.beginPath();
       ctx.arc(op.cx, op.cy, op.radius, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+    if ('disc' in op) {
+      // AI 推荐的蓝色落点圆盘：半透明铺在落点棋子上，形成「蓝色棋子」的观感
+      ctx.save();
+      ctx.globalAlpha = op.alpha;
+      ctx.fillStyle = op.color;
+      ctx.beginPath();
+      ctx.arc(op.cx, op.cy, op.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      continue;
+    }
+    if ('arrow' in op) {
+      // 推荐箭头：杆 + 实心三角头（头部指向杆的末端方向）
+      ctx.save();
+      ctx.globalAlpha = op.alpha;
+      ctx.strokeStyle = op.color;
+      ctx.fillStyle = op.color;
+      ctx.lineWidth = op.width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(op.x1, op.y1);
+      ctx.lineTo(op.x2, op.y2);
+      ctx.stroke();
+      const ang = Math.atan2(op.y2 - op.y1, op.x2 - op.x1);
+      const tipX = op.x2 + Math.cos(ang) * ARROW_HEAD;
+      const tipY = op.y2 + Math.sin(ang) * ARROW_HEAD;
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(
+        op.x2 + Math.cos(ang - 2.5) * ARROW_HEAD * 0.8,
+        op.y2 + Math.sin(ang - 2.5) * ARROW_HEAD * 0.8,
+      );
+      ctx.lineTo(
+        op.x2 + Math.cos(ang + 2.5) * ARROW_HEAD * 0.8,
+        op.y2 + Math.sin(ang + 2.5) * ARROW_HEAD * 0.8,
+      );
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
       continue;
     }

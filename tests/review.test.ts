@@ -12,7 +12,10 @@ import {
   replayBoard,
   resultText,
   sideAt,
+  sideName,
+  withMoves,
 } from '../src/renderer/review.js';
+import { initBoard } from '../src/shared/rules.js';
 import { GameRecord, GameRecordSummary, Move, PlayerRef } from '../src/shared/types.js';
 import { MATE_LINE } from './mate-line.js';
 
@@ -71,6 +74,34 @@ describe('复盘局面还原 replayBoard', () => {
     expect(sideAt(0)).toBe('r');
     expect(sideAt(1)).toBe('b');
     expect(sideAt(2)).toBe('r');
+  });
+
+  it('行棋方名称：红方 / 黑方（推荐与试下面板文案共用）', () => {
+    expect(sideName('r')).toBe('红方');
+    expect(sideName('b')).toBe('黑方');
+  });
+});
+
+describe('后续变化 / 试下共用的局面推演 withMoves', () => {
+  it('在给定局面上试走前若干手，且不改动传入棋盘', () => {
+    const base = replayBoard(MOVES, 1); // 红车已进一
+    const made: Move[] = [
+      { from: [7, 1], to: [7, 4] }, // 红炮平中
+      { from: [3, 0], to: [4, 0] }, // 黑卒进一
+    ];
+    const b = withMoves(base, made, 2);
+    expect(b[7][4]).toEqual({ t: 'C', s: 'r' });
+    expect(b[4][0]).toEqual({ t: 'P', s: 'b' });
+    // base 不受影响（cloneBoard 后推演）
+    expect(base[7][4]).toBeNull();
+    expect(base[7][1]).toEqual({ t: 'C', s: 'r' });
+  });
+
+  it('plies 越界收敛：负数 / 非有限数视作 0，超过长度则全部走完', () => {
+    const base = initBoard();
+    expect(withMoves(base, MOVES, -1)).toEqual(base);
+    expect(withMoves(base, MOVES, Number.NaN)).toEqual(base);
+    expect(withMoves(base, MOVES, 99)[7][4]).toEqual({ t: 'C', s: 'r' });
   });
 });
 

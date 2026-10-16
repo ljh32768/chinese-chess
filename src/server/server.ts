@@ -19,7 +19,7 @@ import { AccountStore } from './accounts.js';
 import { Conn, sendTo as wsSend } from './conn.js';
 import { HistoryStore } from './history.js';
 import { logDebug, logInfo } from './log.js';
-import { hintFor, Room, RoomDeps } from './room.js';
+import { hintFor, lineFor, Room, RoomDeps } from './room.js';
 
 /** 服务器版本（供 /api/server-info 展示） */
 export const SERVER_VERSION = '2.0.0';
@@ -259,6 +259,17 @@ export class GameServer {
         const depth = Number(url.searchParams.get('depth') ?? '2');
         const hint = hintFor(record, index, depth);
         return this.sendJson(res, 200, hint ?? { none: true });
+      }
+      // AI 后续变化：从某一步起连续推演若干手（复盘「查看后续变化」用）
+      if (pathname === '/api/ai/line') {
+        const id = url.searchParams.get('id') ?? '';
+        const record = this.history.get(id);
+        if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
+        const index = Number(url.searchParams.get('index') ?? '0');
+        const plies = Number(url.searchParams.get('plies') ?? '4');
+        const depth = Number(url.searchParams.get('depth') ?? '2');
+        const line = lineFor(record, index, plies, depth);
+        return this.sendJson(res, 200, line ?? { none: true });
       }
       if (pathname.startsWith('/api/')) {
         return this.sendJson(res, 404, { error: 'not found' });

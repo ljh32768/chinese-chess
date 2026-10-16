@@ -438,6 +438,8 @@ body::before {
 .room-row:focus-visible,
 .eg-row:focus-visible,
 .review_row:focus-visible,
+.replay-hint-bar input:focus-visible,
+.replay-line-row:focus-visible,
 #btn-invite:focus-visible,
 .panel-lg input:focus-visible,
 .panel-lg select:focus-visible {
@@ -800,6 +802,73 @@ body::before {
 .replay-info div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .replay-step { color: var(--text); line-height: 1.7; word-break: break-all; }
 .replay-hint { color: var(--gold-bright); line-height: 1.7; word-break: break-all; }
+
+/* AI 推荐操作行：AI推荐 / 后续变化 / 试下（与 bn_box 同款木质按钮） */
+.replay-hint-bar { display: flex; gap: 6px; margin-top: 8px; }
+.replay-hint-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 2px;
+  font: 500 12.5px/1.4 "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: #5b3a12;
+  background: linear-gradient(180deg, #f7e3bd, #e2c288);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 0 rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: filter 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.replay-hint-bar input:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.replay-hint-bar input:active { transform: translateY(0) scale(0.98); }
+.replay-hint-bar input:disabled {
+  color: #8f7d63;
+  background: #d9c8a8;
+  border-color: #a5967a;
+  box-shadow: none;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
+/* 已开启（推荐显示中 / 试下进行中）：金色实底强调 */
+.replay-hint-bar input.on {
+  color: var(--text);
+  background: var(--surface-3-hover);
+  border-color: var(--accent);
+}
+/* 后续变化 / 试下 着法列表（行可点：预览到该手） */
+.replay-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.replay-line-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  font: 400 12px/1.5 inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid #5c472c;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.replay-line-row:hover { background: var(--surface-2); border-color: var(--accent); }
+.replay-line-row.on { background: var(--surface-2); border-color: var(--accent); }
+/* 试下着法行只作记录，不可点选 */
+.replay-line-row.static { cursor: default; }
+.replay-line-row.static:hover { background: var(--surface-1); border-color: #5c472c; }
+.replay-line-idx { flex: none; width: 16px; color: var(--text-dim); }
+.replay-line-side.r { color: var(--err); }
+.replay-line-side.b { color: #bcd2e8; }
+.replay-line-text { flex: 1; min-width: 0; word-break: break-all; }
+.replay-line-note { margin-top: 6px; font-size: 11.5px; color: var(--text-dim); }
 
 /* ---------- 对局回顾（列表） ---------- */
 .review_head { display: flex; align-items: center; gap: 8px; }

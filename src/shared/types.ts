@@ -155,3 +155,13 @@ export interface AiHint {
   /** 中文记谱，如「炮二平五」 */
   text: string;
 }
+
+/** AI 后续变化中的一手（与单步推荐同构） */
+export type AiLineMove = AiHint;
+
+/** AI 后续变化：从复盘的某一步起，连续推演若干手（首手即该局面的推荐着法） */
+export interface AiLine {
+  /** 起始行棋方 */
+  side: Side;
+  moves: AiLineMove[];
+}
