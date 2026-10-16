@@ -613,14 +613,21 @@ function remainText(): string {
   return `（剩余 ${sec}s）`;
 }
 
-/** 房间内的「邀请玩家 / 邀请观战」入口：仅联机且在房间内时可用（开局后转为邀请观战） */
-function renderInviteButtons(): void {
+/** 房间内的「邀请玩家 / 邀请观战」列表：仅联机且在房间内时显示（开局后转为邀请观战） */
+function renderInvitePanel(): void {
   const can = !!S.roomId && !S.offline;
-  const label = inviteRole() === 'spectator' ? '邀请观战' : '邀请玩家';
-  $<HTMLInputElement>('btn-invite').hidden = !can;
-  $<HTMLInputElement>('btn-invite').value = label;
-  $('btn-invite-host').hidden = !can;
-  $('btn-invite-host').textContent = label;
+  $('invite-panel-host').hidden = !can;
+  $('invite-panel-game').hidden = !can;
+  if (!can) return;
+  const spectator = inviteRole() === 'spectator';
+  const label = spectator ? '邀请观战' : '邀请玩家';
+  const hint = spectator
+    ? '本局已开始：点击右侧「邀请」，对方接受后可只读观战'
+    : '点击右侧「邀请」，对方接受后即可加入本局';
+  $('invite-title-host').textContent = label;
+  $('invite-title-game').textContent = label;
+  $('invite-hint-host').textContent = hint;
+  $('invite-hint-game').textContent = hint;
 }
 
 function updatePanel(): void {
@@ -737,7 +744,7 @@ function updatePanel(): void {
           : '已发送重开请求，等待对方回应…';
   }
 
-  renderInviteButtons();
+  renderInvitePanel();
   renderCaptured();
 }
 
@@ -790,9 +797,10 @@ function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void
 function enterGame(): void {
   show('screen-game');
   render();
+  refreshInviteList();
 }
 
-/** 等待页：展示房间号 / 口令状态 / 取先方式 */
+/** 等待页：展示房间号 / 口令状态 / 取先方式 + 常驻邀请列表 */
 function showWaiting(): void {
   $('host-ip').textContent = S.roomId || '—';
   $('room-pass-hint').textContent = S.locked
@@ -800,8 +808,9 @@ function showWaiting(): void {
     : '未设口令，任何人点击即可加入';
   $('host-wait').textContent = S.aiMode ? '正在开始人机对战…' : '让对方在「加入房间」中选择本房间';
   renderSidePick();
-  renderInviteButtons();
+  renderInvitePanel();
   show('screen-host');
+  refreshInviteList();
 }
 
 const FIRST_HINT: Record<FirstMode, string> = {
@@ -2263,17 +2272,48 @@ function inviteRole(): 'player' | 'spectator' {
   return S.status === 'playing' || S.status === 'over' ? 'spectator' : 'player';
 }
 
-/** 打开邀请面板：拉取服务器玩家列表（自己 / 本房间内的玩家除外） */
-async function openInvite(): Promise<void> {
-  if (!S.roomId) return toast('请先加入房间');
-  if (S.offline) return toast('本地对弈没有可邀请的玩家');
-  if (!(await ensureSocket())) return toast('尚未连接服务器');
+/** 拉取服务器在线玩家列表（邀请列表常驻展示：进入房间时 + 定时刷新 + 手动「刷新」） */
+function refreshInviteList(): void {
+  if (!S.roomId || S.offline) return;
   net?.send({ type: 'list_players' });
-  toast('正在获取玩家列表…');
+}
+
+/** 邀请列表的一行：在线且在大厅的玩家可一键邀请；在别处对局中 / 离线的置灰且不显示按钮 */
+function playerRow(p: OnlinePlayer, role: 'player' | 'spectator'): HTMLElement {
+  const inviteable = p.online && p.roomId === null;
+  const item = document.createElement('div');
+  item.className = 'player-item ' + (inviteable ? 'online' : p.online ? 'busy' : 'offline');
+
+  const dot = document.createElement('span');
+  dot.className = 'p-dot';
+  const name = document.createElement('span');
+  name.className = 'p-name';
+  name.textContent = p.name;
+  item.append(dot, name);
+  if (p.kind === 'account') {
+    const kind = document.createElement('span');
+    kind.className = 'p-kind';
+    kind.textContent = '账号';
+    item.appendChild(kind);
+  }
+  const state = document.createElement('span');
+  state.className = 'p-state';
+  state.textContent = !p.online ? '离线' : p.roomId === null ? '在线' : '对局中';
+  item.appendChild(state);
+
+  if (inviteable) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn small';
+    btn.textContent = '邀请';
+    btn.addEventListener('click', () => sendInvite(p.id, role));
+    item.appendChild(btn);
+  }
+  return item;
 }
 
 /**
- * 渲染玩家列表（大面板风格）：
+ * 渲染常驻邀请列表（等待页右栏 / 对局页侧栏）：
  * 在线且在大厅的玩家排在最前并可一键邀请；在别处对局中与离线的玩家置灰、不显示邀请按钮。
  */
 function renderPlayerList(players: OnlinePlayer[]): void {
@@ -2286,64 +2326,19 @@ function renderPlayerList(players: OnlinePlayer[]): void {
         a.name.localeCompare(b.name),
     );
 
-  const body = document.createElement('div');
-  body.className = 'player-list';
-  if (rows.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'room-empty';
-    empty.textContent = '当前没有其它玩家，可让对方打开本服务器地址后等待其上线';
-    body.appendChild(empty);
-  }
-  for (const p of rows) {
-    // 只有「在线且不在其它房间」的玩家能被邀请
-    const inviteable = p.online && p.roomId === null;
-    const item = document.createElement('div');
-    item.className = 'player-item ' + (inviteable ? 'online' : p.online ? 'busy' : 'offline');
-
-    const dot = document.createElement('span');
-    dot.className = 'p-dot';
-    const name = document.createElement('span');
-    name.className = 'p-name';
-    name.textContent = p.name;
-    const state = document.createElement('span');
-    state.className = 'p-state';
-    state.textContent = !p.online ? '离线' : p.roomId === null ? '在线' : '对局中';
-    item.append(dot, name);
-    if (p.kind === 'account') {
-      const kind = document.createElement('span');
-      kind.className = 'p-kind';
-      kind.textContent = '账号';
-      item.appendChild(kind);
+  for (const id of ['player-list-host', 'player-list-game']) {
+    const box = $(id);
+    box.replaceChildren();
+    if (rows.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'room-empty';
+      empty.textContent = '当前没有其它玩家，可让对方打开本服务器地址后等待其上线';
+      box.appendChild(empty);
+      continue;
     }
-    item.appendChild(state);
-
-    if (inviteable) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn small';
-      btn.textContent = '邀请';
-      btn.addEventListener('click', () => {
-        closeModal();
-        sendInvite(p.id, role);
-      });
-      item.appendChild(btn);
-    }
-    body.appendChild(item);
+    for (const p of rows) box.appendChild(playerRow(p, role));
   }
-
-  showModal({
-    title: role === 'player' ? '邀请加入对局' : '邀请观战',
-    sub:
-      role === 'player'
-        ? '点击玩家右侧「邀请」，对方接受后即可加入本局'
-        : '本局已开始：点击玩家右侧「邀请」，对方接受后可只读观战',
-    body,
-    wide: true,
-    buttons: [
-      { label: '刷新', onClick: () => void openInvite() },
-      { label: '关闭', primary: true },
-    ],
-  });
+  renderInvitePanel();
 }
 
 function sendInvite(playerId: string, role: 'player' | 'spectator'): void {
@@ -2617,9 +2612,9 @@ function bindEvents(): void {
   $('btn-rooms').addEventListener('click', () => void refreshRooms());
   $('btn-join-back').addEventListener('click', () => show('screen-home'));
 
-  // 邀请
-  $('btn-invite').addEventListener('click', () => void openInvite());
-  $('btn-invite-host').addEventListener('click', () => void openInvite());
+  // 邀请列表常驻：手动「刷新」
+  $('btn-invite-refresh-host').addEventListener('click', refreshInviteList);
+  $('btn-invite-refresh-game').addEventListener('click', refreshInviteList);
 
   // 对局
   $('btn-spectate-leave').addEventListener('click', leaveToHome);
@@ -2752,6 +2747,13 @@ async function init(): Promise<void> {
   window.setInterval(() => {
     if (S.deadline && S.status === 'playing') updatePanel();
   }, 500);
+
+  // 邀请列表常驻侧栏：在等待页 / 对局页每 5s 刷新在线状态（离线 / 不在房间时不发请求）
+  window.setInterval(() => {
+    const onWaiting = $('screen-host').classList.contains('active');
+    const onGame = $('screen-game').classList.contains('active');
+    if (onWaiting || onGame) refreshInviteList();
+  }, 5000);
 
   // 首个板块：连接服务器
   show('screen-servers');

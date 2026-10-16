@@ -2,7 +2,7 @@
  * 主界面（首页 / 等待 / 加入）布局规格测试：
  * 1) 主页背景 init_bg.png 的署名文字已用 cover.bmp 木板条带覆盖（像素级验证，透明区不受影响）；
  * 2) 首页木质挂板按 --ui-scale 等比缩放；点击板块后的界面改用「大面板」（参考对局回顾），不再与木框对齐；
- * 3) 大面板内的列表行（房间 / 玩家）不会被撑破，离线玩家置灰且不显示邀请按钮；
+ * 3) 大面板内的列表行（房间 / 玩家）不会被撑破，邀请列表常驻等待页右栏 / 对局侧栏（离线玩家置灰且不显示邀请按钮）；
  * 4) 底部小字（服务器 / 已登录）已删除，等待页取先方式为下拉框（默认猜先）；
  * 5) v2.4 视觉与交互精修：设计令牌、焦点可见、切屏 / 弹层动效、减少动态效果、状态框「轮到你走棋」强调。
  */
@@ -265,14 +265,27 @@ describe('大面板内的列表行（房间 / 服务器 / 邀请玩家）', () =
     expect(decl('.player-item .btn', 'flex')).toBe('none');
   });
 
-  it('邀请玩家：宽版弹层 + 玩家列表；离线 / 对局中的玩家置灰且不显示邀请按钮', () => {
-    expect(decl('.modal.wide', 'max-width')).toBe('520px');
+  it('邀请玩家：列表常驻等待页右栏 / 对局页侧栏（不再有邀请按钮与邀请弹层）', () => {
+    // 原「邀请玩家」按钮及其弹层入口已移除
+    expect(HTML).not.toContain('btn-invite-host');
+    expect(HTML).not.toContain('id="btn-invite"');
+    expect(APP).not.toContain('renderInviteButtons');
+    expect(APP).not.toContain('openInvite');
+    // 等待页改为两栏：等待信息 + 常驻邀请列表；对局侧栏内嵌同一份列表
+    expect(HTML).toContain('id="player-list-host"');
+    expect(HTML).toContain('id="player-list-game"');
+    expect(decl('.wait-layout', 'display')).toBe('flex');
+    expect(decl('.wait-layout > .panel-lg', 'min-width')).toBe('300px');
+    // 列表行风格沿用：flex 排布，离线 / 对局中的玩家置灰且不显示邀请按钮
     expect(decl('.player-item', 'display')).toBe('flex');
     expect(decl('.player-item.offline', 'opacity')).toBe('0.6');
     expect(decl('.player-item.busy', 'opacity')).toBe('0.72');
     expect(RULES.some((r) => r.selectors.includes('.player-item.offline .btn'))).toBe(true);
     expect(RULES.some((r) => r.selectors.includes('.player-item.busy .btn'))).toBe(true);
-    // 弹层新增富内容容器（玩家列表挂在这里）
+    // 对局侧栏窄：列表限高可滚动，不撑破面板
+    expect(decl('.panel-box .player-list', 'max-height')).toBe('208px');
+    // 宽版弹层仍保留（题库自检结果复用）
+    expect(decl('.modal.wide', 'max-width')).toBe('520px');
     expect(HTML).toContain('id="modal-body"');
     expect(decl('.modal-body', 'overflow-y')).toBe('auto');
   });
