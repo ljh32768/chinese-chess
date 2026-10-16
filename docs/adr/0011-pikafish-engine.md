@@ -55,7 +55,7 @@
 | 握手 | `uci` → 等 `uciok`；`setoption`（`Threads` 2 / `Hash` 32MB；仅在显式给出 `PIKAFISH_NNUE` 时设 `EvalFile`，其余交由引擎在同目录自寻 `pikafish.nnue`，避免中文安装路径打不开权重）；`isready` → 等 `readyok`；握手超时 15s |
 | 取着法 | `position fen <FEN>` + `go movetime <ms>` → 解析 `bestmove` |
 | 容错 | 子进程 `exit` / `error` 时让在等请求失败（调用方回退纯 TS）；**连续「启动失败」上限 5**，达到后停用皮卡鱼 |
-| 引擎发现 | `PIKAFISH_PATH` → `<root>/dist/engine/<平台文件>`（打包态做 `app.asar` → `app.asar.unpacked` 路径变换）→ `<root>/Reference/Pikafish皮卡鱼20260925/<平台文件>` |
+| 引擎发现 | `PIKAFISH_PATH` → `<root>/dist/engine/<平台文件>` → `<root>/Reference/Pikafish皮卡鱼20260925/<平台文件>`。`<root>` 取仓库 / 应用根目录；打包态另探测 `process.resourcesPath`（`extraResources` 把引擎放到 `resources/dist/engine/`，由该候选命中） |
 | 难度映射 | `1: Skill 0 / 120ms`、`2: Skill 3 / 300ms`、`3: Skill 10 / 700ms`、`4: Skill 20 / 1200ms` |
 
 ### 3.4 引擎选择（`server/engine-select.ts`）
@@ -88,10 +88,10 @@
 
 | 项 | 规格 |
 |---|---|
-| 构建 | `scripts/copy-assets.mjs` 尽力把「平台对应引擎 + `pikafish.nnue`」复制到 `dist/engine/`（缺失**只告警不失败**；非 Windows 复制后 `chmod 0o755`） |
-| 打包 | `package.json` 加 `"asarUnpack": ["dist/engine/**"]`——asar 内的 exe 无法 spawn、权重无法读 |
+| 打包 | `package.json` 的 **`extraResources`** 把 `Reference/Pikafish皮卡鱼20260925/` 下的引擎与权重直接放到 `resources/dist/engine/`——**在 asar 之外**，可直接 spawn、无需 `asarUnpack`，也不必手工复制。目标仅为 Windows（`build.win`），故固定用 Windows 引擎文件 |
+| 开发态 | 不复制：`npm run serve` / `npm run dev` 由引擎发现回退到仓库 `Reference/Pikafish皮卡鱼20260925/`（`copy-assets.mjs` 只复制渲染层静态资源） |
 | 环境变量 | `PIKAFISH_PATH`（引擎可执行文件路径）、`PIKAFISH_NNUE`（显式权重路径）、`LANSCHESS_ENGINE=off`（强制纯 TS） |
-| 不入库 | `Reference/`（含引擎与权重）与 `dist/` 均被 `.gitignore` 忽略；发行包通过构建脚本携带引擎 |
+| 不入库 | `Reference/`（含引擎与权重）与 `dist/` 均被 `.gitignore` 忽略。打包时 electron-builder 直接以 `Reference/` 为源，故**打包机需存在该目录**（缺失会直接报错，而非静默跳过——换取「有引擎 / 无引擎」显式可见） |
 
 ## 4. 代码入口
 
@@ -103,7 +103,7 @@
 | 引擎选择 | [engine-select.ts](../../src/server/engine-select.ts) |
 | 服务端接入 | [server.ts `handleAiMove()` / `handleAiHint()` / `roomDeps()`](../../src/server/server.ts)、[room.ts `runAiMove()` / `hintFor()`](../../src/server/room.ts) |
 | 渲染层接入 | [app.ts `scheduleLocalAi()` / `runLocalAi()` / `requestAiMove()`](../../src/renderer/app.ts) |
-| 构建打包 | [copy-assets.mjs](../../scripts/copy-assets.mjs)、[package.json `build.asarUnpack`](../../package.json) |
+| 构建打包 | [copy-assets.mjs](../../scripts/copy-assets.mjs)（仅静态资源）、[package.json `build.extraResources`](../../package.json) |
 
 ## 5. 验收标准
 

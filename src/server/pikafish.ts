@@ -4,7 +4,8 @@
  * 采用「常驻单进程 + 串行请求队列」：stdin 上不能交错 `position`/`go`，故所有请求排队执行；
  * 空闲一段时间后自动回收进程，下一次请求再惰性拉起（避免每个 Electron 客户端启动即养一个引擎进程）。
  *
- * 引擎文件发现顺序：`PIKAFISH_PATH` 环境变量 → `<root>/dist/engine/`（打包态含 asar.unpacked）
+ * 引擎文件发现顺序：`PIKAFISH_PATH` 环境变量 → `<root>/dist/engine/`
+ * （打包态为 `resources/dist/engine/`，由 electron-builder `extraResources` 提供）
  * → `<root>/Reference/Pikafish皮卡鱼20260925/`。权重 `pikafish.nnue` 与引擎同目录时由引擎自行加载；
  * 仅当显式给出 `PIKAFISH_NNUE` 时才 `setoption name EvalFile`（避免中文安装路径下引擎打不开权重）。
  */
@@ -49,7 +50,11 @@ const MAX_START_FAILURES = 5;
 /** 并发排队请求上限 */
 const MAX_PENDING = 32;
 
-/** Electron 打包后 `app.asar/...` → `app.asar.unpacked/...`（asar 内的可执行文件无法 spawn、权重无法读） */
+/**
+ * 把 `app.asar/…` 重定向到 `app.asar.unpacked/…`：asar 内的原生 exe 无法 spawn、权重无法读。
+ * 正规打包（`extraResources`）不会把引擎放进 asar，这里只是防御残留的旧 `dist/engine` 副本——
+ * 被重定向后该候选自然落空，继续去找 `resources/dist/engine/` 里的正式副本。
+ */
 function unpackedPath(p: string): string {
   return p.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2');
 }
