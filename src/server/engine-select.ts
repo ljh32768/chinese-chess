@@ -48,18 +48,39 @@ function engineDisabled(): boolean {
 }
 
 /**
- * 创建 AI 引擎：本机可发现皮卡鱼二进制则用皮卡鱼（并带纯 TS 兜底），否则直接用纯 TS。
+ * 按难度分派引擎：1–4（入门 / 菜鸟 / 中级 / 高手）走**纯 TS**（恢复皮卡鱼接入前的手感，
+ * 也保证复盘推荐可复现）；5「棋圣」走**皮卡鱼**（带纯 TS 兜底）。
+ */
+class LevelRouter implements EnginePort {
+  constructor(
+    private readonly base: EnginePort,
+    private readonly top: EnginePort,
+  ) {}
+
+  bestMove(board: Board, side: Side, level: EngineLevel): Promise<EngineResult> {
+    return level >= 5 ? this.top.bestMove(board, side, level) : this.base.bestMove(board, side, level);
+  }
+
+  dispose(): void {
+    this.top.dispose?.();
+  }
+}
+
+/**
+ * 创建 AI 引擎：
+ * - 1–4 档恒为纯 TS；5「棋圣」档在有皮卡鱼二进制时走皮卡鱼（并带纯 TS 兜底），
+ *   找不到引擎 / 显式禁用时「棋圣」也回退纯 TS。
  */
 export function createEngine(): EnginePort {
   if (engineDisabled()) {
-    logInfo('AI 引擎：纯 TS（已显式禁用皮卡鱼）');
+    logInfo('AI 引擎：纯 TS（已显式禁用皮卡鱼，棋圣档亦回退纯 TS）');
     return new LocalEngine();
   }
   const loc = findEngine();
   if (!loc) {
-    logInfo('AI 引擎：纯 TS（未找到皮卡鱼引擎文件）');
+    logInfo('AI 引擎：纯 TS（未找到皮卡鱼引擎文件，棋圣档亦回退纯 TS）');
     return new LocalEngine();
   }
-  logInfo(`AI 引擎：皮卡鱼（${loc.exe}）`);
-  return new FallbackEngine(new PikafishEngine(), new LocalEngine());
+  logInfo(`AI 引擎：棋圣档走皮卡鱼（${loc.exe}），其余档位走纯 TS`);
+  return new LevelRouter(new LocalEngine(), new FallbackEngine(new PikafishEngine(), new LocalEngine()));
 }

@@ -149,6 +149,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getEl
 const HINT_DEBOUNCE_MS = 120;
 /** 「后续变化」一次推演的手数 */
 const LINE_PLIES = 4;
+/** 复盘分析用的引擎档位：5 = 棋圣（皮卡鱼），保证复盘推荐质量 */
+const AI_LEVEL = 5;
 
 /** 推荐 / 变化 / 试下的状态（驱动面板文案与按钮可用性） */
 type HintState = 'idle' | 'loading' | 'shown' | 'none' | 'error';
@@ -556,7 +558,7 @@ export function initReview(deps: ReviewDeps): ReviewController {
     if (seq !== hintSeq || record !== rec) return;
     try {
       const data = await fetchJson<Partial<AiHint> & { none?: boolean }>(
-        `/api/ai/hint?id=${encodeURIComponent(rec.id)}&index=${index}`,
+        `/api/ai/hint?id=${encodeURIComponent(rec.id)}&index=${index}&depth=${AI_LEVEL}`,
       );
       if (seq !== hintSeq || record !== rec) return;
       if (data.none || !data.from || !data.to || !data.text) {
@@ -584,12 +586,14 @@ export function initReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const rec = record;
+    const first = hint; // 复盘已显示的推荐着法：作为后续变化首手，保证两者一致
     const seq = ++hintSeq;
     lineState = 'loading';
     syncControls();
     try {
       const data = await fetchJson<{ none?: boolean; moves?: AiLineMove[] }>(
-        `/api/ai/line?id=${encodeURIComponent(rec.id)}&index=${index}&plies=${LINE_PLIES}`,
+        `/api/ai/line?id=${encodeURIComponent(rec.id)}&index=${index}&plies=${LINE_PLIES}` +
+          `&depth=${AI_LEVEL}&first=${first.from[0]},${first.from[1]},${first.to[0]},${first.to[1]}`,
       );
       if (seq !== hintSeq || record !== rec) return;
       if (data.none || !data.moves?.length) {

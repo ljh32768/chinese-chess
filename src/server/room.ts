@@ -963,6 +963,8 @@ export async function hintFor(
  * AI 后续变化：按记录 + 步数复原局面，再连续推演 `plies` 手（复盘「查看后续变化」用）。
  * 首手即该局面的推荐着法，其后为 AI 视角的双方应接；任一方无着可走即提前结束，
  * 一手都推不出（如已终局）返回 null。
+ * `first` 为复盘已显示的「推荐」着法：给出且合法时直接作为首手，保证推荐与后续变化首手一致
+ * （皮卡鱼按思考时限取着法，两次独立查询可能不同，故必须复用）。
  */
 export async function lineFor(
   record: GameRecord,
@@ -970,6 +972,7 @@ export async function lineFor(
   plies: number,
   level: EngineLevel,
   engine: EnginePort,
+  first?: Move | null,
 ): Promise<AiLine | null> {
   const n = Math.max(0, Math.min(Number.isFinite(index) ? Math.floor(index) : 0, record.moves.length));
   const board = initBoard();
@@ -979,7 +982,13 @@ export async function lineFor(
 
   let side = start;
   const moves: AiLineMove[] = [];
-  for (let i = 0; i < count; i++) {
+  // 首手优先复用复盘「推荐」着法（保证与提示箭头 / 文案一致）
+  if (first && validateMove(board, first.from, first.to, side) === null) {
+    moves.push({ side, from: first.from, to: first.to, text: describeMove(board, first.from, first.to) });
+    makeMove(board, first.from, first.to);
+    side = side === 'r' ? 'b' : 'r';
+  }
+  for (let i = moves.length; i < count; i++) {
     const result = await engine.bestMove(board, side, level);
     const move = result.move;
     // 引擎输出一律经规则引擎复核后再纳入变化

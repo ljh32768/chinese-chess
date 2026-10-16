@@ -5,15 +5,16 @@
  * - 引擎不可用 / 出错时回退纯 TS 的 negamax（`src/shared/ai.ts` `pickMove`），
  *   保证离线（`file://` 页面）、非 Windows、引擎缺失时仍可对弈。
  *
- * 难度沿用既有外部契约 `depth 1..4`（1 入门 / 2 菜鸟 / 3 中级 / 4 高手），
+ * 难度沿用外部契约 `depth 1..5`（1 入门 / 2 菜鸟 / 3 中级 / 4 高手 / 5 棋圣），
  * 由具体引擎自行映射到自身强度参数（皮卡鱼映射 Skill Level + 思考时限）。
+ * 1..4 由纯 TS negamax 承担（恢复皮卡鱼接入前的难度手感）；5「棋圣」走皮卡鱼，引擎缺失时回退纯 TS。
  */
 
 import { pickMove } from './ai.js';
 import { Board, Move, Side } from './types.js';
 
-/** 难度档位（1 入门 / 2 菜鸟 / 3 中级 / 4 高手） */
-export type EngineLevel = 1 | 2 | 3 | 4;
+/** 难度档位（1 入门 / 2 菜鸟 / 3 中级 / 4 高手 / 5 棋圣） */
+export type EngineLevel = 1 | 2 | 3 | 4 | 5;
 
 /** 引擎返回：推荐着法 + 来源（供日志与前端诊断，便于确认是否走了回退） */
 export interface EngineResult {
@@ -33,13 +34,15 @@ export interface EnginePort {
 /** 纯 TS 回退引擎：同步搜索包成 Promise（服务于无引擎环境） */
 export class LocalEngine implements EnginePort {
   async bestMove(board: Board, side: Side, level: EngineLevel): Promise<EngineResult> {
+    // 「棋圣」档在无皮卡鱼时用纯 TS 的「高手」深度兜底（时间上限一致）
+    const depth = level >= 5 ? 4 : level;
     const timeLimitMs = level >= 4 ? 900 : 1200;
-    const move = pickMove(board, side, { depth: level, timeLimitMs });
+    const move = pickMove(board, side, { depth, timeLimitMs });
     return { move, source: 'ts' };
   }
 }
 
-/** 归一化外部传入的难度：缺省 2，非法值钳到 1..4 */
+/** 归一化外部传入的难度：缺省 2，非法值钳到 1..5 */
 export function normalizeLevel(x: unknown): EngineLevel {
   const raw = typeof x === 'string' ? x.trim() : x;
   if (raw === '' || raw === null || raw === undefined) return 2;
@@ -47,6 +50,6 @@ export function normalizeLevel(x: unknown): EngineLevel {
   if (!Number.isFinite(n)) return 2;
   const f = Math.floor(n);
   if (f <= 1) return 1;
-  if (f >= 4) return 4;
+  if (f >= 5) return 5;
   return f as EngineLevel;
 }

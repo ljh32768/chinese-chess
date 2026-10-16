@@ -1707,11 +1707,11 @@ async function createRoom(): Promise<void> {
   }
 }
 
-/** 读取人机对战难度（搜索深度，2/3/4 对应菜鸟/中级/高手） */
+/** 读取人机对战难度档位（1 入门 / 2 菜鸟 / 3 中级 / 4 高手 / 5 棋圣） */
 function aiDepth(): number {
   const el = document.querySelector<HTMLInputElement>('input[name="ai-depth"]:checked');
   const depth = Number(el?.value ?? 3);
-  return Number.isInteger(depth) && depth >= 1 && depth <= 4 ? depth : 3;
+  return Number.isInteger(depth) && depth >= 1 && depth <= 5 ? depth : 3;
 }
 
 /** 读取本地人机对弈的棋种：标准象棋 / 揭棋（暗棋） */
@@ -1840,7 +1840,9 @@ async function requestAiMove(g: Game, side: Side, level: number): Promise<Move |
     if (validateMove(board, move.from, move.to, side) !== null) throw new Error('着法非法');
     return move;
   } catch {
-    return pickMove(board, side, { depth: level, timeLimitMs: level >= 4 ? 900 : 1200 });
+    // 服务器不可达时回退本机纯 TS（「棋圣」档用「高手」深度兜底）
+    const depth = level >= 5 ? 4 : level;
+    return pickMove(board, side, { depth, timeLimitMs: level >= 4 ? 900 : 1200 });
   }
 }
 

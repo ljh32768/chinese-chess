@@ -36,6 +36,7 @@ const LEVEL_PARAMS: Record<EngineLevel, { skill: number; movetimeMs: number }> =
   2: { skill: 3, movetimeMs: 300 },
   3: { skill: 10, movetimeMs: 700 },
   4: { skill: 20, movetimeMs: 1200 },
+  5: { skill: 20, movetimeMs: 1500 },
 };
 
 /** 搜索线程数 / 置换表大小（MB） */

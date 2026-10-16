@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { ClientMessage, OnlinePlayer, Role, ServerMessage, decode } from '../shared/protocol.js';
 import { EnginePort, normalizeLevel } from '../shared/engine.js';
-import { GameRecord, PlayerRef, RoomMode, RoomSummary, Side } from '../shared/types.js';
+import { GameRecord, Move, PlayerRef, RoomMode, RoomSummary, Side } from '../shared/types.js';
 import { fenToBoard } from '../shared/uci.js';
 import { AccountStore } from './accounts.js';
 import { Conn, sendTo as wsSend } from './conn.js';
@@ -26,6 +26,17 @@ import { createEngine } from './engine-select.js';
 
 /** 服务器版本（供 /api/server-info 展示） */
 export const SERVER_VERSION = '2.0.0';
+
+/**
+ * 解析复盘「后续变化」复用的推荐首着 `?first=fr,fc,tr,tc`。
+ * 复盘已显示的推荐着法由前端回传，作为后续变化的首手以确保两者一致；非法返回 null。
+ */
+function parseFirstMove(raw: string | null): Move | null {
+  if (!raw) return null;
+  const parts = raw.split(',').map((x) => Number(x));
+  if (parts.length !== 4 || parts.some((x) => !Number.isInteger(x) || x < 0)) return null;
+  return { from: [parts[0], parts[1]], to: [parts[2], parts[3]] };
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -320,14 +331,15 @@ export class GameServer {
     return this.sendJson(res, 200, hint ?? { none: true });
   }
 
-  /** 复盘 AI 后续变化：`?id=&index=&plies=&depth=` → `AiLine | { none: true }` */
+  /** 复盘 AI 后续变化：`?id=&index=&plies=&depth=&first=` → `AiLine | { none: true }` */
   private async handleAiLine(url: URL, res: http.ServerResponse): Promise<void> {
     const record = this.history.get(url.searchParams.get('id') ?? '');
     if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
     const index = Number(url.searchParams.get('index') ?? '0');
     const plies = Number(url.searchParams.get('plies') ?? '4');
     const level = normalizeLevel(url.searchParams.get('depth'));
-    const line = await lineFor(record, index, plies, level, this.engine);
+    const first = parseFirstMove(url.searchParams.get('first'));
+    const line = await lineFor(record, index, plies, level, this.engine, first);
     return this.sendJson(res, 200, line ?? { none: true });
   }
 

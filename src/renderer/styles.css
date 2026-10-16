@@ -596,19 +596,19 @@ body::before {
   box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.5), 0 18px 44px rgba(0, 0, 0, 0.75),
     inset 0 0 30px rgba(255, 255, 255, 0.05);
 }
-/* 暗红斜线：仅绝杀显示（将军隐藏）；自圆右上方穿过黑圈到右下方 */
+/* 暗红斜线：仅绝杀显示（将军隐藏）；自圆左上角穿过黑圈中心到右下角（「\」对角） */
 .orb-slash { display: none; }
 .banner-card[data-kind='mate'] .orb-slash {
   display: block;
   position: absolute;
   top: 50%;
-  left: calc(50% + 34px);
+  left: 50%;
   width: 7px;
   height: 180%;
   background: linear-gradient(180deg, #3d0810, #8f1420 46%, #3d0810);
   border-radius: 4px;
   box-shadow: 0 0 12px rgba(143, 20, 32, 0.75);
-  transform: translate(-50%, -50%) rotate(10deg);
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 .banner-text { position: relative; z-index: 1; text-align: center; }
 .banner-name {
@@ -1247,7 +1247,7 @@ body::before {
   .eg-piece { width: 36px; height: 36px; font-size: 19px; }
   /* 小屏棋盘也小：正中大圆与上方提示条整体收一档，避免盖住整个盘面 */
   .banner-card { width: 132px; height: 132px; }
-  .banner-card[data-kind='mate'] .orb-slash { left: calc(50% + 26px); }
+  .banner-card[data-kind='mate'] .orb-slash { left: 50%; }
   .banner-name { font-size: 32px; letter-spacing: 5px; }
   .banner-sub { letter-spacing: 2px; }
   .board-tactics { padding: 4px 12px; font-size: 13px; letter-spacing: 2px; }

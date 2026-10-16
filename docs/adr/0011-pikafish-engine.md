@@ -22,7 +22,7 @@
 3. 渲染层「本地人机对弈 / 残局防守」不再本机算着法，改为向**承载页面的服务器**（同源 `POST /api/ai/move`）取着法
    —— 页面永远由某个 Node 服务器提供，故同源、无 CORS；仅需服务器可达，**不需要联机对局（WebSocket）连接**。
 4. 引擎输出一律经规则引擎 `validateMove` 复核；非法 / `(none)` / 超时 / 进程出错一律回退纯 TS。
-5. 难度沿用既有外部契约 `depth 1..4`，内部映射为皮卡鱼 `Skill Level` + `go movetime`（不改变协议与前端菜单）。
+5. 难度沿用外部契约 `depth 1..5`（1 入门 / 2 菜鸟 / 3 中级 / 4 高手 / 5 **棋圣**）：**1–4 走纯 TS negamax**（恢复皮卡鱼接入前的难度手感），**仅 5「棋圣」走皮卡鱼**（映射 `Skill Level` + `go movetime`）。协议不新增字段，前端菜单加一档「棋圣」。
 
 ## 3. 详细规格
 
@@ -43,8 +43,8 @@
 | 项 | 规格 |
 |---|---|
 | 端口 | `EnginePort.bestMove(board, side, level) → Promise<{ move, source: 'pikafish' \| 'ts' }>`；`move = null` 表示无合法着法；`dispose?()` 可选 |
-| 难度 | `EngineLevel = 1 \| 2 \| 3 \| 4`（入门 / 菜鸟 / 中级 / 高手）；`normalizeLevel(x)` 缺省 2、非法钳到 1..4 |
-| 回退实现 | `LocalEngine`：调用 `pickMove`（`depth = level`，时限 0.9–1.2s），`source: 'ts'` |
+| 难度 | `EngineLevel = 1 \| 2 \| 3 \| 4 \| 5`（入门 / 菜鸟 / 中级 / 高手 / **棋圣**）；`normalizeLevel(x)` 缺省 2、非法钳到 1..5 |
+| 回退实现 | `LocalEngine`：调用 `pickMove`（`depth = level`，时限 0.9–1.2s；`level 5` 用 `depth 4` 兜底），`source: 'ts'` |
 
 ### 3.3 皮卡鱼进程（`server/pikafish.ts`，仅 Node）
 
@@ -56,11 +56,11 @@
 | 取着法 | `position fen <FEN>` + `go movetime <ms>` → 解析 `bestmove` |
 | 容错 | 子进程 `exit` / `error` 时让在等请求失败（调用方回退纯 TS）；**连续「启动失败」上限 5**，达到后停用皮卡鱼 |
 | 引擎发现 | `PIKAFISH_PATH` → `<root>/dist/engine/<平台文件>` → `<root>/Reference/Pikafish皮卡鱼20260925/<平台文件>`。`<root>` 取仓库 / 应用根目录；打包态另探测 `process.resourcesPath`（`extraResources` 把引擎放到 `resources/dist/engine/`，由该候选命中） |
-| 难度映射 | `1: Skill 0 / 120ms`、`2: Skill 3 / 300ms`、`3: Skill 10 / 700ms`、`4: Skill 20 / 1200ms` |
+| 难度映射 | `1: Skill 0 / 120ms`、`2: Skill 3 / 300ms`、`3: Skill 10 / 700ms`、`4: Skill 20 / 1200ms`、`5(棋圣): Skill 20 / 1500ms`（实际仅 `5` 会走到皮卡鱼） |
 
 ### 3.4 引擎选择（`server/engine-select.ts`）
 
-- `createEngine()`：`LANSCHESS_ENGINE=off`（或 `PIKAFISH_DISABLE=1`）→ 纯 TS；发现不到引擎 → 纯 TS；否则 `FallbackEngine(皮卡鱼, 纯 TS)`。
+- `createEngine()`：`LANSCHESS_ENGINE=off`（或 `PIKAFISH_DISABLE=1`）→ 纯 TS；发现不到引擎 → 纯 TS；否则 `LevelRouter`——**按难度分派**：1–4 走纯 TS，5「棋圣」走 `FallbackEngine(皮卡鱼, 纯 TS)`（皮卡鱼出错 / 非法着法自动回退）。
 - `FallbackEngine`：皮卡鱼出错 / 返回非法着法 / 报「无着法」但规则上仍有可走 → 回退纯 TS，并把实际来源写进 `source`。
 
 ### 3.5 服务端接入（`server.ts` / `room.ts`）

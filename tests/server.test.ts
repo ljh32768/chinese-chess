@@ -855,6 +855,23 @@ describe('服务器 · 对局回顾与 AI 推荐', () => {
     expect((await fetch(`${base}/api/ai/line?id=999`)).status).toBe(404);
   }, 15000);
 
+  it('AI 后续变化：传入 first 时首手复用「推荐」着法（保证与 AI 推荐一致）', async () => {
+    const { base } = await playAndFinish();
+    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: { id: string }[] };
+    const id = list.games[0].id;
+    const hint = (await (await fetch(`${base}/api/ai/hint?id=${id}&index=0`)).json()) as {
+      from: Pos;
+      to: Pos;
+    };
+    const first = `${hint.from[0]},${hint.from[1]},${hint.to[0]},${hint.to[1]}`;
+    const line = (await (
+      await fetch(`${base}/api/ai/line?id=${id}&index=0&plies=3&first=${first}`)
+    ).json()) as { moves: { from: Pos; to: Pos }[] };
+    expect(line.moves.length).toBeGreaterThanOrEqual(1);
+    expect(line.moves[0].from).toEqual(hint.from);
+    expect(line.moves[0].to).toEqual(hint.to);
+  }, 15000);
+
   it('对局未结束时不写入记录', async () => {
     const s = await startServer();
     await setupGame(s);

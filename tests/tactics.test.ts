@@ -253,12 +253,12 @@ describe('将军抽（check-fork）', () => {
 });
 
 describe('串打（skewer）', () => {
-  it('车在同一射线以前马后车（对方两全不得）→ 串打', () => {
+  it('车在同一射线以前马后马（两子皆无根，对方两全不得）→ 串打', () => {
     const b = emptyBoard();
     kings(b, [0, 5]);
     put(b, 5, 0, 'R', 'r');
-    put(b, 5, 5, 'N', 'b'); // 前子：马（与红车相邻，无法反吃）
-    put(b, 5, 6, 'R', 'b'); // 后子：车（被前马挡住，无法反吃红车）
+    put(b, 5, 5, 'N', 'b'); // 前子：马（无根、与红车相邻，无法反吃）
+    put(b, 5, 6, 'N', 'b'); // 后子：马（无根）
     const hits = run(b, [5, 0], [5, 4]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('skewer');
@@ -269,13 +269,13 @@ describe('串打（skewer）', () => {
     ]);
   });
 
-  it('炮借己方炮架后以前车后马 → 串打', () => {
+  it('炮借己方炮架后以前马后马（皆无根）→ 串打', () => {
     const b = emptyBoard();
     kings(b, [0, 5]);
     put(b, 5, 1, 'C', 'r'); // 红炮（走到 5,4）
-    put(b, 5, 5, 'P', 'r'); // 己方炮架（对方无法移走）
-    put(b, 5, 6, 'R', 'b'); // 前子：车
-    put(b, 5, 7, 'N', 'b'); // 后子：马
+    put(b, 5, 5, 'P', 'r'); // 己方炮架（马无法反吃，对方也移不走）
+    put(b, 5, 6, 'N', 'b'); // 前子：马（无根）
+    put(b, 5, 7, 'N', 'b'); // 后子：马（无根）
     const hits = run(b, [5, 1], [5, 4]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('skewer');
@@ -289,6 +289,15 @@ describe('串打（skewer）', () => {
     put(b, 5, 6, 'R', 'b'); // 前子：车（可直取走到 (5,4) 的红车）
     put(b, 5, 8, 'C', 'b'); // 后子：炮
     expect(run(b, [5, 1], [5, 4])).toHaveLength(0);
+  });
+
+  it('前子有根（受后子保护）且非小换大 → 不成立（有根的棋不算「必失」）', () => {
+    const b = emptyBoard();
+    kings(b, [0, 5]);
+    put(b, 5, 0, 'R', 'r');
+    put(b, 5, 5, 'N', 'b'); // 前子：马（被后车保护 → 有根，价值 4 < 红车 9）
+    put(b, 5, 6, 'R', 'b'); // 后子：车（黑可原地不动、弃马反吃红车而两全）
+    expect(run(b, [5, 0], [5, 4])).toHaveLength(0);
   });
 });
 
