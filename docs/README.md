@@ -62,7 +62,7 @@ npm run format:check # Prettier 格式校验
 npm run serve        # 启动中心服务器（无界面常驻；等价 npm run host）
 npm start            # 以 Electron 客户端启动（默认连接服务器）
 npm run dev          # 开发模式：tsc watch + 服务器自动重启 + 静态资源同步
-npm run dist         # 用 electron-builder 产出 Windows 安装包（release/）
+npm run dist         # 产出 Windows 安装包（release/）；经 scripts/dist.mjs，默认走 npmmirror 镜像
 ```
 
 局域网对战流程：
@@ -106,6 +106,11 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
 | `LANSCHESS_SERVER` | `127.0.0.1:7777` | Electron 客户端**优先尝试连接**的服务器地址（`host:port`，仍可在「连接服务器」板块改用其它服务器） |
 | `LANSCHESS_TURN_MS` | `0` | 计时读秒：每回合限时毫秒数，`0` 表示不限时（如 `60000` = 每步 60 秒，超时判负） |
 | `LANSCHESS_DEBUG` | 未设置 | 日志开关：未设置输出 info 打点；`1` 追加 debug 明细；`0` 全部关闭 |
+| `LANSCHESS_ENGINE` | 未设置 | 设为 `off` 强制 AI 走纯 TS 引擎（不加载皮卡鱼；测试与无引擎环境用） |
+| `PIKAFISH_PATH` | 未设置 | 显式指定皮卡鱼引擎可执行文件路径（优先于自动发现） |
+| `PIKAFISH_NNUE` | 未设置 | 显式指定权重 `pikafish.nnue` 路径（默认由引擎在同目录自寻） |
+| `ELECTRON_MIRROR` | `npmmirror` | 打包时 Electron 发行包下载源；`npm run dist` 已默认指向 npmmirror，设置后可换源（如内网镜像） |
+| `ELECTRON_BUILDER_BINARIES_MIRROR` | `npmmirror` | 打包工具（winCodeSign / nsis 等）下载源；同上 |
 
 ---
 
@@ -289,6 +294,7 @@ Chinese_chess/
 ├── tests/                 # vitest 测试（单元 + 集成 + 端到端）
 ├── scripts/
 │   ├── copy-assets.mjs    # 构建后复制 HTML/CSS 与素材到 dist
+│   ├── dist.mjs           # 打包：固定 npmmirror 镜像后调用 electron-builder（离线可用）
 │   └── dev.mjs            # 开发模式：tsc watch + 服务器自动重启
 ├── data/                  # 运行时数据（账号 / 对局记录，git 忽略）
 ├── .github/workflows/     # CI：lint → format → build → test

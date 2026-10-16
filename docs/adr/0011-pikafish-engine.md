@@ -91,6 +91,7 @@
 | 打包 | `package.json` 的 **`extraResources`** 把 `Reference/Pikafish皮卡鱼20260925/` 下的引擎与权重直接放到 `resources/dist/engine/`——**在 asar 之外**，可直接 spawn、无需 `asarUnpack`，也不必手工复制。目标仅为 Windows（`build.win`），故固定用 Windows 引擎文件 |
 | 开发态 | 不复制：`npm run serve` / `npm run dev` 由引擎发现回退到仓库 `Reference/Pikafish皮卡鱼20260925/`（`copy-assets.mjs` 只复制渲染层静态资源） |
 | 环境变量 | `PIKAFISH_PATH`（引擎可执行文件路径）、`PIKAFISH_NNUE`（显式权重路径）、`LANSCHESS_ENGINE=off`（强制纯 TS） |
+| 打包下载源 | electron-builder **不复用** `node_modules/electron`，而是从自己的缓存 `%LOCALAPPDATA%\electron-builder\Cache` 取「目标平台 Electron 发行包」，未命中时默认去 **GitHub** 下载（另需 winCodeSign / nsis 等工具）。国内网络连不上 GitHub，故 `npm run dist` 经 [`scripts/dist.mjs`](../../scripts/dist.mjs) 固定 `ELECTRON_MIRROR` / `ELECTRON_BUILDER_BINARIES_MIRROR` 为 **npmmirror**（已设置同名变量时以环境变量为准）。首次联网跑一次即把 Electron / nsis / winCodeSign 拉进本机缓存，**之后断网也能打包**（缓存就绪即不再发起下载） |
 | 不入库 | `Reference/`（含引擎与权重）与 `dist/` 均被 `.gitignore` 忽略。打包时 electron-builder 直接以 `Reference/` 为源，故**打包机需存在该目录**（缺失会直接报错，而非静默跳过——换取「有引擎 / 无引擎」显式可见） |
 
 ## 4. 代码入口
