@@ -21,7 +21,7 @@ import { AccountStore } from './accounts.js';
 import { Conn, sendTo as wsSend } from './conn.js';
 import { HistoryStore } from './history.js';
 import { logDebug, logInfo } from './log.js';
-import { hintFor, Room, RoomDeps } from './room.js';
+import { hintFor, lineFor, Room, RoomDeps } from './room.js';
 import { createEngine } from './engine-select.js';
 
 /** 服务器版本（供 /api/server-info 展示） */
@@ -272,6 +272,11 @@ export class GameServer {
         void this.handleAiHint(url, res).catch((err) => this.sendJson(res, 500, { error: String(err) }));
         return;
       }
+      // AI 后续变化：从某一步起连续推演若干手（复盘「查看后续变化」用）
+      if (pathname === '/api/ai/line') {
+        void this.handleAiLine(url, res).catch((err) => this.sendJson(res, 500, { error: String(err) }));
+        return;
+      }
       if (pathname.startsWith('/api/')) {
         return this.sendJson(res, 404, { error: 'not found' });
       }
@@ -313,6 +318,17 @@ export class GameServer {
     const level = normalizeLevel(url.searchParams.get('depth'));
     const hint = await hintFor(record, index, level, this.engine);
     return this.sendJson(res, 200, hint ?? { none: true });
+  }
+
+  /** 复盘 AI 后续变化：`?id=&index=&plies=&depth=` → `AiLine | { none: true }` */
+  private async handleAiLine(url: URL, res: http.ServerResponse): Promise<void> {
+    const record = this.history.get(url.searchParams.get('id') ?? '');
+    if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
+    const index = Number(url.searchParams.get('index') ?? '0');
+    const plies = Number(url.searchParams.get('plies') ?? '4');
+    const level = normalizeLevel(url.searchParams.get('depth'));
+    const line = await lineFor(record, index, plies, level, this.engine);
+    return this.sendJson(res, 200, line ?? { none: true });
   }
 
   /** 账号 REST 入口（与 WS 的 register / login 同源） */

@@ -335,7 +335,17 @@
         </div>
         <div class="panel-box">
           <div class="box-title">AI 推荐</div>
-          <div class="replay-hint" id="replay-hint">—</div>
+          <div class="replay-hint" id="replay-hint">点击「AI推荐」查看推荐着法</div>
+          <div class="replay-hint-bar">
+            <input type="button" id="btn-replay-hint" value="AI推荐">
+            <input type="button" id="btn-replay-line" value="后续变化">
+            <input type="button" id="btn-replay-try" value="试下">
+          </div>
+          <div class="replay-line" id="replay-line" hidden></div>
+          <div class="replay-hint-bar" id="replay-try-bar" hidden>
+            <input type="button" id="btn-replay-try-undo" value="悔一步">
+            <input type="button" id="btn-replay-try-reset" value="重来">
+          </div>
         </div>
       </aside>
     </div>

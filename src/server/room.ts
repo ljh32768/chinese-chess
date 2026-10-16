@@ -12,6 +12,8 @@ import { ClientMessage, ServerMessage, isValidPos } from '../shared/protocol.js'
 import {
   AI_PLAYER,
   AiHint,
+  AiLine,
+  AiLineMove,
   FIRST_MODE_LABEL,
   FirstMode,
   GameRecord,
@@ -939,4 +941,36 @@ export async function hintFor(
   // 引擎输出一律经规则引擎复核后再回给前端
   if (!move || validateMove(board, move.from, move.to, side) !== null) return null;
   return { side, from: move.from, to: move.to, text: describeMove(board, move.from, move.to) };
+}
+
+/**
+ * AI 后续变化：按记录 + 步数复原局面，再连续推演 `plies` 手（复盘「查看后续变化」用）。
+ * 首手即该局面的推荐着法，其后为 AI 视角的双方应接；任一方无着可走即提前结束，
+ * 一手都推不出（如已终局）返回 null。
+ */
+export async function lineFor(
+  record: GameRecord,
+  index: number,
+  plies: number,
+  level: EngineLevel,
+  engine: EnginePort,
+): Promise<AiLine | null> {
+  const n = Math.max(0, Math.min(Number.isFinite(index) ? Math.floor(index) : 0, record.moves.length));
+  const board = initBoard();
+  for (let i = 0; i < n; i++) makeMove(board, record.moves[i].from, record.moves[i].to);
+  const start: Side = n % 2 === 0 ? 'r' : 'b';
+  const count = Number.isFinite(plies) ? Math.min(8, Math.max(1, Math.floor(plies))) : 4;
+
+  let side = start;
+  const moves: AiLineMove[] = [];
+  for (let i = 0; i < count; i++) {
+    const result = await engine.bestMove(board, side, level);
+    const move = result.move;
+    // 引擎输出一律经规则引擎复核后再纳入变化
+    if (!move || validateMove(board, move.from, move.to, side) !== null) break;
+    moves.push({ side, from: move.from, to: move.to, text: describeMove(board, move.from, move.to) });
+    makeMove(board, move.from, move.to);
+    side = side === 'r' ? 'b' : 'r';
+  }
+  return moves.length ? { side: start, moves } : null;
 }

@@ -6,12 +6,16 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  ArrowOp,
   DEFAULT_SKIN,
+  DiscOp,
+  HINT_COLOR,
   HINT_TARGET_COLOR,
   HINT_THREAT_COLOR,
   IMAGE_KEYS,
   SKINS,
   SKIN_IDS,
+  arrowSegment,
   assetUrl,
   boardBgUrl,
   canvasPoint,
@@ -46,8 +50,10 @@ const view = (over: Partial<BoardView> = {}): BoardView => ({
   ...over,
 });
 
-const draws = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is DrawOp => !('ring' in o));
+const draws = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is DrawOp => 'img' in o);
 const rings = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is RingOp => 'ring' in o);
+const arrows = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is ArrowOp => 'arrow' in o);
+const discs = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is DiscOp => 'disc' in o);
 const findImage = (ops: ReturnType<typeof computeDrawList>, img: string) =>
   draws(ops).filter((o) => o.img === img);
 
@@ -238,21 +244,59 @@ describe('绘制计划 computeDrawList', () => {
     expect(rings(computeDrawList(view({ hover: [0, 0], interactiveSide: 'r' }), skin2))).toHaveLength(0);
   });
 
-  it('AI 推荐（复盘）：起点细金环、终点粗金环，落点为空时叠加提示点', () => {
+  it('AI 推荐（复盘）：原棋子蓝环 + 指向落点的箭头 + 蓝色落点标记', () => {
     const ops = computeDrawList(view({ hint: { from: [9, 0], to: [7, 0] } }), skin2);
-    const gold = rings(ops).filter((r) => r.color === '#f0b429');
-    expect(gold).toHaveLength(2);
-    // 起点 [9,0]：cx=30.5, cy=542；终点 [7,0]：cy=57*7+5+24=428
-    expect(gold[0]).toMatchObject({ cx: 30.5, cy: 542, width: 2.5 });
-    expect(gold[1]).toMatchObject({ cx: 30.5, cy: 428, width: 3.5 });
-    // 落点为空 → 提示点（3+10 / 57*7+5+10）
-    expect(findImage(ops, 'dot')).toEqual([{ img: 'dot', x: 13, y: 414, alpha: 0.9 }]);
+    const blue = rings(ops).filter((r) => r.color === HINT_COLOR);
+    expect(blue).toHaveLength(2);
+    // 起点 [9,0]：cx=30.5, cy=542（细环，标出「原来的棋子」）
+    expect(blue[0]).toMatchObject({ cx: 30.5, cy: 542, radius: skin2.disc / 2 + 3, width: 2.5 });
+    // 终点 [7,0]：cy=57*7+5+24=428（亮环略大于蓝盘）
+    const discR = skin2.disc * 0.62;
+    expect(blue[1]).toMatchObject({ cx: 30.5, cy: 428, radius: discR + 2, width: 3 });
+    // 落点蓝色圆盘（半透明压在落点上 → 「蓝色棋子」观感）
+    expect(discs(ops)).toHaveLength(1);
+    expect(discs(ops)[0]).toMatchObject({ cx: 30.5, cy: 428, radius: discR, color: HINT_COLOR });
+    // 箭头：从起点指向落点，杆末端停在蓝盘外缘
+    const arrow = arrows(ops);
+    expect(arrow).toHaveLength(1);
+    expect(arrow[0]).toMatchObject({ x1: 30.5, y1: 542, x2: 30.5, color: HINT_COLOR });
+    expect(arrow[0].y2).toBeCloseTo(428 + discR + 7, 5);
+    // 不再借用素材提示点
+    expect(findImage(ops, 'dot')).toHaveLength(0);
   });
 
-  it('AI 推荐为吃子时不叠加提示点（避免提示点被棋子遮住）', () => {
+  it('AI 推荐为吃子时同样只画蓝环 / 蓝盘 / 箭头（不叠加提示点）', () => {
     const ops = computeDrawList(view({ hint: { from: [9, 0], to: [3, 0] } }), skin2);
     expect(findImage(ops, 'dot')).toHaveLength(0);
-    expect(rings(ops).filter((r) => r.color === '#f0b429')).toHaveLength(2);
+    expect(rings(ops).filter((r) => r.color === HINT_COLOR)).toHaveLength(2);
+    expect(discs(ops)).toHaveLength(1);
+    expect(arrows(ops)).toHaveLength(1);
+  });
+
+  it('AI 推荐箭头随视角翻转（黑方视角坐标取反）', () => {
+    const ops = computeDrawList(view({ hint: { from: [9, 0], to: [7, 0] }, flip: true }), skin2);
+    const arrow = arrows(ops)[0];
+    // 逻辑 [9,0] 翻转 → 视图 [0,8]：cx=57*8+3+27.5=486.5, cy=5+24=29
+    expect(arrow.x1).toBe(486.5);
+    expect(arrow.y1).toBe(29);
+    expect(discs(ops)[0]).toMatchObject({ cx: 486.5, cy: 57 * 2 + 5 + 24 });
+  });
+});
+
+describe('箭头几何 arrowSegment（AI 推荐箭头杆）', () => {
+  it('把线段末端按 gap 收进，方向不变', () => {
+    expect(arrowSegment({ x: 0, y: 0 }, { x: 100, y: 0 }, 20)).toEqual({ x1: 0, y1: 0, x2: 80, y2: 0 });
+    const up = arrowSegment({ x: 30.5, y: 542 }, { x: 30.5, y: 428 }, 41.1);
+    expect(up).toMatchObject({ x1: 30.5, y1: 542, x2: 30.5 });
+    expect(up.y2).toBeCloseTo(469.1, 5);
+  });
+
+  it('gap 不小于线段长度时退化为零长（不会反向指回）', () => {
+    expect(arrowSegment({ x: 0, y: 0 }, { x: 10, y: 0 }, 40)).toEqual({ x1: 0, y1: 0, x2: 0, y2: 0 });
+  });
+
+  it('两点重合不产生 NaN', () => {
+    expect(arrowSegment({ x: 5, y: 5 }, { x: 5, y: 5 }, 10)).toEqual({ x1: 5, y1: 5, x2: 5, y2: 5 });
   });
 });
 

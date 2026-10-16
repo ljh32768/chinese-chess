@@ -569,3 +569,71 @@ describe('吃子提示（绿色可吃 / 红色有险）', () => {
     expect(APP).toContain("hintBtn.setAttribute('aria-pressed'");
   });
 });
+
+describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', () => {
+  const REVIEW = readFileSync(path.join(ROOT, 'src', 'renderer', 'review.ts'), 'utf8');
+
+  it('AI 推荐面板：推荐按钮 + 后续变化 + 试下按钮，以及变化 / 试下着法列表', () => {
+    for (const id of [
+      'btn-replay-hint',
+      'btn-replay-line',
+      'btn-replay-try',
+      'replay-line',
+      'replay-try-bar',
+      'btn-replay-try-undo',
+      'btn-replay-try-reset',
+    ]) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    // 默认只给引导文案，推荐着法在点按钮后才显示
+    expect(HTML).toContain('点击「AI推荐」查看推荐着法');
+  });
+
+  it('按钮行为：AI推荐点开才请求（未点不请求）、点棋盘蓝色落点看后续变化、试下自由走子', () => {
+    // 打开复盘不再自动请求推荐
+    expect(REVIEW).not.toContain('void fetchHint()');
+    expect(REVIEW).toContain("$('btn-replay-hint').addEventListener('click', () => void toggleHint())");
+    expect(REVIEW).toContain('/api/ai/hint?id=');
+    expect(REVIEW).toContain('/api/ai/line?id=');
+    // 点落点（蓝色棋子）→ 查看后续变化
+    expect(REVIEW).toContain('pos[0] === hint.to[0] && pos[1] === hint.to[1]');
+    expect(REVIEW).toContain('function showLine(');
+  });
+
+  it('试下：选中己方子 → 点合法落点走子，可悔一步 / 重来 / 退出，均不改动记录', () => {
+    expect(REVIEW).toContain('function trialClick(');
+    expect(REVIEW).toContain('legalMoves(trial.board');
+    expect(REVIEW).toContain('function trialUndo(');
+    expect(REVIEW).toContain('function trialReset(');
+    expect(REVIEW).toContain('function exitTrial(');
+    expect(REVIEW).toContain("$('btn-replay-try-undo').addEventListener('click', trialUndo)");
+  });
+
+  it('面板文案与按钮态跟随状态：推荐中 / 变化预览 / 试下中', () => {
+    expect(REVIEW).toContain('function panelMsg(');
+    expect(REVIEW).toContain('变化预览：第 ');
+    expect(REVIEW).toContain('试下中（');
+    expect(REVIEW).toContain("hintBtn.value = hintState === 'shown' ? '收起推荐' : 'AI推荐'");
+    expect(REVIEW).toContain("lineBtn.value = line && lineStep > 0 ? '回到当前' : '后续变化'");
+    expect(REVIEW).toContain("tryBtn.value = inTrial ? '退出试下' : '试下'");
+  });
+
+  it('棋盘推荐标记为「箭头 + 蓝色落点」（与木质暖色对比），并点击可看后续变化', () => {
+    const BOARD = readFileSync(path.join(ROOT, 'src', 'renderer', 'board.ts'), 'utf8');
+    expect(BOARD).toContain('export const HINT_COLOR');
+    expect(BOARD).toContain('export function arrowSegment(');
+    expect(BOARD).toContain('ops.push({ arrow: true');
+    expect(BOARD).toContain('ops.push({ disc: true');
+  });
+
+  it('样式沿用设计令牌：按钮 / 列表行木质风格、开启态实底、金色焦点环', () => {
+    expect(decl('.replay-hint-bar input', 'border-radius')).toBe('var(--radius-sm)');
+    expect(decl('.replay-hint-bar input.on', 'background')).toBe('var(--surface-3-hover)');
+    expect(decl('.replay-line-row', 'border-radius')).toBe('var(--radius-sm)');
+    expect(decl('.replay-line-row.on', 'border-color')).toBe('var(--accent)');
+    const focusRule = RULES.find((r) => r.selectors.includes('.replay-hint-bar input:focus-visible'));
+    expect(focusRule).toBeTruthy();
+    expect(focusRule!.decls).toContain('--focus-ring');
+    expect(focusRule!.selectors).toContain('.replay-line-row:focus-visible');
+  });
+});

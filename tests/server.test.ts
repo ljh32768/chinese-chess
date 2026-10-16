@@ -825,6 +825,26 @@ describe('服务器 · 对局回顾与 AI 推荐', () => {
     expect(validateMove(initBoard(), data.from, data.to, 'r')).toBeNull();
   });
 
+  it('AI 后续变化：从该步起连续推演若干手（首手即推荐着法、双方交替）', async () => {
+    const { base } = await playAndFinish();
+    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: { id: string }[] };
+    const id = list.games[0].id;
+
+    const line = (await (await fetch(`${base}/api/ai/line?id=${id}&index=0&plies=2`)).json()) as {
+      side: string;
+      moves: { side: string; from: Pos; to: Pos; text: string }[];
+    };
+    expect(line.side).toBe('r'); // 第 0 步（开局）红方行棋
+    expect(line.moves.length).toBeGreaterThanOrEqual(1);
+    expect(line.moves[0].side).toBe('r');
+    expect(validateMove(initBoard(), line.moves[0].from, line.moves[0].to, 'r')).toBeNull();
+    if (line.moves.length > 1) expect(line.moves[1].side).toBe('b');
+    expect(line.moves.every((m) => m.text.length > 0)).toBe(true);
+
+    // 未知 id → 404
+    expect((await fetch(`${base}/api/ai/line?id=999`)).status).toBe(404);
+  }, 15000);
+
   it('对局未结束时不写入记录', async () => {
     const s = await startServer();
     await setupGame(s);

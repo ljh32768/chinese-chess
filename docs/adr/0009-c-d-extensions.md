@@ -1,7 +1,7 @@
 # ADR-0009：C/D 档与 v1.5 扩展模块规格（日志 / 记谱 / AI / 自动发现 / 先手方式 / 对局回顾）
 
-- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战；v2.6 更新 §3.12：残局「下一关」按钮 + 题库自检；v2.7 更新 §3.12：不限步数（将死即胜）+ 列表状态标记；v2.9 更新 §3.12：自建残局编辑器，保存时自动核验（取消「自检题库」手动入口）；**v3.0 更新 §3.3：AI 引擎改为皮卡鱼 UCI 原生引擎（纯 TS 保留为回退），详见 [ADR-0011](./0011-pikafish-engine.md)**）
-- 日期：2026-10-03（v1.5 追加：2026-10-06；v2.5 追加：2026-10-12；v2.9 追加：2026-10-15）
+- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战；v2.6 更新 §3.12：残局「下一关」按钮 + 题库自检；v2.7 更新 §3.12：不限步数（将死即胜）+ 列表状态标记；v2.9 更新 §3.12：自建残局编辑器，保存时自动核验（取消「自检题库」手动入口）；**v2.11 更新 §3.10：复盘 AI 推荐改为按钮点开显示（箭头 + 蓝色落点）+ 后续变化 + 试下**；**v3.0 更新 §3.3：AI 引擎改为皮卡鱼 UCI 原生引擎（纯 TS 保留为回退），详见 [ADR-0011](./0011-pikafish-engine.md)**）
+- 日期：2026-10-03（v1.5 追加：2026-10-06；v2.5 追加：2026-10-12；v2.9 追加：2026-10-15；v2.11 追加：2026-10-16）
 - 关联入口：主机日志、棋谱与吃子、悔棋、观战、人机对战、计时读秒、局域网主机搜索、先手方式与猜先、对局回顾与 AI 推荐、残局挑战
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0004 状态机](./0004-game-state-machine.md)、[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0007 渲染层](./0007-renderer-ui.md)
 
@@ -119,7 +119,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 路由 | `connOf(side)` 按阵营找连接（主机不一定执红），`sendTo` / `broadcast` / `sendToOpponent` 均与席位无关 |
 | 客户端提示 | 主机弹层「抓单 / 抓双」（`grasp_request`）→ 客方弹层「猜单 / 猜双」（`guess_request`）；结果用 toast 提示（如「猜先：主机抓「双」，加入者猜「单」→ 主机执红」） |
 
-### 3.10 对局回顾与 AI 推荐（v1.5）
+### 3.10 对局回顾与 AI 推荐（v1.5；v2.11 更新复盘的推荐交互）
 
 | 项 | 规格 |
 |---|---|
@@ -128,7 +128,10 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 列表 | `GET /api/history` → `{ games: GameRecordSummary[] }`（最近在前） |
 | 明细 | `GET /api/history/:id` → `GameRecord`（含 `moves`）；未知 id → 404 |
 | AI 推荐 | `GET /api/ai/hint?id=&index=&depth=`：按 `moves` 前 `index` 步用 `makeMove` 复原局面，行棋方 = `index % 2 === 0 ? 'r' : 'b'`；**v3.0 起改由 `hintFor(record, index, level, engine)` 调引擎出着法**（`level` 默认 2、上限 4），经 `validateMove` 复核后返回推荐着法 + `describeMove` 中文记谱；无着法回 `{ none: true }`。HTTP 处理函数改为 async（`handleAiHint`） |
-| 客户端 | `review.ts`：列表 → 复盘；复盘棋盘复用 `renderBoard`（`hint` 高亮起点/终点），步进一次一步，AI 推荐 120ms 防抖 + 序号防乱序 |
+| AI 推荐（客户端，v2.11） | 复盘页侧栏「AI 推荐」面板**默认只显示引导文案**（不再自动请求）；点按钮「AI推荐」才请求 `/api/ai/hint`，并把结果画到棋盘：**从原棋子指向推荐落点的箭头** + **蓝色落点标记**（半透明蓝盘压在落点上、外圈亮蓝环 → 「蓝色棋子」观感；起点另画细蓝环标出「原来的棋子」）。再点「收起推荐」隐藏；换局面（步进 / 跳步）会收起推荐与变化 |
+| 后续变化（v2.11） | `GET /api/ai/line?id=&index=&plies=`：`lineFor()` 在复原局面上连续推演 `plies`（默认 4，上限 8）手（**首手即该局面的推荐着法**，其后为 AI 视角双方应接；任一方无着可走即提前结束，全无着法回 `{ none: true }`），返回 `AiLine { side, moves: AiLineMove[] }`（每手含 `side` / `from` / `to` / `text`）。客户端：点「后续变化」**或直接点棋盘上的蓝色落点**即请求，把着法列成可点的列表并默认预览到末端（棋盘叠加该变化、推荐箭头收起）；点某一行预览到该手，按钮变「回到当前」回到未预览局面。预览用纯函数 `withMoves(base, moves, plies)`，不改动记录 |
+| 试下（v2.11，自由走子） | 点「试下」以当前复盘局面为起点自由试走：点己方子 → 棋盘亮出合法落点 → 点落点走子（红先交替，走子后交给对方，规则用 `legalMoves` 过滤送将）；着法只在 `cloneBoard` 出来的试下盘上推演，**不改动对局记录**。操作行多出「悔一步」（按试走着法重算盘面）/「重来」（清空试走着法），按钮变「退出试下」；步进 / 跳步 / 离开复盘即结束试下 |
+| 客户端 | `review.ts`：列表 → 复盘；棋盘复用 `renderBoard`，只读局面 / 变化预览 / 试下三种形态共用 `paintView()`；推荐与变化请求带序号（`hintSeq`）防乱序，推荐按钮带 120ms 防抖 |
 
 ### 3.11 杀法识别与终局展示（v2.4）
 
@@ -190,8 +193,8 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 自动发现 | [discover.ts](../../src/renderer/discover.ts) |
 | 观战/悔棋/人机/计时服务端 | [host-server.ts](../../src/server/host-server.ts)（`handleJoin` / `undo_*` / `startAiGame` / `armTurnTimer`） |
 | 先手方式 / 猜先 / 席位分配 | [host-server.ts `maybeStart()` / `beginFirst()` / `dispatchStart()`](../../src/server/host-server.ts)、[app.ts `chooseFirst()`](../../src/renderer/app.ts) |
-| 对局记录 / AI 推荐服务端 | [host-server.ts `saveRecord()` / `hintFor()`](../../src/server/host-server.ts) |
-| 对局回顾 / 复盘客户端 | [review.ts](../../src/renderer/review.ts) |
+| 对局记录 / AI 推荐 / 后续变化服务端 | [room.ts `saveRecord()` / `hintFor()` / `lineFor()`](../../src/server/room.ts)、[server.ts `/api/ai/hint` / `/api/ai/line`](../../src/server/server.ts) |
+| 对局回顾 / 复盘客户端 | [review.ts](../../src/renderer/review.ts)（列表 / 复盘 / 推荐按钮 / 后续变化 / 试下；`withMoves()` 纯函数）、[board.ts `HINT_COLOR` / `arrowSegment()` / `ArrowOp` / `DiscOp`](../../src/renderer/board.ts)（推荐箭头与蓝色落点） |
 | 杀法识别（杀法库 + 匹配） | [checkmate.ts](../../src/shared/checkmate.ts)（`CHECKMATE_PATTERNS` / `classifyCheckmate` / `classifyCheckmateFromHistory`） |
 | 残局题库与求解器 | [endgame.ts](../../src/shared/endgame.ts)（`PUZZLES` / `buildPuzzleBoard` / `canForceMate` / `findMateMove` / `minMateDepth` / `findPuzzle` / `nextPuzzle` / `checkPuzzle` / `checkEndgameBank`） |
 | 残局开局与判定 | [game.ts `setup()`](../../src/shared/game.ts)、[app.ts `startPuzzle()` / `restartPuzzle()` / `endgameUndo()` / `endgameHint()` / `endgameNext()` / `checkEndgameBankUI()` / `endgameEvaluate()` / `showEndgameResult()`](../../src/renderer/app.ts) |
@@ -201,7 +204,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 吃子提示分析 | [tactics.ts](../../src/shared/tactics.ts)（`captureHints` / `profitableTargets` / `PIECE_VALUE`） |
 | 吃子提示界面 | [app.ts `toggleCaptureHint()` / `refreshCaptureHints()`](../../src/renderer/app.ts)、[board.ts `BoardView.capture` / `HINT_TARGET_COLOR` / `HINT_THREAT_COLOR`](../../src/renderer/board.ts)、[index.html `btn-hint`](../../src/renderer/index.html)、[styles.css `#btn-hint`](../../src/renderer/styles.css) |
 | 状态机扩展 | [game.ts](../../src/shared/game.ts)（`history` / `undo` / `timeout` / `deadline`） |
-| 渲染层扩展 | [app.ts](../../src/renderer/app.ts)（吃子面板 / 悔棋 / 观战 / 倒计时 / 搜索 / 先手方式）、[review.ts](../../src/renderer/review.ts)（对局回顾 / 复盘 / AI 推荐） |
+| 渲染层扩展 | [app.ts](../../src/renderer/app.ts)（吃子面板 / 悔棋 / 观战 / 倒计时 / 搜索 / 先手方式）、[review.ts](../../src/renderer/review.ts)（对局回顾 / 复盘 / AI 推荐按钮 / 后续变化 / 试下）、[board.ts](../../src/renderer/board.ts)（推荐箭头 + 蓝色落点） |
 | 工程化配置 | [package.json](../../package.json)（dev/lint/format/dist）、[.github/workflows/ci.yml](../../.github/workflows/ci.yml) |
 
 ## 5. 验收标准
@@ -238,3 +241,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
   - 自动化：`npm test`（342 项，含新增 [tests/tactics.test.ts](../../tests/tactics.test.ts) 11 项）/ `npm run lint` / `npm run format:check` / `npm run build` 全绿；
     分析用例覆盖开局无提示、无根白吃、有根小换大、等价交换不提示、**炮的「有根」判定（无炮架不算根 / 有炮架算根）**、将帅不参与提示、红黑对称与纯函数性；[tests/board.test.ts](../../tests/board.test.ts) 覆盖提示环的几何（半径 / 颜色 / 坐标 / 翻转）与「未开启不画环」；[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 覆盖按钮结构、开启态样式、焦点环与 `app.ts` 接线。
   - 说明：提示的「分析 + 绘制 + 交互」三层均由自动化用例覆盖；浏览器自动化工具无法点击 Canvas，故本轮未在浏览器内实盘走完一盘棋验证绿 / 红环。
+- v2.11（复盘 AI 推荐：按钮点开显示 + 后续变化 + 试下，2026-10-16）：
+  - 自动化：`npm test`（354 项，含 [board.test.ts](../../tests/board.test.ts) 40 项 / [review.test.ts](../../tests/review.test.ts) 16 项 / [server.test.ts](../../tests/server.test.ts) 集成用例）/ `npm run lint` / `npm run format:check` / `npm run build` 全绿；
+    新增 `arrowSegment` 几何单测（按 gap 收进末端、超长退化零长、两点重合不 NaN）、推荐标记绘制计划（蓝环 ×2 + 蓝盘 + 箭头、随视角翻转、不再借用素材提示点）、`withMoves` 纯函数单测（在给定局面上试走前 N 手且不改动传入棋盘、plies 越界收敛）、`AI 后续变化` 服务端集成（首手为该局面推荐着法且合法、双方交替、文本非空、未知 id 404）、以及复盘界面的 DOM / 样式 / 接线契约（按钮与变化列表结构、默认引导文案、点按钮才请求、点落点看后续变化、试下自由走子、面板文案与按钮态、设计令牌与焦点环）。
+  - 界面实测（浏览器，预置一局 37 步「夹车炮杀」记录）：复盘页「AI 推荐」面板初始为引导文案 +「后续变化」禁用；点「AI推荐」后文案变「红方推荐：炮八进七」、按钮变「收起推荐」、棋盘出现原棋子指向落点的**蓝色箭头与蓝色圆盘/蓝环**；点「后续变化」列出 3 行（首行「炮八进七」）并预览到变化末端，点第 1 行可回到该手（行高亮 + 按钮变「回到当前」），再点回到未预览局面并重现箭头；点「试下」进入自由走子（提示「试下中（红方走子）」+「悔一步 / 重来 / 退出试下」），点红马与其合法落点即走子并在列表记一手，点「悔一步」清空记录、棋盘复位；「退出试下」后回到初始引导文案；控制台无 error / warning。

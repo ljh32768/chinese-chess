@@ -1,16 +1,25 @@
 /**
  * 对局回顾：对局列表（红黑方 / 取先方式 / 时间 / 胜负）与复盘
- * （右箭头逐步回放 + AI 推荐）。
+ * （右箭头逐步回放 + AI 推荐 / 后续变化 / 试下）。
  *
- * 记录由主机保存在内存中，通过 /api/history 系列接口读取；
+ * 记录由中心服务器保存在内存中，通过 /api/history 系列接口读取；
  * 复盘棋盘复用对局页的 Canvas 渲染器（board.ts）。
  */
 
 import { describeMove } from '../shared/notation.js';
 import { CheckmateInfo, classifyCheckmateFromHistory } from '../shared/checkmate.js';
-import { findKing, initBoard, isInCheck, makeMove } from '../shared/rules.js';
+import {
+  cloneBoard,
+  findKing,
+  initBoard,
+  isInCheck,
+  legalMoves,
+  makeMove,
+  sideHasAnyMove,
+} from '../shared/rules.js';
 import {
   AiHint,
+  AiLineMove,
   FIRST_MODE_LABEL,
   Board,
   GameRecord,
@@ -19,12 +28,28 @@ import {
   Pos,
   Side,
 } from '../shared/types.js';
-import { Skin, renderBoard } from './board.js';
+import { Skin, canvasPoint, pickCell, renderBoard } from './board.js';
 
 /** 复盘第 index 步（0 = 开局）后的棋盘 */
 export function replayBoard(moves: Move[], index: number): Board {
   const board = initBoard();
   const n = Math.max(0, Math.min(Number.isFinite(index) ? Math.floor(index) : 0, moves.length));
+  for (let i = 0; i < n; i++) makeMove(board, moves[i].from, moves[i].to);
+  return board;
+}
+
+/** 行棋方名称（红方 / 黑方） */
+export function sideName(side: Side): string {
+  return side === 'r' ? '红方' : '黑方';
+}
+
+/**
+ * 在某个局面之上试走前 `plies` 手（越界自动收敛），返回**新棋盘**（不改动 base）。
+ * 「后续变化」预览与「试下」自由走子共用。
+ */
+export function withMoves(base: Board, moves: Move[], plies: number): Board {
+  const board = cloneBoard(base);
+  const n = Math.max(0, Math.min(Number.isFinite(plies) ? Math.floor(plies) : 0, moves.length));
   for (let i = 0; i < n; i++) makeMove(board, moves[i].from, moves[i].to);
   return board;
 }
@@ -122,13 +147,30 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getEl
 
 /** 暂停：AI 推荐请求与步进解耦，避免连续点箭头时画面错位 */
 const HINT_DEBOUNCE_MS = 120;
+/** 「后续变化」一次推演的手数 */
+const LINE_PLIES = 4;
+
+/** 推荐 / 变化 / 试下的状态（驱动面板文案与按钮可用性） */
+type HintState = 'idle' | 'loading' | 'shown' | 'none' | 'error';
+type LineState = 'idle' | 'loading' | 'shown' | 'none' | 'error';
 
 export function initReview(deps: ReviewDeps): ReviewController {
   const canvas = $<HTMLCanvasElement>('replay-board');
   let records: GameRecordSummary[] = [];
   let record: GameRecord | null = null;
   let index = 0;
+  /** 推荐箭头（仅在点开「AI推荐」后才有值） */
   let hint: { from: Pos; to: Pos } | null = null;
+  let hintState: HintState = 'idle';
+  let hintText = '';
+  /** 后续变化（AI 连续推演的着法）与预览到第几手（0 = 未预览） */
+  let line: AiLineMove[] | null = null;
+  let lineState: LineState = 'idle';
+  let lineStep = 0;
+  /** 试下：以当前复盘局面为起点自由走子（只在本端推演，不改动记录） */
+  let trial: { board: Board; moves: Move[]; selected: Pos | null } | null = null;
+  let trialHover: Pos | null = null;
+  /** 请求代次：步进 / 换局后旧响应作废（推荐与变化共用） */
   let hintSeq = 0;
   let hintTimer = 0;
   /** 当前回顾范围（全部 / 我的历史） */
@@ -229,30 +271,103 @@ export function initReview(deps: ReviewDeps): ReviewController {
       return;
     }
     index = 0;
-    hint = null;
+    resetAux();
     deps.show('screen-replay');
     await deps.loadImages();
     paint();
     renderInfo();
-    void fetchHint();
   }
 
-  /** 复盘棋盘：复用对局页渲染器（只读，无交互高亮） */
+  /** 进入新局面（步进 / 换局）或离开复盘时清掉推荐、变化与试下 */
+  function resetAux(): void {
+    hintSeq++; // 让在途请求作废
+    hint = null;
+    hintState = 'idle';
+    hintText = '';
+    line = null;
+    lineState = 'idle';
+    lineStep = 0;
+    trial = null;
+    trialHover = null;
+    canvas.style.cursor = 'default';
+  }
+
+  /** 试下中当前应由哪一方走（沿用红先交替） */
+  function trialSide(): Side {
+    return sideAt(index + (trial ? trial.moves.length : 0));
+  }
+
+  /** 面板文案：试下提示优先，其次是推荐状态 */
+  function panelMsg(): string {
+    if (trial) {
+      const side = trialSide();
+      if (!sideHasAnyMove(trial.board, side)) return `试下：${sideName(side)}已无着可走`;
+      return `试下中（${sideName(side)}走）：点自己的棋子，再点落点自由试走`;
+    }
+    if (hintState === 'loading') return `${sideName(sideAt(index))} · AI 思考中…`;
+    if (hintState === 'shown' && hint && lineStep === 0) return `${sideName(sideAt(index))}推荐：${hintText}`;
+    if (hintState === 'shown' && lineStep > 0) return `变化预览：第 ${lineStep} 手（点「回到当前」退出）`;
+    if (hintState === 'none') return '无推荐着法（已终局或无需走子）';
+    if (hintState === 'error') return 'AI 推荐获取失败，请确认已连接服务器';
+    return '点击「AI推荐」查看推荐着法';
+  }
+
+  /** 复盘棋盘：只读局面 / 变化预览 / 试下三种形态共用同一渲染器 */
   function paint(): void {
     if (!record) return;
-    const board = replayBoard(record.moves, index);
-    const turn = sideAt(index);
+    if (trial) {
+      const side = trialSide();
+      paintView(trial.board, {
+        selected: trial.selected,
+        moves: trial.selected ? legalMoves(trial.board, trial.selected[0], trial.selected[1]) : [],
+        lastMove: trial.moves.length ? trial.moves[trial.moves.length - 1] : null,
+        interactiveSide: side,
+        hover: trialHover,
+        turn: side,
+      });
+      return;
+    }
+    const base = replayBoard(record.moves, index);
+    const preview = line && lineStep > 0 ? line : null;
+    const board = preview ? withMoves(base, preview, lineStep) : base;
+    paintView(board, {
+      selected: null,
+      moves: [],
+      lastMove: preview ? preview[lineStep - 1] : index > 0 ? record.moves[index - 1] : null,
+      interactiveSide: null,
+      hover: null,
+      // 变化预览时收起推荐箭头（局面已经向前推演）
+      hint: hintState === 'shown' && !preview ? hint : null,
+      turn: sideAt(index + (preview ? lineStep : 0)),
+    });
+  }
+
+  /** 把一份盘面按当前皮肤画到复盘画布（额外字段由调用方按形态给出） */
+  function paintView(
+    board: Board,
+    extra: {
+      selected: Pos | null;
+      moves: Pos[];
+      lastMove: { from: Pos; to: Pos } | null;
+      interactiveSide: Side | null;
+      hover: Pos | null;
+      hint?: { from: Pos; to: Pos } | null;
+      turn?: Side;
+    },
+  ): void {
+    const turn = extra.turn ?? sideAt(index);
     renderBoard(
       canvas,
       {
         board,
-        selected: null,
-        moves: [],
-        lastMove: index > 0 ? record.moves[index - 1] : null,
+        selected: extra.selected,
+        moves: extra.moves,
+        lastMove: extra.lastMove,
         flip: false,
         checkKing: isInCheck(board, turn) ? findKing(board, turn) : null,
-        interactiveSide: null,
-        hint,
+        interactiveSide: extra.interactiveSide,
+        hover: extra.hover,
+        hint: extra.hint ?? null,
       },
       deps.skin(),
       deps.images(),
@@ -260,7 +375,7 @@ export function initReview(deps: ReviewDeps): ReviewController {
     );
   }
 
-  /** 侧栏信息：对局信息 / 当前步 / AI 推荐 */
+  /** 侧栏信息：对局信息 / 当前步 / AI 推荐按钮与变化列表 */
   function renderInfo(): void {
     if (!record) return;
     const line = recordLine(record);
@@ -294,18 +409,113 @@ export function initReview(deps: ReviewDeps): ReviewController {
     $<HTMLInputElement>('btn-replay-prev').disabled = index === 0;
     $<HTMLInputElement>('btn-replay-next').disabled = index >= record.moves.length;
     $<HTMLInputElement>('btn-replay-last').disabled = index >= record.moves.length;
+
+    syncControls();
   }
 
-  /** 步进（delta 步，越界自动收敛）；步进后清除旧推荐并重新请求 */
+  /** 同步 AI 推荐面板的按钮文案 / 按压态 / 变化列表（面板文案与棋盘状态保持一致） */
+  function syncControls(): void {
+    const inTrial = !!trial;
+    $('replay-hint').textContent = panelMsg();
+
+    const hintBtn = $<HTMLInputElement>('btn-replay-hint');
+    hintBtn.value = hintState === 'shown' ? '收起推荐' : 'AI推荐';
+    hintBtn.disabled = inTrial || hintState === 'loading';
+    hintBtn.classList.toggle('on', hintState === 'shown' && !inTrial);
+
+    const lineBtn = $<HTMLInputElement>('btn-replay-line');
+    lineBtn.value = line && lineStep > 0 ? '回到当前' : '后续变化';
+    lineBtn.disabled = inTrial || hintState !== 'shown' || lineState === 'loading';
+    lineBtn.classList.toggle('on', !!line && lineStep > 0);
+
+    const tryBtn = $<HTMLInputElement>('btn-replay-try');
+    tryBtn.value = inTrial ? '退出试下' : '试下';
+    tryBtn.classList.toggle('on', inTrial);
+
+    $('replay-try-bar').hidden = !inTrial;
+    $<HTMLInputElement>('btn-replay-try-undo').disabled = !inTrial || !trial?.moves.length;
+    renderLine();
+  }
+
+  /** 变化 / 试下着法列表：变化行可点（预览到该手），试下行只作记录 */
+  function renderLine(): void {
+    const box = $('replay-line');
+    if (trial) {
+      const made = trial;
+      if (!made.moves.length) {
+        box.hidden = true;
+        box.replaceChildren();
+        return;
+      }
+      const base = replayBoard(record?.moves ?? [], index);
+      const rows = made.moves.map((m, i) =>
+        lineRow(
+          i + 1,
+          sideAt(index + i),
+          describeMove(withMoves(base, made.moves, i), m.from, m.to),
+          false,
+          false,
+        ),
+      );
+      box.hidden = false;
+      box.replaceChildren(...rows);
+      return;
+    }
+    if (lineState === 'idle') {
+      box.hidden = true;
+      box.replaceChildren();
+      return;
+    }
+    if (lineState === 'shown' && line) {
+      const rows = line.map((m, i) => lineRow(i + 1, m.side, m.text, true, i + 1 === lineStep));
+      box.hidden = false;
+      box.replaceChildren(...rows);
+      return;
+    }
+    const note = document.createElement('div');
+    note.className = 'replay-line-note';
+    note.textContent =
+      lineState === 'loading'
+        ? '正在计算后续变化…'
+        : lineState === 'none'
+          ? '后续变化：无可推演的着法'
+          : '后续变化获取失败';
+    box.hidden = false;
+    box.replaceChildren(note);
+  }
+
+  /** 一行着法（`clickable` 为真时可点：预览到该手） */
+  function lineRow(idx: number, side: Side, text: string, clickable: boolean, active: boolean): HTMLElement {
+    const row = document.createElement(clickable ? 'button' : 'div');
+    row.className = `replay-line-row${clickable ? '' : ' static'}${active ? ' on' : ''}`;
+    row.innerHTML =
+      `<span class="replay-line-idx">${idx}.</span>` +
+      `<span class="replay-line-side ${side}">${side === 'r' ? '红' : '黑'}</span>` +
+      `<span class="replay-line-text">${text}</span>`;
+    if (clickable) {
+      (row as HTMLButtonElement).type = 'button';
+      row.addEventListener('click', () => previewLine(idx));
+    }
+    return row;
+  }
+
+  /** 预览后续变化到第 `step` 手（0 = 回到当前局面） */
+  function previewLine(step: number): void {
+    if (!line) return;
+    lineStep = Math.max(0, Math.min(step, line.length));
+    paint();
+    syncControls();
+  }
+
+  /** 步进（delta 步，越界自动收敛）；步进后收起旧推荐 / 变化并退出试下 */
   function step(delta: number): void {
     if (!record) return;
     const next = Math.max(0, Math.min(index + delta, record.moves.length));
     if (next === index) return;
     index = next;
-    hint = null;
+    resetAux();
     paint();
     renderInfo();
-    void fetchHint();
   }
 
   function jump(to: number): void {
@@ -313,18 +523,32 @@ export function initReview(deps: ReviewDeps): ReviewController {
     const next = Math.max(0, Math.min(to, record.moves.length));
     if (next === index) return;
     index = next;
-    hint = null;
+    resetAux();
     paint();
     renderInfo();
-    void fetchHint();
   }
 
-  /** 请求该局面的 AI 推荐（带序号防乱序；120ms 防抖） */
-  async function fetchHint(): Promise<void> {
-    if (!record) return;
+  /** 「AI推荐」：点开才请求并显示推荐（蓝色箭头 + 落点），再点收起 */
+  async function toggleHint(): Promise<void> {
+    if (!record || trial) return;
+    if (hintState === 'shown') {
+      hint = null;
+      hintState = 'idle';
+      line = null;
+      lineState = 'idle';
+      lineStep = 0;
+      paint();
+      syncControls();
+      return;
+    }
     const rec = record;
     const seq = ++hintSeq;
-    $('replay-hint').textContent = `${sideAt(index) === 'r' ? '红方' : '黑方'} · AI 思考中…`;
+    hintState = 'loading';
+    hint = null;
+    line = null;
+    lineState = 'idle';
+    lineStep = 0;
+    syncControls();
     window.clearTimeout(hintTimer);
     await new Promise<void>((r) => {
       hintTimer = window.setTimeout(() => r(), HINT_DEBOUNCE_MS);
@@ -337,14 +561,124 @@ export function initReview(deps: ReviewDeps): ReviewController {
       if (seq !== hintSeq || record !== rec) return;
       if (data.none || !data.from || !data.to || !data.text) {
         hint = null;
-        $('replay-hint').textContent = '无推荐着法（已终局或无需走子）';
+        hintState = 'none';
       } else {
         hint = { from: data.from, to: data.to };
-        $('replay-hint').textContent = `${data.side === 'r' ? '红方' : '黑方'}推荐：${data.text}`;
+        hintText = data.text;
+        hintState = 'shown';
       }
       paint();
+      syncControls();
     } catch {
-      if (seq === hintSeq) $('replay-hint').textContent = 'AI 推荐获取失败';
+      if (seq !== hintSeq) return;
+      hintState = 'error';
+      syncControls();
+    }
+  }
+
+  /** 「后续变化」（或点棋盘上的蓝色落点）：AI 连续推演若干手并预览到末端 */
+  async function showLine(): Promise<void> {
+    if (!record || !hint || trial || hintState !== 'shown') return;
+    if (line) {
+      previewLine(lineStep > 0 ? 0 : line.length);
+      return;
+    }
+    const rec = record;
+    const seq = ++hintSeq;
+    lineState = 'loading';
+    syncControls();
+    try {
+      const data = await fetchJson<{ none?: boolean; moves?: AiLineMove[] }>(
+        `/api/ai/line?id=${encodeURIComponent(rec.id)}&index=${index}&plies=${LINE_PLIES}`,
+      );
+      if (seq !== hintSeq || record !== rec) return;
+      if (data.none || !data.moves?.length) {
+        lineState = 'none';
+        syncControls();
+        return;
+      }
+      line = data.moves;
+      lineState = 'shown';
+      lineStep = line.length;
+      paint();
+      syncControls();
+    } catch {
+      if (seq !== hintSeq) return;
+      lineState = 'error';
+      syncControls();
+    }
+  }
+
+  // ------------------------------------------------------------ 试下（自由走子）
+
+  /** 进入试下：以当前复盘局面为起点，本端自由试走（不改动记录） */
+  function enterTrial(): void {
+    if (!record) return;
+    hintSeq++;
+    hint = null;
+    hintState = 'idle';
+    hintText = '';
+    line = null;
+    lineState = 'idle';
+    lineStep = 0;
+    trial = { board: replayBoard(record.moves, index), moves: [], selected: null };
+    trialHover = null;
+    paint();
+    syncControls();
+  }
+
+  function exitTrial(): void {
+    trial = null;
+    trialHover = null;
+    hintState = 'idle';
+    canvas.style.cursor = 'default';
+    paint();
+    syncControls();
+  }
+
+  /** 试下：悔一步（重算盘面） */
+  function trialUndo(): void {
+    if (!record || !trial || !trial.moves.length) return;
+    trial.moves.pop();
+    trial.selected = null;
+    trial.board = withMoves(replayBoard(record.moves, index), trial.moves, trial.moves.length);
+    paint();
+    syncControls();
+  }
+
+  /** 试下：重来（清空试走着法，回到进入时的局面） */
+  function trialReset(): void {
+    if (!trial) return;
+    enterTrial();
+    deps.toast('已重来：回到进入试下时的局面');
+  }
+
+  /** 试下棋盘点击：选中己方子 → 点合法落点走子（红先交替，走子后自动交给对方） */
+  function trialClick(pos: Pos): void {
+    if (!trial) return;
+    const side = trialSide();
+    const piece = trial.board[pos[0]][pos[1]];
+    const sel = trial.selected;
+    if (sel) {
+      if (sel[0] === pos[0] && sel[1] === pos[1]) {
+        trial.selected = null;
+      } else if (piece && piece.s === side) {
+        trial.selected = pos;
+      } else if (legalMoves(trial.board, sel[0], sel[1]).some(([r, c]) => r === pos[0] && c === pos[1])) {
+        makeMove(trial.board, sel, pos);
+        trial.moves.push({ from: sel, to: pos });
+        trial.selected = null;
+      } else {
+        trial.selected = null;
+      }
+      paint();
+      syncControls();
+      return;
+    }
+    if (piece && piece.s === side) {
+      trial.selected = pos;
+      paint();
+      syncControls();
     }
   }
 
@@ -354,12 +688,62 @@ export function initReview(deps: ReviewDeps): ReviewController {
   $('btn-history-refresh').addEventListener('click', () => void refresh());
   $('tab-history-all').addEventListener('click', () => setScope('all'));
   $('tab-history-mine').addEventListener('click', () => setScope('mine'));
-  $('btn-replay-back').addEventListener('click', () => deps.show('screen-history'));
+  $('btn-replay-back').addEventListener('click', () => {
+    resetAux();
+    deps.show('screen-history');
+  });
   $('btn-replay-first').addEventListener('click', () => jump(0));
   $('btn-replay-prev').addEventListener('click', () => step(-1));
   $('btn-replay-next').addEventListener('click', () => step(1));
   $('btn-replay-last').addEventListener('click', () => {
     if (record) jump(record.moves.length);
+  });
+  // AI 推荐：点按钮显示 / 收起推荐；点棋盘上的蓝色落点查看后续变化；试下自由走子
+  $('btn-replay-hint').addEventListener('click', () => void toggleHint());
+  $('btn-replay-line').addEventListener('click', () => void showLine());
+  $('btn-replay-try').addEventListener('click', () => (trial ? exitTrial() : enterTrial()));
+  $('btn-replay-try-undo').addEventListener('click', trialUndo);
+  $('btn-replay-try-reset').addEventListener('click', trialReset);
+
+  canvas.addEventListener('click', (e) => {
+    if (!record) return;
+    const pt = canvasPoint(canvas, e.clientX, e.clientY, deps.skin());
+    const pos = pickCell(pt.x, pt.y, deps.skin(), false);
+    if (!pos) return;
+    if (trial) {
+      trialClick(pos);
+      return;
+    }
+    if (hint && hintState === 'shown' && pos[0] === hint.to[0] && pos[1] === hint.to[1]) void showLine();
+  });
+
+  // 试下时悬停预高亮 + 手型光标（其余形态只读）
+  canvas.addEventListener('mousemove', (e) => {
+    if (!trial) return;
+    const pt = canvasPoint(canvas, e.clientX, e.clientY, deps.skin());
+    const pos = pickCell(pt.x, pt.y, deps.skin(), false);
+    const same =
+      (pos === null && trialHover === null) ||
+      (!!pos && !!trialHover && pos[0] === trialHover[0] && pos[1] === trialHover[1]);
+    if (same) return;
+    trialHover = pos;
+    const hit = pos ? trial.board[pos[0]][pos[1]] : null;
+    const clickable =
+      !!pos &&
+      (hit?.s === trialSide() ||
+        (trial.selected
+          ? legalMoves(trial.board, trial.selected[0], trial.selected[1]).some(
+              ([r, c]) => r === pos[0] && c === pos[1],
+            )
+          : false));
+    canvas.style.cursor = clickable ? 'pointer' : 'default';
+    paint();
+  });
+  canvas.addEventListener('mouseleave', () => {
+    if (!trial || !trialHover) return;
+    trialHover = null;
+    canvas.style.cursor = 'default';
+    paint();
   });
 
   // 左右方向键：一次一步（与「下一步 ▶ / ◀ 上一步」等效）
