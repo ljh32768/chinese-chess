@@ -76,8 +76,8 @@
         <span class="panel-lg-title">残局挑战</span>
       </div>
       <div class="endgame-list" id="endgame-list"></div>
-      <button type="button" class="btn small block" id="btn-eg-check">自检题库</button>
-      <p class="hint" id="endgame-hint">选一局开战：轮到你（红方）走，把对方将死即挑战成功（不限步数）；列表上的勾叉表示完成 / 失败 / 未完成，外圈绿色代表已达成最优步数；卡住了可用「提示」看最快取胜的着法，想跳关可用棋盘下的「下一关」；「自检题库」会核验每局的局面合法性与可解性。</p>
+      <button type="button" class="btn small block" id="btn-eg-create">自建残局</button>
+      <p class="hint" id="endgame-hint">选一局开战：轮到你（先手方）走，把对方将死即挑战成功（不限步数）；列表上的勾叉表示完成 / 失败 / 未完成，外圈绿色代表已达成最优步数；卡住了可用「提示」看最快取胜的着法，想跳关可用棋盘下的「下一关」；「自建残局」可自己摆一个局面，保存时会自动核验（局面合法且能强制将死对方）并算出最优步数。</p>
     </div>
 
     <div class="panel-lg" id="menu-acct" hidden>
@@ -214,6 +214,44 @@
         <div class="req-hint" id="req-hint" hidden></div>
         <div class="role-hint" id="role-hint"></div>
         <input type="button" id="btn-invite" value="邀请玩家" hidden>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ========== 自建残局编辑器（棋盘摆子 + 右侧「局面」面板 + 棋盘下方棋子栏 + 红先/黑先） ========== -->
+  <section id="screen-endgame-editor" class="screen">
+    <div class="editor-layout">
+      <div class="editor-main">
+        <canvas id="eg-board" width="523" height="580"></canvas>
+        <div class="editor-bottom">
+          <div class="eg-palette">
+            <div class="eg-pal-row" id="eg-pal-red"></div>
+            <div class="eg-pal-row" id="eg-pal-black"></div>
+          </div>
+          <div class="eg-first">
+            <button type="button" class="eg-first-btn on" id="eg-first-r"><i class="dot"></i>红先</button>
+            <button type="button" class="eg-first-btn" id="eg-first-b"><i class="dot"></i>黑先</button>
+          </div>
+        </div>
+      </div>
+      <aside class="editor-side">
+        <div class="panel-box">
+          <div class="box-title">局面</div>
+          <div class="editor-acts">
+            <button type="button" class="editor-act" id="eg-reset"><i class="ico">↺</i>初始局面</button>
+            <button type="button" class="editor-act" id="eg-clear"><i class="ico">✕</i>清空</button>
+            <button type="button" class="editor-act" id="eg-swap"><i class="ico">⇄</i>红黑互换</button>
+          </div>
+        </div>
+        <div class="panel-box">
+          <div class="box-title">残局名</div>
+          <input type="text" id="eg-name" maxlength="12" autocomplete="off" placeholder="自建残局">
+          <p class="hint">先在棋盘下方选一颗棋子作画笔，再点棋盘落子；右键点棋盘可拿走棋子。「红先 / 黑先」决定你（先手方）执哪一方。</p>
+        </div>
+        <div class="editor-actions">
+          <button type="button" class="btn small" id="eg-cancel">返　回</button>
+          <button type="button" class="btn small" id="eg-save">保　存</button>
+        </div>
       </aside>
     </div>
   </section>

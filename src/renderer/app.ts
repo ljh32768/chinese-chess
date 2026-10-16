@@ -24,20 +24,23 @@ import { Game } from '../shared/game.js';
 import { pickMove } from '../shared/ai.js';
 import { CheckmateInfo, classifyCheckmate, classifyCheckmateFromHistory } from '../shared/checkmate.js';
 import {
+  CUSTOM_LEVEL,
   EndgamePuzzle,
   EndgameRecord,
   LEVEL_LABEL,
   PUZZLES,
   buildPuzzleBoard,
-  checkEndgameBank,
   endgameOutcome,
   findMateMove,
   isOptimalSteps,
   minMateDepth,
   nextPuzzle,
+  parseCustomEndgames,
   parseEndgameRecords,
   recordFail,
   recordWin,
+  removeCustomEndgame,
+  upsertCustomEndgame,
 } from '../shared/endgame.js';
 import { capturedPieces, describeMove } from '../shared/notation.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
@@ -69,6 +72,7 @@ import { initReview, ReviewController } from './review.js';
 import { playClick, playSelect } from './sound.js';
 import { Net } from './net.js';
 import { BannerContent, bannerContent } from './banner.js';
+import { EndgameEditorController, initEndgameEditor } from './endgame-editor.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -87,6 +91,8 @@ const SESSION_KEY = 'lanschess-session';
 const PLAYER_KEY = 'lanschess-player';
 /** 残局挑战通关记录（id → 取胜所用步数） */
 const ENDGAME_KEY = 'lanschess-endgame';
+/** 自建残局存档（编辑器保存的题目列表，同样只存本机） */
+const CUSTOM_KEY = 'lanschess-endgame-custom';
 
 /** 残局挑战的进度（本地对弈，不连服务器） */
 interface EndgameState {
@@ -504,6 +510,9 @@ function ensureSkinImages(): void {
 
 /** 对局回顾（列表 + 复盘）；在 init() 中装配 */
 let review: ReviewController | null = null;
+
+/** 自建残局编辑器（棋盘摆子 + 保存前自动核验）；在 init() 中装配 */
+let editor: EndgameEditorController | null = null;
 
 /** 将军警示环的脉冲动画：仅在需要时运行定时重绘 */
 let pulseTimer = 0;
@@ -1637,55 +1646,167 @@ function recordEndgameFail(id: string): void {
   writeStore(ENDGAME_KEY, JSON.stringify(recordFail(readEndgameRecord(), id)));
 }
 
-/** 打开「残局挑战」面板（题库列表） */
+/** 打开「残局挑战」面板（内置题库 + 自建残局） */
 function openEndgamePanel(): void {
   renderEndgameList();
   showHomePanel('endgame');
 }
 
+/** 从编辑器回到残局面板（编辑器是独立切屏，需先切回首页） */
+function backToEndgamePanel(): void {
+  show('screen-home');
+  openEndgamePanel();
+}
+
+/** 读取本机自建残局（纯逻辑见 shared/endgame.ts `parseCustomEndgames`） */
+function readCustomEndgames(): EndgamePuzzle[] {
+  return parseCustomEndgames(readStore(CUSTOM_KEY));
+}
+
+/** 写回本机自建残局 */
+function writeCustomEndgames(list: EndgamePuzzle[]): void {
+  writeStore(CUSTOM_KEY, JSON.stringify(list));
+}
+
+/** 新建自建残局的默认名（按已有数量顺延） */
+function defaultCustomName(): string {
+  return `自建残局 ${readCustomEndgames().length + 1}`;
+}
+
 /**
- * 渲染题库列表：状态标记 + 名称 + 难度 + 最优步数（点击即开局）。
+ * 渲染残局列表：内置题库在前、自建残局在后（状态标记 + 名称 + 难度 + 最优步数，点击即开局）。
  * 标记含义：勾叉表示完成 / 失败 / 未完成（绿勾 / 红叉 / 白勾），
- * 外圈表示是否达成最优步数（绿圈 = 是最优，灰圈 = 不是最优）。
+ * 外圈表示是否达成最优步数（绿圈 = 是最优，灰圈 = 不是最优）；自建条目另有「编辑 / 删除」。
  */
 function renderEndgameList(): void {
   const box = $('endgame-list');
   box.replaceChildren();
   const rec = readEndgameRecord();
-  for (const p of PUZZLES) {
-    const r = rec[p.id];
-    const status = endgameOutcome(r);
-    const optimal = isOptimalSteps(r, p.goalMoves);
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'eg-row';
-
-    const mark = document.createElement('span');
-    mark.className = `eg-mark ${status}${optimal ? ' optimal' : ''}`;
-    mark.textContent = status === 'fail' ? '✗' : '✓';
-    mark.title =
-      status === 'win'
-        ? optimal
-          ? `已完成 · 最优 ${p.goalMoves} 步`
-          : '已完成（未达最优步数）'
-        : status === 'fail'
-          ? '失败'
-          : '未完成';
-
-    const name = document.createElement('span');
-    name.className = 'eg-name';
-    name.textContent = p.name;
-    const level = document.createElement('span');
-    level.className = 'eg-level' + (p.level === 'hard' ? ' hard' : '');
-    level.textContent = LEVEL_LABEL[p.level];
-    const goal = document.createElement('span');
-    goal.className = 'eg-goal';
-    goal.textContent = `最优 ${p.goalMoves} 步`;
-    row.append(mark, name, level, goal);
-
-    row.addEventListener('click', () => startPuzzle(p));
-    box.appendChild(row);
+  for (const p of PUZZLES) box.appendChild(endgameRow(p, rec[p.id], null));
+  for (const p of readCustomEndgames()) {
+    box.appendChild(endgameRow(p, rec[p.id], { edit: () => editor?.open(p), del: () => askDeleteCustom(p) }));
   }
+}
+
+/** 列表单行；`acts` 有值时为自建残局（右侧多出「编辑 / 删除」两个小按钮） */
+function endgameRow(
+  p: EndgamePuzzle,
+  rec: EndgameRecord | undefined,
+  acts: { edit: () => void; del: () => void } | null,
+): HTMLElement {
+  const status = endgameOutcome(rec);
+  const optimal = isOptimalSteps(rec, p.goalMoves);
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'eg-row';
+
+  const mark = document.createElement('span');
+  mark.className = `eg-mark ${status}${optimal ? ' optimal' : ''}`;
+  mark.textContent = status === 'fail' ? '✗' : '✓';
+  mark.title =
+    status === 'win'
+      ? optimal
+        ? `已完成 · 最优 ${p.goalMoves} 步`
+        : '已完成（未达最优步数）'
+      : status === 'fail'
+        ? '失败'
+        : '未完成';
+
+  const name = document.createElement('span');
+  name.className = 'eg-name';
+  name.textContent = p.name;
+  const level = document.createElement('span');
+  level.className =
+    'eg-level' + (p.level === 'hard' ? ' hard' : '') + (p.level === CUSTOM_LEVEL ? ' custom' : '');
+  level.textContent = LEVEL_LABEL[p.level];
+  const goal = document.createElement('span');
+  goal.className = 'eg-goal';
+  goal.textContent = `最优 ${p.goalMoves} 步`;
+  row.append(mark, name, level, goal);
+  row.addEventListener('click', () => startPuzzle(p));
+  if (!acts) return row;
+
+  const item = document.createElement('div');
+  item.className = 'eg-item';
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'eg-mini';
+  edit.textContent = '✎';
+  edit.title = '编辑这个自建残局';
+  edit.addEventListener('click', acts.edit);
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'eg-mini del';
+  del.textContent = '✕';
+  del.title = '删除这个自建残局';
+  del.addEventListener('click', acts.del);
+  item.append(row, edit, del);
+  return item;
+}
+
+/** 删除自建残局：二次确认，并一并清掉本机对应的通关记录 */
+function askDeleteCustom(p: EndgamePuzzle): void {
+  showModal({
+    title: '删除自建残局',
+    sub: `确定删除「${p.name}」吗？删除后无法恢复，本机对应的通关记录也会清除。`,
+    buttons: [
+      {
+        label: '删　除',
+        primary: true,
+        onClick: () => {
+          writeCustomEndgames(removeCustomEndgame(readCustomEndgames(), p.id));
+          const rest = { ...readEndgameRecord() };
+          delete rest[p.id];
+          writeStore(ENDGAME_KEY, JSON.stringify(rest));
+          renderEndgameList();
+          toast(`已删除「${p.name}」`);
+        },
+      },
+      { label: '取消' },
+    ],
+  });
+}
+
+// -------------------------------------------------------------- 自建残局编辑器
+
+/** 打开自建残局编辑器（新建） */
+function openEndgameEditor(): void {
+  editor?.open(null);
+}
+
+/**
+ * 保存前自动核验未通过：逐条列出问题。
+ * 编辑器保持打开，便于按问题把局面改到合法且能强制取胜。
+ */
+function showCustomProblems(name: string, problems: string[]): void {
+  const body = document.createElement('div');
+  body.className = 'eg-check-list';
+  for (const text of problems) {
+    const row = document.createElement('div');
+    row.className = 'eg-check-row bad';
+    const mark = document.createElement('span');
+    mark.className = 'eg-check-mark';
+    mark.textContent = '✗';
+    const detail = document.createElement('span');
+    detail.className = 'eg-check-detail';
+    detail.textContent = text;
+    row.append(mark, detail);
+    body.appendChild(row);
+  }
+  showModal({
+    title: `「${name}」自动核验未通过`,
+    sub: `共 ${problems.length} 处问题，改好后可再次保存（局面需双方有将、不重叠，且能在 4 步内强制将死对方）`,
+    body,
+    wide: true,
+    buttons: [{ label: '知道了', primary: true }],
+  });
+}
+
+/** 核验通过：自建残局落盘并回到残局面板 */
+function saveCustomEndgame(p: EndgamePuzzle): void {
+  writeCustomEndgames(upsertCustomEndgame(readCustomEndgames(), p));
+  toast(`已保存「${p.name}」：最优 ${p.goalMoves} 步`);
+  backToEndgamePanel();
 }
 
 /** 开始（或重开）一局残局：本地对弈，不依赖服务器 */
@@ -1826,42 +1947,6 @@ function endgameNext(): void {
   const next = nextPuzzle(eg.puzzle.id);
   if (!next) return toast('已经是最后一关了');
   startPuzzle(next);
-}
-
-/** 题库自检：逐条核验（局面合法 / 目标步数内可解 / 步数最少）并展示结果 */
-function checkEndgameBankUI(): void {
-  toast('题库自检中…');
-  // 先让「自检中」绘制出来，再做同步求解（多步杀求解较耗时）
-  window.setTimeout(() => {
-    const results = checkEndgameBank();
-    const bad = results.filter((r) => !r.ok);
-    const body = document.createElement('div');
-    body.className = 'eg-check-list';
-    for (const r of results) {
-      const row = document.createElement('div');
-      row.className = 'eg-check-row' + (r.ok ? '' : ' bad');
-      const mark = document.createElement('span');
-      mark.className = 'eg-check-mark';
-      mark.textContent = r.ok ? '✓' : '✗';
-      const name = document.createElement('span');
-      name.className = 'eg-check-name';
-      name.textContent = `${r.name} · ${LEVEL_LABEL[r.level]}`;
-      const detail = document.createElement('span');
-      detail.className = 'eg-check-detail';
-      detail.textContent = r.ok ? '局面合法 · 目标步数内可解 · 步数最少' : r.problems.join('；');
-      row.append(mark, name, detail);
-      body.appendChild(row);
-    }
-    showModal({
-      title: `题库自检：${results.length} 局`,
-      sub: bad.length
-        ? `${bad.length} 局未通过，详见下表`
-        : '全部通过：局面合法 · 目标步数内可解 · 均为最少步数',
-      body,
-      wide: true,
-      buttons: [{ label: '知道了', primary: true }],
-    });
-  }, 0);
 }
 
 // -------------------------------------------------------------- 账号（可选）
@@ -2437,7 +2522,7 @@ function bindEvents(): void {
   $('btn-ai-start').addEventListener('click', createAiRoom);
   $('btn-endgame').addEventListener('click', openEndgamePanel);
   $('btn-endgame-back').addEventListener('click', backToIndex);
-  $('btn-eg-check').addEventListener('click', checkEndgameBankUI);
+  $('btn-eg-create').addEventListener('click', openEndgameEditor);
   $('btn-acct-back').addEventListener('click', backToIndex);
   $('btn-login').addEventListener('click', () => void doAuth(false));
   $('btn-register').addEventListener('click', () => void doAuth(true));
@@ -2534,6 +2619,7 @@ function bindEvents(): void {
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if ($('modal').classList.contains('show')) return closeModal();
+    if ($('screen-endgame-editor').classList.contains('active')) return backToEndgamePanel();
     if ($('screen-replay').classList.contains('active')) return show('screen-history');
     if ($('screen-history').classList.contains('active')) return show('screen-home');
     clearSelection();
@@ -2564,6 +2650,16 @@ async function init(): Promise<void> {
     myLabel: myPlayerLabel,
     show,
     toast,
+  });
+  editor = initEndgameEditor({
+    skin,
+    images: () => loadedImages[S.skin] ?? {},
+    show,
+    toast,
+    onInvalid: showCustomProblems,
+    onSave: saveCustomEndgame,
+    onCancel: backToEndgamePanel,
+    defaultName: defaultCustomName,
   });
   render();
 

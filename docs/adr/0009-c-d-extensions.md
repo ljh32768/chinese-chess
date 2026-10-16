@@ -1,7 +1,7 @@
 # ADR-0009：C/D 档与 v1.5 扩展模块规格（日志 / 记谱 / AI / 自动发现 / 先手方式 / 对局回顾）
 
-- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战；v2.6 更新 §3.12：残局「下一关」按钮 + 题库自检；v2.7 更新 §3.12：不限步数（将死即胜）+ 列表状态标记）
-- 日期：2026-10-03（v1.5 追加：2026-10-06；v2.5 追加：2026-10-12）
+- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战；v2.6 更新 §3.12：残局「下一关」按钮 + 题库自检；v2.7 更新 §3.12：不限步数（将死即胜）+ 列表状态标记；v2.9 更新 §3.12：自建残局编辑器，保存时自动核验（取消「自检题库」手动入口））
+- 日期：2026-10-03（v1.5 追加：2026-10-06；v2.5 追加：2026-10-12；v2.9 追加：2026-10-15）
 - 关联入口：主机日志、棋谱与吃子、悔棋、观战、人机对战、计时读秒、局域网主机搜索、先手方式与猜先、对局回顾与 AI 推荐、残局挑战
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0004 状态机](./0004-game-state-machine.md)、[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0007 渲染层](./0007-renderer-ui.md)
 
@@ -138,7 +138,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 对局页展示 | [app.ts `updatePanel()`](../../src/renderer/app.ts)：将死且识别到杀法时，状态框显示「红方胜 · 夹车炮杀」，其下渲染杀法框（杀法名 + 定义 + 「同时构成：…」）；联机、观战、本地人机共用同一判定 |
 | 回顾展示 | 列表「胜负」列优先显示记录中的 `killMethod`（旧记录退回「将死」）；复盘页新增「终局杀法」面板，按记录着法即时识别，因此新老记录都能给出具体杀法 |
 
-### 3.12 残局挑战（v2.5；v2.6 追加「下一关」与「自检题库」；v2.7 改为不限步数 + 状态标记）
+### 3.12 残局挑战（v2.5；v2.6 追加「下一关」与「自检题库」；v2.7 改为不限步数 + 状态标记；v2.9 追加「自建残局」编辑器）
 
 | 项 | 规格 |
 |---|---|
@@ -146,7 +146,11 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 题库模块 | 新增 [shared/endgame.ts](../../src/shared/endgame.ts)：纯函数、无 DOM / 网络依赖。`EndgamePuzzle { id, name, level, side, goalMoves, intro, pieces }`，`pieces` 为 `[行, 列, 类型, 阵营]` 列表；`PUZZLES` 共 9 局（入门 5：对面笑 / 卧槽马 / 挂角马 / 重炮 / 双车错；中等 2：借帅封门 / 车马成杀 = 两步杀；困难 2：车炮冷着 / 车马残杀 = 三步杀），均为本项目自建的标准杀法构图 |
 | 求解器 | `canForceMate(board, side, moves)`：我方着法 → 对方**所有**应着 → 递归，判断能否不论对方如何应对都在 moves 步（我方着法数）内取胜；对方无着可走（将死或困毙）即算取胜。`findMateMove(board, side, moves)` 返回一步可强制取胜的着法（无解返回 null）。`minMateDepth(board, side, max)` 返回当前局面**最少**几步可强制取胜（max 步以内无解返回 0），不限步数下用它配合 `findMateMove` 给出「仍能取胜」的最快着法（返回步数即该局面的最优步数）。实现要点：就地试走 + `isAttacked` 还原、置换缓存（棋盘 + 行棋方 + 剩余步数）、对方无着可走与递归两层剪枝；不修改传入棋盘 |
 | 题库校验 | [tests/endgame.test.ts](../../tests/endgame.test.ts) 逐条断言：局面自洽（双方有将、无重叠、玩家先行方未被将军、对方有子可走）、`canForceMate(goalMoves) === true`、`goalMoves` 为最小步数（少一步即不可解）、`findMateMove` 首着合法且走完仍在杀棋之内、非退化（不是「随便走哪儿都赢」） |
-| 题库自检 | [endgame.ts `checkPuzzle(p)` / `checkEndgameBank()`](../../src/shared/endgame.ts) 为纯函数，复用规则引擎 + 求解器逐条核验：局面合法（双方有将 / 无重叠 / 越界 / 步数 ≥ 1）、开局双方均未被将军且均有子可走、目标步数内可强制取胜、步数为最少、求解器能给出正解首着；返回 `PuzzleCheck { id, name, level, ok, solvable, minimal, problems[] }`。界面入口在残局面板底部「自检题库」（`btn-eg-check` → [app.ts `checkEndgameBankUI()`](../../src/renderer/app.ts)），结果以弹层逐条列出通过 / 不通过与问题说明；新增题目可先用它自检再入库 |
+| 局面核验（纯函数） | [endgame.ts `positionProblems()` / `checkPuzzle(p)` / `checkEndgameBank()`](../../src/shared/endgame.ts) 复用规则引擎 + 求解器逐条核验：局面合法（双方有将 / 无重叠 / 越界 / 步数 ≥ 1）、开局双方均未被将军且均有子可走、目标步数内可强制取胜、步数为最少、求解器能给出正解首着；`checkPuzzle` 返回 `PuzzleCheck { id, name, level, ok, solvable, minimal, problems[] }`。**v2.9 起不再有界面入口**：原「自检题库」按钮（`btn-eg-check`）与其结果弹层已移除，改由测试与「自建残局」保存前核验复用 |
+| 自建残局（数据结构） | 难度档新增 `'custom'`（`LEVEL_LABEL.custom = '自建'`，列表徽章 `.eg-level.custom`）；自建残局与内置题目同构（`EndgamePuzzle`，`level = CUSTOM_LEVEL`），只存本机 `localStorage['lanschess-endgame-custom']`。新增纯函数：[`makeCustomEndgame()`](../../src/shared/endgame.ts)（由编辑器状态生成题目）、`parseCustomEndgames()`（损坏数据 / 结构不符的条目丢弃）、`upsertCustomEndgame()` / `removeCustomEndgame()`（均不修改传入数组）、`piecesToBoard()` / `boardToPieces()` / `swapPieceSides()`（棋盘 ↔ 棋子表、红黑互换） |
+| 保存前自动核验 | [`checkCustomEndgame(pieces, side, limit = CUSTOM_CHECK_MAX)`](../../src/shared/endgame.ts)：与题库自检同一套判定（复用 `positionProblems`），只是步数不预设——**在 4 步（`CUSTOM_CHECK_MAX`）以内由 `minMateDepth` 求出最优步数**，返回 `CustomCheck { ok, goalMoves, problems[] }`。不通过（缺将 / 重叠 / 越界 / 先手方被将军 / 对方无子可走 / 上限内无法强制取胜）即逐条列出问题；编辑器保持打开，便于按问题把局面改到合法且能强制取胜 |
+| 自建残局编辑器 | 残局面板底部「自建残局」（`btn-eg-create`）→ 独立切屏 `screen-endgame-editor`，界面参照常见象棋残局编辑器：左侧棋盘（`eg-board`，Canvas 摆子）+ 棋盘下方棋子栏（`eg-pal-red` / `eg-pal-black`：红 車馬相仕帥炮兵、黑 車馬象士將炮卒）+ 右下「红先 / 黑先」（`eg-first-r` / `eg-first-b`）；右侧「局面」面板（`eg-reset` 初始局面 / `eg-clear` 清空 / `eg-swap` 红黑互换）、残局名输入（`eg-name`）与「返 回 / 保 存」（`eg-cancel` / `eg-save`）。交互：先在棋子栏选一颗作画笔（再点一次取消画笔），再点棋盘交叉点落子；右键点棋盘拿走该格棋子；有画笔时悬停给出落点提示。模块 [endgame-editor.ts `initEndgameEditor()`](../../src/renderer/endgame-editor.ts) 只管编辑器自身的 DOM 与状态，切屏 / 落盘 / 弹层由 [app.ts](../../src/renderer/app.ts) 注入（避免循环依赖） |
+| 自建残局落盘与列表 | [app.ts `renderEndgameList()`](../../src/renderer/app.ts)：内置题库在前、自建残局在后，共用同一 `endgameRow()` 行（状态标记 + 名称 + 难度 / 「自建」徽章 + 最优步数）；自建条目右侧多出「编辑（`✎`）/ 删除（`✕`）」两个小按钮（[`askDeleteCustom()`](../../src/renderer/app.ts) 二次确认，并一并清掉本机对应的通关记录）。保存（`saveCustomEndgame()`）通过 `upsertCustomEndgame()` 写入本机存档后回到残局面板；自建残局与内置残局一样可开局、可记通关记录，只是题库中没有下一局（「下一关」按钮隐藏） |
 | 状态机 | [game.ts `setup(board, turn)`](../../src/shared/game.ts)：以自定义局面开局（清空着法 / 悔棋栈 / 待处理请求，标记先行方是否被将军），残局与既有 `applyMove` / `undo` / 终局判定完全复用 |
 | 入口 | 首页木质挂板「残局挑战」（`btn-endgame`，v2.5 由 5 入口改为 6 入口）→ 大面板 `menu-endgame` 列出题库（名称 / 难度徽章 / **最优步数** / **状态标记**），点击任意一条即开局 |
 | 对局页 | 残局用独立操作行 `actions-endgame`：**悔棋**（连同 AI 应招一起回退）、**提示**（不限步数，用 `minMateDepth` 求出当前局面最少取胜步数，再由 `findMateMove` 给出对应着法——棋盘高亮起点 / 终点金环 + 轻提示记谱 + 步数；已走成无法强制取胜则提示重来）、**下一关**（`nextPuzzle` 直接进入题库中的下一局；题库中无下一局时按钮隐藏，已到末关点击提示「已经是最后一关了」）、**重来**（恢复初始局面）、**离开**；隐藏「和棋 / 认输」。侧栏 `eg-box` 显示残局名、难度、**最优步数**、已用步数与本局要点；状态框显示「轮到你走棋（第 x 步）」（不再有步数上限） |
@@ -202,3 +206,8 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
     新增 `minMateDepth` 单测（一步杀为 1、两步杀上限不足为 0、放宽上限仍取最少）与「题库逐局 `minMateDepth(…, 6) === goalMoves`」；本机记录纯函数单测（完成 / 失败 / 未完成、最优步数判定、旧版数字格式兼容、失败不覆盖已通关、取胜清除失败标记、不改动传入对象）；界面接线断言残局判定已无「超出步数」分支、列表/侧栏改为展示最优步数、状态标记类名（`eg-mark` 的 `win` / `fail` / `todo` / `optimal`）齐备。
   - 界面实测（浏览器）：残局列表 9 条，每行左侧为圆形状态标记、右侧显示「最优 N 步」（未通关时为白勾 + 灰圈）；进入残局后侧栏显示「残局：名 · 难度」「最优：N 步」「已用：M 步」，状态框「轮到你走棋（第 x 步）」，角色提示「不限步数 · 最优 N 步」（均无步数上限写法）；「提示」给出当前局面最快取胜着法并标注步数（实测「提示：车九进八（1 步内取胜）」）且棋盘出现金色高亮环；控制台无报错。
     （说明：将死后的列表标记变化属纯前端渲染逻辑，已由自动化用例覆盖；浏览器自动化工具无法点击 Canvas，故本轮未在浏览器内实盘走完整局。）
+- v2.9（自建残局 + 保存时自动核验，2026-10-15）：
+  - 自动化：`npm test`（329 项，含 [tests/endgame.test.ts](../../tests/endgame.test.ts) 45 项）/ `npm run lint` / `npm run format:check` / `npm run build` 全绿；
+    新增 `checkCustomEndgame` 单测（一步 / 两步杀通过并给出最优步数、默认 4 步上限内无杀法即不通过、上限可调、缺将 / 重叠 / 越界 / 后手方已被将死被拦下、不改动传入棋子表）、`makeCustomEndgame` / `parseCustomEndgames` / `upsert` / `remove` 与本机存档解析（损坏数据与结构不符条目丢弃、不修改传入数组）、`boardToPieces` / `piecesToBoard` / `swapPieceSides` 互转单测；界面接线断言编辑器结构（棋盘 / 双排棋子栏 / 红先黑先 / 局面面板 / 保存）、保存时自动核验、自建残局并入列表与编辑 / 删除、以及**原「自检题库」入口已移除**。
+  - 界面实测（浏览器）：残局面板 9 条内置题目 + 底部「自建残局」按钮（面板上已无「自检题库」）；进入编辑器可见棋盘（木质底图）、棋盘下方红黑两排棋子（各 7 颗：車馬相仕帥炮兵 / 車馬象士將炮卒）、右下「红先 / 黑先」、右侧「局面」面板（初始局面 / 清空 / 红黑互换）与残局名输入、「返 回 / 保 存」；「清空」后点「保 存」自动核验并弹出未通过弹层（列出「缺少红帅」「缺少黑将」），关闭后编辑器仍在；「初始局面」可恢复标准开局；「红先 / 黑先」切换高亮正常；「返 回」与 ESC 均回到残局面板；控制台无应用自身报错，`index.html` / `styles.css` / `app.js` / `endgame-editor.js` 与 `assets/img/stype_2/*` 均无 404。
+    （说明：摆子与「合法局面保存成功 → 列表出现「自建」行」这一步需要精确点击 Canvas 交叉点，浏览器自动化工具做不到，故由纯函数单测与界面接线断言覆盖。）
