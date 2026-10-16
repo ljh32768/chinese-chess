@@ -5,8 +5,8 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.10（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 走子动画改为「点击棋子抬起」+ 被吃掉的棋子改为棋盘两侧灰色缩略图 + 自建残局编辑器**；**v2.10 吃子提示：绿环标「可吃掉的对方无根子 / 小换大」，红环标「会被对方吃掉的己方子」**）
-- 状态：v2.10 完成；358 项自动化测试通过，lint / format / build / CI 全绿
+- 版本：v2.11（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 走子动画改为「点击棋子抬起」+ 被吃掉的棋子改为棋盘两侧灰色缩略图 + 自建残局编辑器**；**v2.10 吃子提示：绿环标「可吃掉的对方无根子 / 小换大」，红环标「会被对方吃掉的己方子」**；**v2.11 长将 / 长捉 / 重复局面裁决：新增共享纯模块 `shared/repetition.ts`——同一局面（棋盘布局 + 行棋方）第 3 次出现即裁决：一方每步都是「打」（将 / 捉）而另一方不是则该方判负（长将 / 长捉 / 长打判负），双方都是「打」或都不是则不变作和**）
+- 状态：v2.11 完成；375 项自动化测试通过，lint / format / build / CI 全绿
 - 更新日期：2026-10-16
 
 版本里程碑：
@@ -34,6 +34,7 @@
 | **v2.9** | **吃子展示改造：删除侧栏「红方吃子 / 黑方吃子」文字面板，改为棋盘两侧的三栏结构（左 = 红方所吃 / 右 = 黑方所吃），被吃掉的子以素材缩略图统一置灰（`filter: grayscale(1) opacity(0.55)`）实时摆到棋盘旁；吃子条随棋盘高度拉伸并纵向居中，左右对称保证棋盘居中** | 见 [ADR-0007 §3.5.6](./adr/0007-renderer-ui.md) |
 | **v2.9** | **自建残局：残局面板新增「自建残局」编辑器（新增渲染模块 [endgame-editor.ts](../src/renderer/endgame-editor.ts)：棋盘摆子 + 右侧「局面」面板（初始局面 / 清空 / 红黑互换）+ 棋盘下方棋子栏 + 红先 / 黑先）；保存时**自动核验**（`checkCustomEndgame`：局面合法 + 求解器在 4 步内求出最优步数），不通过则逐条列出问题；自建残局存本机，与内置题库同列表（「自建」徽章 + 编辑 / 删除），通关记录与开局流程完全复用；原「自检题库」手动入口移除** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | **v2.10** | **吃子提示：新增共享纯模块 `shared/tactics.ts`（`captureHints` / `profitableTargets` / `PIECE_VALUE`）——从本端视角算出「可获利吃掉的对方棋子」（无根白吃或小换大）与「会被对方吃掉的己方棋子」；棋盘为前者画绿环、后者画红环（`BoardView.capture`，半径 `disc/2 + 4`）；对局侧栏新增「吃子提示」切换按钮（默认关闭，开启后金色实底强调），结果仅在 `render()` 时重算** | 见 [ADR-0009 §3.13](./adr/0009-c-d-extensions.md) |
+| **v2.11** | **长将 / 长捉 / 重复局面裁决：新增共享纯模块 `shared/repetition.ts`（`positionKey` 局面键、`classifyMove` 每手性质「将 / 捉 / 闲」、`judgeRepetition` 三次重复裁决，复用 `tactics.ts` 的 `profitableTargets` 判定「捉」）；`game.ts` 记录 `posKeys` / `moveNatures` 并在走子后触发裁决，`undo` / `reset` / `setup` 同步回退与清空；恰好一方「长打」→ `长将判负` / `长捉判负` / `长打判负`，双方都长打或都不是 → `重复局面判和`（`GameOverReason` 新增四种文案，终局随 `game_over` 广播与落库）** | 见 [ADR-0002 §3.7](./adr/0002-rules-engine.md)、[ADR-0004 §3.6](./adr/0004-game-state-machine.md) |
 
 ---
 
@@ -181,7 +182,7 @@ main / server-main（进程入口，装配 server 与页面）
 |---|---|---|---|---|
 | 1 | 规则引擎 | 走法生成、送将过滤、将军/将死/困毙判定 | [rules.ts](../src/shared/rules.ts)、[types.ts](../src/shared/types.ts) | [ADR-0002](./adr/0002-rules-engine.md) |
 | 2 | 通信协议 | 客户端/服务端消息定义、编解码、共享数据结构 | [protocol.ts](../src/shared/protocol.ts)、[types.ts](../src/shared/types.ts) | [ADR-0003](./adr/0003-wire-protocol.md)、[ADR-0010](./adr/0010-room-server.md) |
-| 3 | 对局状态机 | 权威棋盘状态、走子校验链、认输/和棋/重开/超时（服务端房间与客户端本地人机共用） | [game.ts](../src/shared/game.ts) | [ADR-0004](./adr/0004-game-state-machine.md) |
+| 3 | 对局状态机 | 权威棋盘状态、走子校验链、认输/和棋/重开/超时、**重复局面裁决触发**（服务端房间与客户端本地人机共用） | [game.ts](../src/shared/game.ts) | [ADR-0004](./adr/0004-game-state-machine.md) |
 | 4 | 中心服务器 | HTTP 静态服务 + API、WebSocket 路由、房间表、空闲回收、局域网 IP 发现 | [server.ts](../src/server/server.ts) | [ADR-0010](./adr/0010-room-server.md) |
 | 5 | 房间 | 席位、先手方式、猜先、断线宽限、读秒、人机对战、终局落库与销毁倒计时 | [room.ts](../src/server/room.ts) | [ADR-0010](./adr/0010-room-server.md) |
 | 6 | 连接对象 | WebSocket 连接与房间 / 角色 / 玩家身份的最小视图 | [conn.ts](../src/server/conn.ts) | [ADR-0010](./adr/0010-room-server.md) |
@@ -194,6 +195,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 13 | 杀法识别 | 将死时判定具体杀法（18 种经典杀法 + 兜底「将死」）、给出杀法名与解说；服务端落库与客户端展示共用 | [checkmate.ts](../src/shared/checkmate.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 | 14 | 残局挑战 | 内置经典杀法题库（9 局，入门 – 困难）+ 强制将死求解器与最快取胜步数 `minMateDepth`；本地对弈（**不限步数，将死即胜**）、提示（最快取胜着法）/ 悔棋 / 下一关 / 重来、最优步数展示、列表状态标记、本机胜负记录；**自建残局**（编辑器摆子 + 保存时自动核验并求出最优步数，与内置题库同列表、可编辑 / 删除，存本机） | [endgame.ts](../src/shared/endgame.ts)、[endgame-editor.ts](../src/renderer/endgame-editor.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 15 | 吃子提示 | 从本端视角算出「可获利吃掉的对方棋子」（无根白吃 / 小换大）与「会被对方吃掉的己方棋子」；棋盘分别画绿环 / 红环，侧栏可一键开关 | [tactics.ts](../src/shared/tactics.ts) | [ADR-0009 §3.13](./adr/0009-c-d-extensions.md) |
+| 16 | 重复局面裁决 | 三次重复局面（棋盘布局 + 行棋方）的长将 / 长捉 / 长打判定与不变作和；局面键 `positionKey`、每手性质「将 / 捉 / 闲」`classifyMove`、裁决 `judgeRepetition` | [repetition.ts](../src/shared/repetition.ts) | [ADR-0002 §3.7](./adr/0002-rules-engine.md) |
 
 ---
 
@@ -218,6 +220,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 复制房间号 | 等待页点击房间号块（`ip-box`） | [app.ts `copyRoomNo()`](../src/renderer/app.ts)（非安全上下文降级 `execCommand`） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 走子（选子/落点/发送） | 点击棋盘 | 联机：[app.ts `onCell()`](../src/renderer/app.ts) → `move` → [room.ts `applyAndBroadcast()`](../src/server/room.ts) → [game.ts `applyMove()`](../src/shared/game.ts)；本地人机：`localMove()` → [shared/game.ts](../src/shared/game.ts) | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
 | 规则裁判（将军/将死/困毙） | 走子后自动判定 | [rules.ts `judgeAfterMove()`](../src/shared/rules.ts)、[`validateMove()`](../src/shared/rules.ts) | [ADR-0002](./adr/0002-rules-engine.md) |
+| 重复局面裁决（长将 / 长捉 / 长打判负 · 不变作和） | 走子后自动判定（同一局面第 3 次出现时触发） | [game.ts `applyMove()`](../src/shared/game.ts)（记录局面键与每手「将 / 捉 / 闲」性质）→ [repetition.ts `positionKey()` / `classifyMove()` / `judgeRepetition()`](../src/shared/repetition.ts)（「捉」复用 [tactics.ts `profitableTargets()`](../src/shared/tactics.ts)）→ 终局广播 `game_over` 并落库 | [ADR-0002 §3.7](./adr/0002-rules-engine.md)、[ADR-0004 §3.6](./adr/0004-game-state-machine.md) |
 | 将军/将死高亮 | 走子后自动 | [board.ts `computeDrawList()`](../src/renderer/board.ts)（被将军一方的将/帅红色脉冲警示环） | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 吃子提示（绿环 = 可吃 / 红环 = 有险） | 对局侧栏「吃子提示」按钮（默认关闭，对局中可开关） | [app.ts `toggleCaptureHint()` / `refreshCaptureHints()`](../src/renderer/app.ts) → [tactics.ts `captureHints()`](../src/shared/tactics.ts)（无根 / 小换大分析）→ [board.ts `computeDrawList()`](../src/renderer/board.ts)（`BoardView.capture` 画绿 / 红环） | [ADR-0009 §3.13](./adr/0009-c-d-extensions.md) |
 | 杀法识别（将死时给出具体杀法名） | 走子致将死时自动 | [checkmate.ts `classifyCheckmate()`](../src/shared/checkmate.ts)（终局棋盘 + 最后一步/吃子 → 杀法名与解说） | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
@@ -264,12 +267,13 @@ Chinese_chess/
 │   │   ├── types.ts       #   数据结构：Side/Piece/Board/PlayerRef/GameRecord/RoomSummary...
 │   │   ├── protocol.ts    #   通信协议：ClientMessage/ServerMessage/encode/decode/isValidPos/OnlinePlayer
 │   │   ├── rules.ts       #   规则引擎：走法/将军/将死/困毙/validateMove
-│   │   ├── game.ts        #   对局状态机：权威棋盘、走子校验、悔棋/超时/终局
+│   │   ├── game.ts        #   对局状态机：权威棋盘、走子校验、悔棋/超时/终局、重复局面裁决触发
 │   │   ├── ai.ts          #   人机引擎：negamax + α-β（服务端 AI 房间与客户端本地人机共用）
 │   │   ├── notation.ts    #   中文记谱：describeMove/describeHistory/capturedPieces
 │   │   ├── checkmate.ts   #   杀法识别：18 种经典杀法匹配（将死时给出具体杀法名与解说）
 │   │   ├── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove/minMateDepth）+ 局面核验（checkPuzzle/checkEndgameBank）+ 自建残局（checkCustomEndgame/makeCustomEndgame/parseCustomEndgames/upsert/remove）
-│   │   └── tactics.ts     #   吃子提示：无根 / 小换大分析（captureHints/profitableTargets/PIECE_VALUE）
+│   │   ├── tactics.ts     #   吃子提示：无根 / 小换大分析（captureHints/profitableTargets/PIECE_VALUE）
+│   │   └── repetition.ts  #   重复局面裁决：局面键 / 每手性质（将·捉·闲）/ 三次重复裁决（positionKey/classifyMove/judgeRepetition）
 │   ├── server/            # 服务端（中心服务器）
 │   │   ├── server.ts      #   服务器：HTTP 静态+API、WS 路由、房间表、在线玩家、邀请、空闲回收、局域网 IP
 │   │   ├── room.ts        #   单局房间：席位/先手/猜先/宽限/读秒/AI 房间/邀请口令豁免/落库/销毁倒计时
@@ -328,7 +332,7 @@ Chinese_chess/
 ## 8. 测试与验收
 
 - 测试命令：`npm test`（vitest run，node 环境）；配套 `npm run lint` 与 `npm run format:check`。
-- 覆盖范围：规则引擎单测、状态机单测（含自定义局面 `setup` / 悔棋 / 终局清理）、棋盘 Canvas 渲染计划与点击命中、中文记谱与吃子统计、
+- 覆盖范围：规则引擎单测、状态机单测（含自定义局面 `setup` / 悔棋 / 终局清理 / **重复局面裁决（长将 / 长捉 / 长打判负与不变作和、悔棋与重开同步回退）**）、棋盘 Canvas 渲染计划与点击命中、中文记谱与吃子统计、
   AI 引擎、**残局题库与强制将死求解器（含最快取胜步数 `minMateDepth`、局面核验 `checkPuzzle` / `checkEndgameBank`、自建残局保存前自动核验 `checkCustomEndgame` 与本机存档解析 / 变更）**、WebSocket 客户端心跳、完整对局端到端回放、服务器连接/消息/房间隔离/口令/宽限重连/观战/人机（含难度）/
   先手方式与猜先/对局回顾与 AI 推荐/计时/静态安全与素材 MIME 集成、账号与记录持久化、局域网 IP 与服务器发现、
   复盘局面还原、主界面布局（署名遮盖 / 放大范围 / 大面板 / **6 入口挂板几何** / v2.4 视觉精修契约 / **v2.9 自建残局编辑器契约**）。
@@ -337,6 +341,7 @@ Chinese_chess/
 |---|---|
 | [rules.test.ts](../tests/rules.test.ts) | 开局棋盘、各棋子走法、将军/照面、将死/困毙、validateMove |
 | [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照、**`setup()` 自定义局面（残局开局）与终局判定** |
+| [repetition.test.ts](../tests/repetition.test.ts) | 重复局面裁决：**局面键（棋盘布局 + 行棋方）**、**每手性质（走子致将军 = 将 / 新出现的得子威胁 = 捉 / 同一子仍被咬 = 闲）**、**三次重复裁决（不足 3 次不裁决 / 长将 / 长捉 / 将捉混合记长打 / 双方长打或双方长闲判和 / 只看最后一次循环）**；**状态机集成（长将、长捉、双方长闲三种循环各自走满 3 次重复后正确终局；第 2 次重复不裁决；悔棋回退重复计数不提前裁决；`reset` / `setup` 清空历史；普通开局不误判）** |
 | [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转、**点击抬起（`liftFrame` 原地升降 / 放大 / 落影、进度越界夹取、翻转、抬起格跳过静态贴图、棋子离场时跳过）、走子动画（一帧几何：抬起高度 / 放大 / 平移 / 落影、`startLifted` 省去起身段、进度越界夹取、翻转、纯函数性、终点格跳过静态贴图）**、**吃子提示环（绿 / 红环的半径 / 颜色 / 坐标 / 翻转，未开启不画环）** |
 | [banner.test.ts](../tests/banner.test.ts) | 棋盘正中提示条：**18 种杀法各有图案样式（pattern 与杀法 id 一致、强调色唯一、五种底纹齐备）**、将军样式独立、未知杀法回退兜底、样式表覆盖全部杀法 id、将军 / 绝杀内容组装（缺省退到「将死」与兜底图案） |
 | [checkmate.test.ts](../tests/checkmate.test.ts) | 杀法识别：18 种杀法各构造一个终局局面（先用规则引擎确认确为将死，再断言杀法名）、未匹配时兜底「将死」、红黑双方对称、同时成立的杀法进 `alsoMatched`、`capturedPieceAt` 推导吃子、杀法库条目唯一 |

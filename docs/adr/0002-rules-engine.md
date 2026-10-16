@@ -1,4 +1,4 @@
-# ADR-0002：规则引擎模块规格（shared/rules.ts + shared/types.ts）
+# ADR-0002：规则引擎模块规格（shared/rules.ts + shared/types.ts + shared/repetition.ts）
 
 - 状态：已接受（记录现状实现）
 - 日期：2026-10-03
@@ -85,8 +85,32 @@
 
 ### 3.6 明确不做（MVP 范围外）
 
-长将、长捉、重复局面、自然限着、悔棋、计时读秒。加入这些规则时只扩展 `rules.ts` 与 `judgeAfterMove`，
-不改变本模块的纯函数边界。
+自然限着、悔棋、计时读秒。**长将、长捉、重复局面已在 v2.11 落地**，见 §3.7——它们扩展在
+`shared/repetition.ts`（与规则引擎同层的纯模块），未改变 §3.1–§3.5 的纯函数边界。
+
+### 3.7 重复局面裁决（`shared/repetition.ts`，v2.11）
+
+长将 / 长捉 / 三次重复**没有**直接写进 `rules.ts`：`rules.ts` 不得依赖 `tactics.ts`
+（反过来 `tactics.ts` 依赖 `rules.ts`），因此判定放在与规则引擎同层的独立纯模块 `repetition.ts`，
+它同时复用 `rules.ts`（`isInCheck`）与 `tactics.ts`（`profitableTargets`）；触发时机与终局结算仍由
+[ADR-0004 对局状态机](./0004-game-state-machine.md) 的 `Game` 负责。
+
+| 项 | 规格 |
+|---|---|
+| 三次重复 `REPETITION_TIMES` | 同一局面（棋盘布局 + 行棋方**完全一致**）第 3 次出现即触发裁决 |
+| 局面键 `positionKey(board, turn)` | 90 格逐格序列化（有子记 `side+type`，空格记 `.`）后拼接行棋方 |
+| 每手性质 `classifyMove(before, after, mover)` | `check`（走子后对方被将军，**优先**）→ `chase` → `idle` |
+| 「捉」`chase` | 走子后**新出现**「可获利吃掉的对方棋子」（复用 `profitableTargets`：无根白吃 / 小换大），即这一步制造了新的得子威胁；若同一子走子前就已被咬住则不算新捉 |
+| 「闲」`idle` | 非将非捉（含兑子、拦、跟等官方规则中不算「打」的走法） |
+| 长打 | 重复循环内某方**每一步**都是「将」或「捉」 |
+| 裁决 `judgeRepetition(history)` | 恰好一方长打 → 该方判负；双方都长打或都不是 → 不变作和 |
+
+裁决只看**最后一次**重复循环（自该局面第 2 次出现起）内各方的每手性质，更早的循环不影响当前结论。
+判负文案按长打方的性质细分：全为将 → `长将判负`，全为捉 → `长捉判负`，将捉混合 → `长打判负`；
+判和统一为 `重复局面判和`。
+
+> 与官方规则的差异（本项目的可测试取舍）：不实现自然限着；「捉」只按「一手得子威胁」判定，
+> 不细分官方规则里的兑 / 献 / 拦 / 跟等例外（这些走法在此记作「闲」）。
 
 ## 4. 代码入口
 
@@ -100,8 +124,11 @@
 | 合法走法过滤 `legalMoves` | [rules.ts](../../src/shared/rules.ts#L251-L263) |
 | 终局判定 `judgeAfterMove` | [rules.ts](../../src/shared/rules.ts#L299-L307) |
 | 权威校验 `validateMove` | [rules.ts](../../src/shared/rules.ts#L313-L330) |
+| 局面键 `positionKey` | [repetition.ts](../../src/shared/repetition.ts#L47-L60) |
+| 每手性质 `classifyMove` | [repetition.ts](../../src/shared/repetition.ts#L62-L75) |
+| 重复局面裁决 `judgeRepetition` | [repetition.ts](../../src/shared/repetition.ts#L82-L116) |
 
-调用方：主机 [game.ts `applyMove()`](../../src/shared/game.ts#L60-L82)、
+调用方：主机 [game.ts `applyMove()`](../../src/shared/game.ts#L102-L146)（记录局面键 / 每手性质并触发裁决）、
 客户端落点提示 [app.ts `onCell()`](../../src/renderer/app.ts#L449-L481)。
 
 ## 5. 验收标准
@@ -111,3 +138,5 @@
 - 对脸局面被判定为非法（`legalMoves` 过滤）且可检测为将军。
 - 将死返回 `{ winner: 对方, reason: '将死' }`；困毙返回 `{ winner: 对方, reason: '困毙' }`。
 - `validateMove` 六类拒绝原因逐一可复现。
+- 局面键只由棋盘布局与行棋方决定；每手性质可区分将 / 捉 / 闲（含「同一子仍被咬住不算新捉」）；
+  三次重复裁决可区分长将 / 长捉 / 长打 / 双方长打 / 双方长闲（[repetition.test.ts](../../tests/repetition.test.ts)）。
