@@ -7,6 +7,7 @@
  */
 
 import { Board, Piece, PieceType, Pos, Side } from '../shared/types.js';
+import type { CaptureHints } from '../shared/tactics.js';
 
 /** 皮肤标识（与参考项目 stype1/2/3 对应） */
 export type SkinId = 'stype1' | 'stype2' | 'stype3';
@@ -107,6 +108,10 @@ export const PIECE_IMG: Record<PieceType, string> = {
 /** 提示点贴图相对交叉点的偏移（参考项目固定 +10） */
 const DOT_OFFSET = 10;
 
+/** 吃子提示环配色：绿 = 可吃的对方棋子，红 = 会被吃的己方棋子 */
+export const HINT_TARGET_COLOR = '#2f9e44';
+export const HINT_THREAT_COLOR = '#d64545';
+
 /** 单套皮肤需要预加载的素材键 */
 export const IMAGE_KEYS: readonly string[] = [
   'bg',
@@ -176,6 +181,8 @@ export interface BoardView {
   hover?: Pos | null;
   /** AI 推荐着法（复盘用）：起点细金环 + 终点粗金环 */
   hint?: { from: Pos; to: Pos } | null;
+  /** 吃子提示（可选）：绿色环 = 可吃的对方棋子（无根 / 小换大），红色环 = 会被吃的己方棋子 */
+  capture?: CaptureHints | null;
 }
 
 /** 交叉点的贴图起点（视图坐标）：`space*坐标 + pointStart`，可再叠加固定偏移 */
@@ -410,6 +417,20 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
     if (!v.board[pos[0]][pos[1]]) continue;
     const { x, y } = center(pos);
     ops.push({ ring: true, cx: x, cy: y, radius: skin.disc / 2 + 2, color: '#c0392b', width: 3, alpha: 0.9 });
+  }
+
+  // 吃子提示（可选）：绿色 = 可吃的对方棋子（无根 / 小换大），红色 = 会被吃的己方棋子
+  if (v.capture) {
+    const ringRadius = skin.disc / 2 + 4;
+    for (const [kind, color] of [
+      ['targets', HINT_TARGET_COLOR],
+      ['threats', HINT_THREAT_COLOR],
+    ] as [keyof CaptureHints, string][]) {
+      for (const pos of v.capture[kind]) {
+        const { x, y } = center(pos);
+        ops.push({ ring: true, cx: x, cy: y, radius: ringRadius, color, width: 3, alpha: 0.9 });
+      }
+    }
   }
 
   // 将军 / 将死：将帅红色脉冲警示环

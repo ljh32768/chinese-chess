@@ -410,6 +410,26 @@ body::before {
 }
 #btn-invite:hover { border-color: var(--accent); color: var(--gold-bright); transform: translateY(-1px); }
 
+/* 对局面板内的「吃子提示」切换按钮：开启时金色实底强调（绿环可吃 / 红环有险） */
+#btn-hint {
+  padding: 9px 10px;
+  font: 500 13px/1.4 inherit;
+  color: var(--gold);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease),
+    background 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+#btn-hint:hover { border-color: var(--accent); color: var(--gold-bright); transform: translateY(-1px); }
+#btn-hint.on {
+  color: #5b3a12;
+  background: linear-gradient(180deg, #f7e3bd, #e2c288);
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
 /* ---------- 通用按钮（弹层 / 面板内小按钮） ---------- */
 .btn {
   appearance: none;
@@ -439,6 +459,7 @@ body::before {
 .eg-row:focus-visible,
 .review_row:focus-visible,
 #btn-invite:focus-visible,
+#btn-hint:focus-visible,
 .panel-lg input:focus-visible,
 .panel-lg select:focus-visible {
   outline: none;
@@ -1108,7 +1129,7 @@ body::before {
   .game-layout { gap: 12px; }
   .panel { flex: 1 1 100%; min-width: 0; flex-direction: row; flex-wrap: wrap; }
   .player-row { flex: 1 1 45%; }
-  .status-box, .req-hint, .panel-box, .role-hint, .kill-box { flex: 1 1 100%; }
+  .status-box, .req-hint, .panel-box, .role-hint, .kill-box, #btn-hint { flex: 1 1 100%; }
   #board { max-height: calc(100vh - 260px); }
   /* 自建残局编辑器：面板移到棋盘下方，棋盘再收一档 */
   .editor-layout { gap: 12px; }

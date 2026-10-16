@@ -5,9 +5,9 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.9（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 走子动画改为「点击棋子抬起」+ 被吃掉的棋子改为棋盘两侧灰色缩略图 + 自建残局编辑器**）
-- 状态：v2.9 完成；340 项自动化测试通过，lint / format / build / CI 全绿
-- 更新日期：2026-10-15
+- 版本：v2.10（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 走子动画改为「点击棋子抬起」+ 被吃掉的棋子改为棋盘两侧灰色缩略图 + 自建残局编辑器**；**v2.10 吃子提示：绿环标「可吃掉的对方无根子 / 小换大」，红环标「会被对方吃掉的己方子」**）
+- 状态：v2.10 完成；358 项自动化测试通过，lint / format / build / CI 全绿
+- 更新日期：2026-10-16
 
 版本里程碑：
 
@@ -33,6 +33,7 @@
 | **v2.9** | **走子动画改为「点击棋子抬起」：新增 `board.ts liftFrame()` 与 `BoardView.lifts`（原地升起 / 落下，抬高 + 放大 + 落影），`app.ts liftPiece()` / `lowerAllLifts()` 绑定选中与取消（同一时刻只抬起一枚，`LIFT_MS = 200ms`）；走子时该子已在抬起态，`animateMove(from, to, startLifted)` 直接从平移开始、落点再放下（对手 / AI 走子仍是完整三段）；联机点击落点后保持抬起等待服务器确认，被拒则落回；抬起与走子共用一条 rAF 帧循环，保持抬起时停帧不空转；`prefers-reduced-motion` 下不做抬起动画（选中仍以压暗 + 落点框表达）** | 见 [ADR-0007 §3.5.5](./adr/0007-renderer-ui.md) |
 | **v2.9** | **吃子展示改造：删除侧栏「红方吃子 / 黑方吃子」文字面板，改为棋盘两侧的三栏结构（左 = 红方所吃 / 右 = 黑方所吃），被吃掉的子以素材缩略图统一置灰（`filter: grayscale(1) opacity(0.55)`）实时摆到棋盘旁；吃子条随棋盘高度拉伸并纵向居中，左右对称保证棋盘居中** | 见 [ADR-0007 §3.5.6](./adr/0007-renderer-ui.md) |
 | **v2.9** | **自建残局：残局面板新增「自建残局」编辑器（新增渲染模块 [endgame-editor.ts](../src/renderer/endgame-editor.ts)：棋盘摆子 + 右侧「局面」面板（初始局面 / 清空 / 红黑互换）+ 棋盘下方棋子栏 + 红先 / 黑先）；保存时**自动核验**（`checkCustomEndgame`：局面合法 + 求解器在 4 步内求出最优步数），不通过则逐条列出问题；自建残局存本机，与内置题库同列表（「自建」徽章 + 编辑 / 删除），通关记录与开局流程完全复用；原「自检题库」手动入口移除** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| **v2.10** | **吃子提示：新增共享纯模块 `shared/tactics.ts`（`captureHints` / `profitableTargets` / `PIECE_VALUE`）——从本端视角算出「可获利吃掉的对方棋子」（无根白吃或小换大）与「会被对方吃掉的己方棋子」；棋盘为前者画绿环、后者画红环（`BoardView.capture`，半径 `disc/2 + 4`）；对局侧栏新增「吃子提示」切换按钮（默认关闭，开启后金色实底强调），结果仅在 `render()` 时重算** | 见 [ADR-0009 §3.13](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -192,6 +193,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 12 | 记谱 / AI / 日志 | 中文记谱与吃子、negamax + α-β 搜索（服务端 AI 房间与客户端本地人机共用）、`LANSCHESS_DEBUG` 日志 | [notation.ts](../src/shared/notation.ts)、[ai.ts](../src/shared/ai.ts)、[log.ts](../src/server/log.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 13 | 杀法识别 | 将死时判定具体杀法（18 种经典杀法 + 兜底「将死」）、给出杀法名与解说；服务端落库与客户端展示共用 | [checkmate.ts](../src/shared/checkmate.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 | 14 | 残局挑战 | 内置经典杀法题库（9 局，入门 – 困难）+ 强制将死求解器与最快取胜步数 `minMateDepth`；本地对弈（**不限步数，将死即胜**）、提示（最快取胜着法）/ 悔棋 / 下一关 / 重来、最优步数展示、列表状态标记、本机胜负记录；**自建残局**（编辑器摆子 + 保存时自动核验并求出最优步数，与内置题库同列表、可编辑 / 删除，存本机） | [endgame.ts](../src/shared/endgame.ts)、[endgame-editor.ts](../src/renderer/endgame-editor.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 15 | 吃子提示 | 从本端视角算出「可获利吃掉的对方棋子」（无根白吃 / 小换大）与「会被对方吃掉的己方棋子」；棋盘分别画绿环 / 红环，侧栏可一键开关 | [tactics.ts](../src/shared/tactics.ts) | [ADR-0009 §3.13](./adr/0009-c-d-extensions.md) |
 
 ---
 
@@ -217,6 +219,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 走子（选子/落点/发送） | 点击棋盘 | 联机：[app.ts `onCell()`](../src/renderer/app.ts) → `move` → [room.ts `applyAndBroadcast()`](../src/server/room.ts) → [game.ts `applyMove()`](../src/shared/game.ts)；本地人机：`localMove()` → [shared/game.ts](../src/shared/game.ts) | [ADR-0002](./adr/0002-rules-engine.md)、[ADR-0004](./adr/0004-game-state-machine.md) |
 | 规则裁判（将军/将死/困毙） | 走子后自动判定 | [rules.ts `judgeAfterMove()`](../src/shared/rules.ts)、[`validateMove()`](../src/shared/rules.ts) | [ADR-0002](./adr/0002-rules-engine.md) |
 | 将军/将死高亮 | 走子后自动 | [board.ts `computeDrawList()`](../src/renderer/board.ts)（被将军一方的将/帅红色脉冲警示环） | [ADR-0007](./adr/0007-renderer-ui.md) |
+| 吃子提示（绿环 = 可吃 / 红环 = 有险） | 对局侧栏「吃子提示」按钮（默认关闭，对局中可开关） | [app.ts `toggleCaptureHint()` / `refreshCaptureHints()`](../src/renderer/app.ts) → [tactics.ts `captureHints()`](../src/shared/tactics.ts)（无根 / 小换大分析）→ [board.ts `computeDrawList()`](../src/renderer/board.ts)（`BoardView.capture` 画绿 / 红环） | [ADR-0009 §3.13](./adr/0009-c-d-extensions.md) |
 | 杀法识别（将死时给出具体杀法名） | 走子致将死时自动 | [checkmate.ts `classifyCheckmate()`](../src/shared/checkmate.ts)（终局棋盘 + 最后一步/吃子 → 杀法名与解说） | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 | 终局杀法展示（对局页 / 观战 / 本地人机） | 终局后右侧面板 | [app.ts `mateInfo()` / `updatePanel()`](../src/renderer/app.ts)（状态框显示「红方胜 · 夹车炮杀」，其下渲染杀法框：杀法名 + 定义 + 同时构成） | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 | 终局杀法展示（对局回顾 / 复盘） | 回顾列表「胜负」列、复盘页「终局杀法」面板 | 落库：[room.ts `saveRecord()`](../src/server/room.ts) → `killMethod` → [history.ts `toSummary()`](../src/server/history.ts)；展示：[review.ts `resultText()` / `mateOf()`](../src/renderer/review.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
@@ -265,7 +268,8 @@ Chinese_chess/
 │   │   ├── ai.ts          #   人机引擎：negamax + α-β（服务端 AI 房间与客户端本地人机共用）
 │   │   ├── notation.ts    #   中文记谱：describeMove/describeHistory/capturedPieces
 │   │   ├── checkmate.ts   #   杀法识别：18 种经典杀法匹配（将死时给出具体杀法名与解说）
-│   │   └── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove/minMateDepth）+ 局面核验（checkPuzzle/checkEndgameBank）+ 自建残局（checkCustomEndgame/makeCustomEndgame/parseCustomEndgames/upsert/remove）
+│   │   ├── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove/minMateDepth）+ 局面核验（checkPuzzle/checkEndgameBank）+ 自建残局（checkCustomEndgame/makeCustomEndgame/parseCustomEndgames/upsert/remove）
+│   │   └── tactics.ts     #   吃子提示：无根 / 小换大分析（captureHints/profitableTargets/PIECE_VALUE）
 │   ├── server/            # 服务端（中心服务器）
 │   │   ├── server.ts      #   服务器：HTTP 静态+API、WS 路由、房间表、在线玩家、邀请、空闲回收、局域网 IP
 │   │   ├── room.ts        #   单局房间：席位/先手/猜先/宽限/读秒/AI 房间/邀请口令豁免/落库/销毁倒计时
@@ -333,12 +337,13 @@ Chinese_chess/
 |---|---|
 | [rules.test.ts](../tests/rules.test.ts) | 开局棋盘、各棋子走法、将军/照面、将死/困毙、validateMove |
 | [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照、**`setup()` 自定义局面（残局开局）与终局判定** |
-| [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转、**点击抬起（`liftFrame` 原地升降 / 放大 / 落影、进度越界夹取、翻转、抬起格跳过静态贴图、棋子离场时跳过）、走子动画（一帧几何：抬起高度 / 放大 / 平移 / 落影、`startLifted` 省去起身段、进度越界夹取、翻转、纯函数性、终点格跳过静态贴图）** |
+| [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转、**点击抬起（`liftFrame` 原地升降 / 放大 / 落影、进度越界夹取、翻转、抬起格跳过静态贴图、棋子离场时跳过）、走子动画（一帧几何：抬起高度 / 放大 / 平移 / 落影、`startLifted` 省去起身段、进度越界夹取、翻转、纯函数性、终点格跳过静态贴图）**、**吃子提示环（绿 / 红环的半径 / 颜色 / 坐标 / 翻转，未开启不画环）** |
 | [banner.test.ts](../tests/banner.test.ts) | 棋盘正中提示条：**18 种杀法各有图案样式（pattern 与杀法 id 一致、强调色唯一、五种底纹齐备）**、将军样式独立、未知杀法回退兜底、样式表覆盖全部杀法 id、将军 / 绝杀内容组装（缺省退到「将死」与兜底图案） |
 | [checkmate.test.ts](../tests/checkmate.test.ts) | 杀法识别：18 种杀法各构造一个终局局面（先用规则引擎确认确为将死，再断言杀法名）、未匹配时兜底「将死」、红黑双方对称、同时成立的杀法进 `alsoMatched`、`capturedPieceAt` 推导吃子、杀法库条目唯一 |
 | [endgame.test.ts](../tests/endgame.test.ts) | 残局挑战：题库自洽（id 唯一、难度有序、棋子不重叠、双方有将、对方有子可走）、**9 局逐条由求解器验证「目标步数内可强制取胜且步数最少」**、正解首着合法且走完仍在杀棋内、非退化（不是随便走都赢）；**局面核验（内置题库逐条通过，能否抓出缺将/越界/重叠/不可解/非最少步数/后手已被将死，且不改动传入题目）**；求解器语义（一步杀 / 多步杀 / **困毙同将死** / **`minMateDepth` 最快取胜步数（含题库逐局 = `goalMoves`）** / 不改动传入棋盘 / 黑方对称）；**自建残局（保存前自动核验：一步/两步杀通过并给出最优步数、上限内无杀法即不通过、上限可调、缺将/重叠/越界/后手已被将死拦下、不改动传入棋子表；题目构造 `makeCustomEndgame` 等级固定「自建」；本机存档解析丢弃损坏与结构不符条目、新增 / 同 id 覆盖 / 删除且不改动传入数组；棋盘↔棋子表互转与红黑互换）**；**本机记录（完成/失败/未完成、最优步数判定、旧版数字格式兼容、失败不覆盖已通关、取胜清除失败标记、纯函数不改动传入对象）**；界面接线（首页 6 入口、残局面板、残局操作行与信息块、**不限步数（无「超出步数」判负）**、**列表状态标记（绿勾/红叉/白勾 + 绿/灰外圈）**、**「下一关」按钮与最后一关隐藏**、**自建残局入口与编辑器结构（棋盘 / 棋子栏 / 红先黑先 / 局面面板）、保存时自动核验、编辑器并入列表与编辑 / 删除**、**既有「自检题库」手动入口已移除**、**多步残局继续调度 AI 应招**、列表与样式契约） |
 | [review.test.ts](../tests/review.test.ts) | 复盘局面还原与越界收敛、行棋方交替、列表文案（玩家名/取先方式/时间/胜负）、**结果文案优先显示杀法名（killMethod）**、**复盘按着法即时识别杀法（mateOf）**、**列表请求路径 `historyUrl`（全部 / 我的历史 + URL 编码）** |
 | [notation.test.ts](../tests/notation.test.ts) | 中文记谱（平/进/退/前后消歧/斜走目标列）、describeHistory 回放、capturedPieces 吃子统计 |
+| [tactics.test.ts](../tests/tactics.test.ts) | 吃子提示分析：开局无提示、**无根白吃**、**有根小换大**、等价交换不提示、**炮的「有根」判定（无炮架不算根 / 有炮架算根）**、将帅不参与提示、红黑对称（红方 threats = 黑方 targets）、纯函数性 |
 | [ai.test.ts](../tests/ai.test.ts) | 一步杀、白吃子、无着法返回 null、开局着法合法与耗时 |
 | [net.test.ts](../tests/net.test.ts) | 连接建立与消息分发、pong 内部消化、心跳 5s、16s 无 pong 判离线、主动关闭不提示 |
 | [fullgame.test.ts](../tests/fullgame.test.ts) | 完整一盘棋 WS 回放：双方棋盘一致、seq 单调、history 一致、`game_over`「将死」、**对局记录带识别出的杀法名（killMethod）**、重开 |
@@ -347,7 +352,7 @@ Chinese_chess/
 | [discover.test.ts](../tests/discover.test.ts) | 服务器探测、无服务端口返回 null、网段扫描聚合去重与进度 |
 | [servers.test.ts](../tests/servers.test.ts) | 服务器地址解析、网段推导、服务器键、页面地址回退与「浏览器 / 桌面客户端」判定 |
 | [lan-ip.test.ts](../tests/lan-ip.test.ts) | pickLanIp 网段优先级与虚拟网卡跳过 |
-| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构（**6 个入口：43×6 + 6 = 264 铺满内框，按钮素材等比缩放与悬停偏移**）、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）**、**v2.8 走子动画与正中提示条契约（`board-stage` 结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减少动态效果仍可见 / app.ts 接线）**、**v2.9 点击抬起契约（抬起帧与 `lifts` / 点击选中即抬起 / 取消落回 / 走子从抬起态直接平移 / 联机等待确认期间保持抬起）**、**v2.9 被吃掉的棋子展示契约（侧栏文字面板与其样式已删除 / 两侧吃子条三栏居中 / 缩略图置灰 / app.ts 素材渲染且不再有文字映射）** |
+| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构（**6 个入口：43×6 + 6 = 264 铺满内框，按钮素材等比缩放与悬停偏移**）、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）**、**v2.8 走子动画与正中提示条契约（`board-stage` 结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减少动态效果仍可见 / app.ts 接线）**、**v2.9 点击抬起契约（抬起帧与 `lifts` / 点击选中即抬起 / 取消落回 / 走子从抬起态直接平移 / 联机等待确认期间保持抬起）**、**v2.9 被吃掉的棋子展示契约（侧栏文字面板与其样式已删除 / 两侧吃子条三栏居中 / 缩略图置灰 / app.ts 素材渲染且不再有文字映射）**、**v2.10 吃子提示契约（`btn-hint` 按钮结构 / 默认关闭与按压态 / 开启态金色实底与焦点环 / `app.ts` 接线）** |
 
 验收标准见 [Product-plan.md 第 14 节](./Product-plan.md)、[ADR-0008](./adr/0008-testing-strategy.md)
 与 [ADR-0010 §6](./adr/0010-room-server.md)。

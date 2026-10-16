@@ -7,6 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SKIN,
+  HINT_TARGET_COLOR,
+  HINT_THREAT_COLOR,
   IMAGE_KEYS,
   SKINS,
   SKIN_IDS,
@@ -251,6 +253,55 @@ describe('绘制计划 computeDrawList', () => {
     const ops = computeDrawList(view({ hint: { from: [9, 0], to: [3, 0] } }), skin2);
     expect(findImage(ops, 'dot')).toHaveLength(0);
     expect(rings(ops).filter((r) => r.color === '#f0b429')).toHaveLength(2);
+  });
+});
+
+describe('吃子提示环（BoardView.capture）', () => {
+  it('绿色环标记可吃的对方棋子、红色环标记会被吃的己方棋子', () => {
+    const ops = computeDrawList(view({ capture: { targets: [[3, 0]], threats: [[6, 0]] } }), skin2);
+    const green = rings(ops).filter((r) => r.color === HINT_TARGET_COLOR);
+    const red = rings(ops).filter((r) => r.color === HINT_THREAT_COLOR);
+    // 半径 = 圆盘直径 / 2 + 4；贴图中心 = 57*列 + 30.5 / 57*行 + 29
+    expect(green).toEqual([
+      { ring: true, cx: 30.5, cy: 200, radius: 27.5, color: HINT_TARGET_COLOR, width: 3, alpha: 0.9 },
+    ]);
+    expect(red).toEqual([
+      { ring: true, cx: 30.5, cy: 371, radius: 27.5, color: HINT_THREAT_COLOR, width: 3, alpha: 0.9 },
+    ]);
+  });
+
+  it('多枚棋子 / 双方分别标记时不遗漏（每点一个环）', () => {
+    const ops = computeDrawList(
+      view({
+        capture: {
+          targets: [
+            [3, 0],
+            [7, 2],
+          ],
+          threats: [[6, 0]],
+        },
+      }),
+      skin2,
+    );
+    expect(rings(ops).filter((r) => r.color === HINT_TARGET_COLOR)).toEqual([
+      { ring: true, cx: 30.5, cy: 200, radius: 27.5, color: HINT_TARGET_COLOR, width: 3, alpha: 0.9 },
+      { ring: true, cx: 144.5, cy: 428, radius: 27.5, color: HINT_TARGET_COLOR, width: 3, alpha: 0.9 },
+    ]);
+    expect(rings(ops).filter((r) => r.color === HINT_THREAT_COLOR)).toHaveLength(1);
+  });
+
+  it('黑方视角翻转后提示环坐标随之翻转', () => {
+    const ops = computeDrawList(view({ flip: true, capture: { targets: [[3, 0]], threats: [] } }), skin2);
+    // 逻辑 [3,0] → 视图 [6,8]：cx = 57*8 + 30.5 = 486.5，cy = 57*6 + 29 = 371
+    expect(rings(ops).filter((r) => r.color === HINT_TARGET_COLOR)).toEqual([
+      { ring: true, cx: 486.5, cy: 371, radius: 27.5, color: HINT_TARGET_COLOR, width: 3, alpha: 0.9 },
+    ]);
+  });
+
+  it('未开启提示（capture 省略 / null）时不画任何提示环', () => {
+    const off = rings(computeDrawList(view({ capture: null }), skin2));
+    expect(off.some((r) => r.color === HINT_TARGET_COLOR || r.color === HINT_THREAT_COLOR)).toBe(false);
+    expect(rings(computeDrawList(view(), skin2)).length).toBe(0);
   });
 });
 
