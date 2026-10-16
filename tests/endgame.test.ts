@@ -45,10 +45,12 @@ import { isInCheck, legalMoves, makeMove, sideHasAnyMove } from '../src/shared/r
 import { Board, Cell, Move, PieceType, Side } from '../src/shared/types.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const HTML = readFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), 'utf8');
-const CSS = readFileSync(path.join(ROOT, 'src', 'renderer', 'styles.css'), 'utf8');
-const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8');
-const EDITOR = readFileSync(path.join(ROOT, 'src', 'renderer', 'endgame-editor.ts'), 'utf8');
+/** 读源码文件并统一换行为 LF（Windows 检出为 CRLF 时也能按 \n 断言） */
+const read = (p: string): string => readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
+const HTML = read('src/renderer/index.html');
+const CSS = read('src/renderer/styles.css');
+const APP = read('src/renderer/app.ts');
+const EDITOR = read('src/renderer/endgame-editor.ts');
 
 const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
 

@@ -1,8 +1,9 @@
 /**
- * 棋盘正中提示条（将军 / 绝杀）的内容与图案样式。
+ * 棋盘正中提示（将军 / 绝杀黑色大圆）的内容与样式。
  *
- * 「绝杀的各种方式」= 每一种杀法一套图案样式（底纹 motif + 强调色 accent + 徽记 emblem），
- * 配置见 `STYLES`（键为 `shared/checkmate.ts` 的杀法 id）；将军未成杀时用固定的警示样式。
+ * 主标题固定「将军」（白字）/「绝杀」（红字）；每种杀法一套强调色（accent），
+ * 供圆环描边与副标题着色，配置见 `STYLES`（键为 `shared/checkmate.ts` 的杀法 id）；
+ * 将军未成杀时用固定的警示样式 `CHECK_STYLE`。`motif / emblem` 为保留数据（黑色大圆不铺底纹）。
  *
  * 纯数据、无 DOM 依赖，便于单测；app.ts 负责写入 DOM 并触发 1.5s 渐入渐出动画。
  */
@@ -64,22 +65,22 @@ export function bannerStyle(patternId: string): BannerStyle {
 /** 已被收录图案样式的杀法 id（含将军与兜底） */
 export const BANNER_PATTERN_IDS: readonly string[] = Object.keys(STYLES);
 
-/** 中央提示条内容 */
+/** 中央提示（黑色大圆）内容 */
 export interface BannerContent {
   kind: BannerKind;
-  /** 主标题（将军 / 具体杀法展示名） */
+  /** 主标题（固定「将军」/「绝杀」） */
   name: string;
-  /** 副标题（哪一方被将军 / 哪一方绝杀） */
+  /** 副标题（哪一方被将军 / 具体杀法名 + 哪一方绝杀） */
   sub: string;
   style: BannerStyle;
 }
 
 /**
- * 组装提示条内容。
+ * 组装提示内容。
  * @param kind        check 将军 / mate 绝杀
- * @param opts.label  绝杀时的杀法展示名（如「马后炮杀」），缺省「将死」
- * @param opts.patternId 杀法 id（决定图案样式），缺省回退 generic
- * @param opts.sub    副标题
+ * @param opts.label  绝杀时的杀法展示名（如「马后炮杀」），用作副标题兜底（缺省「绝杀」）
+ * @param opts.patternId 杀法 id（决定强调色），缺省回退 generic
+ * @param opts.sub    副标题（调用方通常给出「马后炮杀 · 红方绝杀」）
  */
 export function bannerContent(
   kind: BannerKind,
@@ -88,10 +89,11 @@ export function bannerContent(
   if (kind === 'check') {
     return { kind, name: '将军', sub: opts.sub ?? '应将', style: CHECK_STYLE };
   }
+  // 主标题固定「绝杀」；具体杀法名保留在副标题里（见 ADR-0007 §3.5.7）
   return {
     kind,
-    name: opts.label ?? '将死',
-    sub: opts.sub ?? '绝杀',
+    name: '绝杀',
+    sub: opts.sub ?? opts.label ?? '绝杀',
     style: bannerStyle(opts.patternId ?? 'generic'),
   };
 }
