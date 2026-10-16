@@ -139,6 +139,11 @@ export type ServerMessage =
       history: Move[];
       /** 本回合截止时间（epoch ms）；null 表示不限时 */
       deadline: number | null;
+      /** 揭棋：对局变体（标准对局省略） */
+      variant?: GameSnapshot['variant'];
+      /** 揭棋：双方吃子记录（含被吃暗子翻开后的真实身份） */
+      capturedByRed?: GameSnapshot['capturedByRed'];
+      capturedByBlack?: GameSnapshot['capturedByBlack'];
     }
   /** 走子被拒绝 */
   | { type: 'move_rejected'; from: Pos; to: Pos; reason: string }

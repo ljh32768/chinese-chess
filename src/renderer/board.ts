@@ -252,7 +252,19 @@ export interface ShadowOp {
   alpha: number;
 }
 
-export type RenderOp = DrawOp | RingOp | ShadowOp;
+export type RenderOp = DrawOp | RingOp | ShadowOp | BackOp;
+
+/** 程序绘制的「暗子」背面（揭棋）：素面圆盘 + 阵营色外环，不含任何字体 */
+export interface BackOp {
+  back: true;
+  cx: number;
+  cy: number;
+  radius: number;
+  side: Side;
+  alpha?: number;
+  /** 缩放倍数（抬起 / 走子动画用；以圆盘中心为锚点） */
+  scale?: number;
+}
 
 // ------------------------------------------------------------ 走子动画
 
@@ -279,6 +291,8 @@ export interface AnimFrame {
   lift: number;
   /** 落影（抬起时才有；贴地时不画） */
   shadow: { cx: number; cy: number; rx: number; ry: number; alpha: number } | null;
+  /** 揭棋暗子：非空时该帧应绘制背面（取值为阵营），不贴棋子正图 */
+  back: Side | null;
 }
 
 /** 抬起量 → 贴图位置 / 缩放 / 落影（贴盘 0 ↔ 完全抬起 1 之间） */
@@ -318,6 +332,7 @@ export function liftFrame(pos: Pos, piece: Piece, t: number, skin: Skin, flip: b
     scale: pose.scale,
     lift,
     shadow: pose.shadow,
+    back: piece.hidden ? piece.s : null,
   };
 }
 
@@ -352,6 +367,7 @@ export function moveAnimFrame(anim: MoveAnim, skin: Skin, flip: boolean): AnimFr
     scale: pose.scale,
     lift,
     shadow: pose.shadow,
+    back: anim.piece.hidden ? anim.piece.s : null,
   };
 }
 
@@ -401,6 +417,19 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
       if (lifted(r, c)) continue;
       const { x, y } = at([r, c]);
       const selected = !!v.selected && v.selected[0] === r && v.selected[1] === c;
+      if (p.hidden) {
+        // 揭棋暗子：素面背面（阵营色外环），不贴棋子正图
+        const ct = center([r, c]);
+        ops.push({
+          back: true,
+          cx: ct.x,
+          cy: ct.y,
+          radius: skin.disc / 2,
+          side: p.s,
+          alpha: selected ? 0.75 : 1,
+        });
+        continue;
+      }
       ops.push({ img: `${p.s}_${PIECE_IMG[p.t]}`, x, y, alpha: selected ? 0.75 : 1 });
     }
   }
@@ -474,21 +503,33 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
     }
   }
 
-  // 点击选中的棋子「抬起」：升起 / 落下的棋子与落影画在最上层（先落影后棋子）
+  // 抬起 / 走子动画帧：暗子按背面绘制，明子按素材贴图（先落影后棋子）
+  const pushFrame = (f: AnimFrame): void => {
+    if (f.shadow) ops.push({ shadow: true, ...f.shadow });
+    if (f.back) {
+      ops.push({
+        back: true,
+        cx: f.x + skin.discX,
+        cy: f.y + skin.discY,
+        radius: skin.disc / 2,
+        side: f.back,
+        alpha: 1,
+        scale: f.scale,
+      });
+    } else {
+      ops.push({ img: f.img, x: f.x, y: f.y, alpha: 1, scale: f.scale });
+    }
+  };
+
+  // 点击选中的棋子「抬起」：升起 / 落下的棋子与落影画在最上层
   for (const l of v.lifts ?? []) {
     const p = v.board[l.pos[0]]?.[l.pos[1]];
     if (!p) continue;
-    const f = liftFrame(l.pos, p, l.t, skin, v.flip);
-    if (f.shadow) ops.push({ shadow: true, ...f.shadow });
-    ops.push({ img: f.img, x: f.x, y: f.y, alpha: 1, scale: f.scale });
+    pushFrame(liftFrame(l.pos, p, l.t, skin, v.flip));
   }
 
   // 走子动画：抬起的棋子与落影画在最上层（先落影后棋子，保证棋子压在投影之上）
-  if (v.anim) {
-    const f = moveAnimFrame(v.anim, skin, v.flip);
-    if (f.shadow) ops.push({ shadow: true, ...f.shadow });
-    ops.push({ img: f.img, x: f.x, y: f.y, alpha: 1, scale: f.scale });
-  }
+  if (v.anim) pushFrame(moveAnimFrame(v.anim, skin, v.flip));
 
   return ops;
 }
@@ -515,6 +556,26 @@ export function renderBoard(
   ctx.clearRect(0, 0, skin.width, skin.height);
 
   for (const op of computeDrawList(v, skin)) {
+    if ('back' in op) {
+      // 揭棋暗子背面：素面圆盘 + 阵营色外环 + 内圈（程序绘制，不依赖素材）
+      ctx.save();
+      ctx.globalAlpha = op.alpha ?? 1;
+      const r = op.radius * (op.scale ?? 1);
+      ctx.beginPath();
+      ctx.arc(op.cx, op.cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#e3c99c';
+      ctx.fill();
+      ctx.lineWidth = Math.max(1.5, r * 0.16);
+      ctx.strokeStyle = op.side === 'r' ? '#a8372a' : '#2c2c2c';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(op.cx, op.cy, r * 0.6, 0, Math.PI * 2);
+      ctx.lineWidth = Math.max(1, r * 0.06);
+      ctx.strokeStyle = 'rgba(60,40,20,0.35)';
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
     if ('ring' in op) {
       ctx.save();
       ctx.globalAlpha = ringAlpha(op, time);

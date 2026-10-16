@@ -5,9 +5,9 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.9（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 改为点击棋子即抬起：选子抬起 / 取消落回 / 走子从抬起态直接平移**）
-- 状态：v2.9 完成；324 项自动化测试通过，lint / format / build / CI 全绿
-- 更新日期：2026-10-15
+- 版本：v3.0（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 改为点击棋子即抬起：选子抬起 / 取消落回 / 走子从抬起态直接平移**；**v3.0 揭棋（暗棋）：洗子开局 + 暗子按起始兵种首步 / 翻开 + 翻开的士相越界 + 公开快照抹除真实身份；人机对弈「揭棋」模式与双人「揭棋房间」**）
+- 状态：v3.0 完成；358 项自动化测试通过，lint / format / build / CI 全绿
+- 更新日期：2026-10-16
 
 版本里程碑：
 
@@ -31,6 +31,7 @@
 | **v2.7** | **残局改为不限步数：把对方将死即挑战成功（不再按步数判负），题库给出的步数改为展示「最优步数」；「提示」改用 `minMateDepth` + `findMateMove` 给出当前局面仍能取胜的最快着法；列表新增状态标记——勾叉表示完成 / 失败 / 未完成（绿勾 / 红叉 / 白勾），外圈绿色表示已达成最优步数、灰色表示未达成；本机记录改为「取胜最少步数 + 是否曾失败」并兼容旧的数字格式** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | **v2.8** | **对局动效：走子动画「抬起 → 移动 → 放下」（`board.ts` 增 `anim` / `moveAnimFrame` / 落影，`app.ts` 走子后按 rAF 在 460ms 内推进）；将军 / 绝杀在棋盘正中弹**提示条**（新增纯数据模块 `renderer/banner.ts`：18 种杀法各一套图案样式——五种底纹 + 强调色 + 徽记，未收录杀法回退兜底），显示 1.5s 渐入渐出（`banner-cycle`），`prefers-reduced-motion` 下不做走子动画、提示条去掉动效但保持可见** | 见 [ADR-0007 §3.5.5](./adr/0007-renderer-ui.md) |
 | **v2.9** | **走子动画改为「点击棋子抬起」：新增 `board.ts liftFrame()` 与 `BoardView.lifts`（原地升起 / 落下，抬高 + 放大 + 落影），`app.ts liftPiece()` / `lowerAllLifts()` 绑定选中与取消（同一时刻只抬起一枚，`LIFT_MS = 200ms`）；走子时该子已在抬起态，`animateMove(from, to, startLifted)` 直接从平移开始、落点再放下（对手 / AI 走子仍是完整三段）；联机点击落点后保持抬起等待服务器确认，被拒则落回；抬起与走子共用一条 rAF 帧循环，保持抬起时停帧不空转；`prefers-reduced-motion` 下不做抬起动画（选中仍以压暗 + 落点框表达）** | 见 [ADR-0007 §3.5.5](./adr/0007-renderer-ui.md) |
+| **v3.0** | **揭棋（暗棋）：新增共享纯模块 `shared/jieqi.ts`（洗子 `dealBoard` / 起始兵种 `startTypeAt` / 翻子 `revealAt` / 公开快照抹除 `redactBoard`）；`Piece` 增加 `hidden` / `real` / `free`，`t` 始终为「当前生效走法兵种」；`rules.ts` 支持翻开的士 / 相出九宫 / 过河、`cloneBoard` 保留新字段；`Game` 增加 `variant` / `openJieqi()` / 吃子记录 / 快照天然抹除；入口**不改首页挂板**——人机对弈面板增「标准象棋 / 揭棋（暗棋）」单选、创建房间面板增「揭棋房间」勾选；棋盘新增程序化暗子背面（`BackOp`）；双人揭棋房间与本地人机揭棋共用同一套规则，**揭棋不计入对局回顾** | 见 [ADR-0011](./adr/0011-jieqi.md) |
 
 ---
 
@@ -77,12 +78,13 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
 4. 双方到齐自动开局；开赛前房主可在等待页用**下拉框**选择取先方式：猜先（默认）/ 随机黑红 / 房主执红 / 房主执黑
    （猜先由房主抓单双、对手猜，猜中者执红；**对手加入后双方直接进入棋盘界面，再在棋盘上抓子/猜单双**）。
 5. 第三方观众从房间列表点「观战」即可只读旁观（不占席位）。
-6. 单人可点首页「人机对弈」选择难度（菜鸟/中级/高手）后与 AI（执黑）对弈——**该模式在客户端本地运行，
-   不需要连接服务器**。
+6. 单人可点首页「人机对弈」，先选棋种（**标准象棋 / 揭棋（暗棋）**）与难度（菜鸟/中级/高手）后与 AI（执黑）对弈——
+   **该模式在客户端本地运行，不需要连接服务器**。选「揭棋」时除将帅外的棋子开局背面随机摆放（暗子），
+   暗子首步按所在位置的兵种走并随即翻开（翻开的士 / 相可出九宫、过河）；**AI 也看不到任何暗子的真实身份**。
 7. 对局结束后：若无人点「再来一局」，房间会自动销毁并释放房间号；首页「对局回顾」可查看历史对局
    （红黑方 / 取先方式 / 时间 / 胜负），顶部页签可切换「全部对局 / 我的历史」（我的历史按账号或本机最近一次身份过滤，
    请求的是**当前所选服务器**的记录）；点进某一局即可「下一步 ▶」逐步复盘并查看每个局面的 AI 推荐着法。
-   **人机对局（本地或服务器 AI 房间）不计入对局回顾。**
+   **人机对局（本地或服务器 AI 房间）与揭棋对局均不计入对局回顾。**
 8. 单人还可点首页「残局挑战」做杀法练习：面板里列出 9 局残局（入门 / 中等 / 困难，并给出每局「最优 N 步」），
    点一条即进入棋盘——你执红先行，AI（黑方）自动应招；**不限步数，把对方将死即挑战成功**（被对方将死 / 困毙则挑战失败）。
    列表每条带状态标记：**勾叉表示完成 / 失败 / 未完成（绿勾 / 红叉 / 白勾），外圈绿色表示已达成最优步数、灰色表示未达成**。
@@ -90,6 +92,9 @@ npm run dist         # 用 electron-builder 产出 Windows 安装包（release/�
    （提示给出当前局面仍能取胜的最快着法；「下一关」直接跳到题库中的下一局，最后一关时按钮自动隐藏）。
    通关记录存在本机（取胜最少步数 + 是否曾失败）。残局面板底部的「自检题库」会用求解器逐条核验每局的
    局面合法性与可解性（目标步数内可解且步数最少），结果以弹层逐条列出。**残局同样是本地对弈，不需要连接服务器，也不计入对局回顾。**
+9. 双人也可下揭棋：创建房间时勾选「揭棋（暗棋）房间」，对手从房间列表（带「揭棋」标记）加入即可；
+   开局服务器把双方除将帅外的棋子洗匀背面摆放，**双方与观战者都只能看到暗子的背面**（真实身份只留在服务器），
+   走子后落点暗子翻开；翻开的士 / 相可出九宫 / 过河，其余与标准象棋一致（将死 / 困毙判负）。**揭棋对局不计入对局回顾。**
 
 账号（可选）：点首页**右上角**的账号按钮（未登录时显示「登录 / 注册」，登录后显示用户名），
 在弹出的面板中填写用户名与密码点「登 录」或「注 册」；登录后对局记录会归属账号，
@@ -187,6 +192,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 12 | 记谱 / AI / 日志 | 中文记谱与吃子、negamax + α-β 搜索（服务端 AI 房间与客户端本地人机共用）、`LANSCHESS_DEBUG` 日志 | [notation.ts](../src/shared/notation.ts)、[ai.ts](../src/shared/ai.ts)、[log.ts](../src/server/log.ts) | [ADR-0009](./adr/0009-c-d-extensions.md) |
 | 13 | 杀法识别 | 将死时判定具体杀法（18 种经典杀法 + 兜底「将死」）、给出杀法名与解说；服务端落库与客户端展示共用 | [checkmate.ts](../src/shared/checkmate.ts) | [ADR-0009 §3.11](./adr/0009-c-d-extensions.md) |
 | 14 | 残局挑战 | 内置经典杀法题库（9 局，入门 – 困难）+ 强制将死求解器与最快取胜步数 `minMateDepth`；本地对弈（**不限步数，将死即胜**）、提示（最快取胜着法）/ 悔棋 / 下一关 / 重来、最优步数展示、列表状态标记、本机胜负记录与题库自检 | [endgame.ts](../src/shared/endgame.ts) | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 15 | 揭棋（暗棋） | 洗子开局（`dealBoard` / `startTypeAt`）、暗子首步按起始兵种并翻开（`revealAt`）、翻开的士 / 相越九宫河界（`Piece.free`）、公开快照抹除真实身份（`redactBoard`）；双人揭棋房间与本地人机揭棋共用同一套规则与状态机 | [jieqi.ts](../src/shared/jieqi.ts) | [ADR-0011](./adr/0011-jieqi.md) |
 
 ---
 
@@ -234,6 +240,10 @@ main / server-main（进程入口，装配 server 与页面）
 | 残局提示 / 悔棋 / 重来 | 棋盘下「提示 / 悔棋 / 重来」 | [app.ts `endgameHint()` / `endgameUndo()` / `restartPuzzle()`](../src/renderer/app.ts) → [endgame.ts `minMateDepth()` / `findMateMove()`](../src/shared/endgame.ts)（当前局面仍能取胜的最快着法，棋盘金环高亮 + 中文记谱 + 步数提示） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 残局「下一关」 | 棋盘下「下一关」（最后一关自动隐藏） | [app.ts `endgameNext()`](../src/renderer/app.ts) → [endgame.ts `nextPuzzle()`](../src/shared/endgame.ts) → `startPuzzle(next)`；结果弹层同样提供「下一关」 | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 残局题库自检 | 残局面板底部「自检题库」 | [app.ts `checkEndgameBankUI()`](../src/renderer/app.ts) → [endgame.ts `checkPuzzle()` / `checkEndgameBank()`](../src/shared/endgame.ts)（逐条核验局面合法 / 目标步数内可解 / 步数最少，弹层逐条列出） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
+| 揭棋（人机，本地） | 首页「人机对弈」→ 模式选「揭棋（暗棋）」→ 难度 →「开始对弈」（**本地对弈，不需服务器；AI 看不到任何暗子真实身份**） | [app.ts `createAiRoom()` / `aiVariant()`](../src/renderer/app.ts) → [game.ts `openJieqi()`](../src/shared/game.ts) → [jieqi.ts `dealBoard()`](../src/shared/jieqi.ts)；AI 仍走 [ai.ts `pickMove()`](../src/shared/ai.ts) | [ADR-0011 §3.4 / §3.5](./adr/0011-jieqi.md) |
+| 揭棋房间（双人） | 首页「创建房间」→ 勾选「揭棋（暗棋）房间」→ 创建；对手从房间列表（带「揭棋」标记）加入 | [app.ts `createRoom()`](../src/renderer/app.ts) → `create_room{mode:'jieqi'}` → [server.ts `handleCreateRoom()`](../src/server/server.ts) → [room.ts `startGame()`](../src/server/room.ts)（`game.openJieqi()`） | [ADR-0011 §3.6](./adr/0011-jieqi.md) |
+| 揭棋暗子渲染 / 翻开 | 揭棋对局自动 | [board.ts `computeDrawList()`](../src/renderer/board.ts)（`p.hidden` → `BackOp` 素面背面，抬起 / 走子动画帧同规则）；走子后服务端翻开，广播的快照里该子 `hidden` 消失 | [ADR-0011 §3.5](./adr/0011-jieqi.md) |
+| 揭棋吃子展示 / 暗子计数 | 侧栏吃子面板与角色提示自动 | [app.ts `renderCaptured()` / `jieqiTag()`](../src/renderer/app.ts) → 快照 `capturedByRed/Black` 与 [jieqi.ts `coveredCount()`](../src/shared/jieqi.ts) | [ADR-0011 §3.5](./adr/0011-jieqi.md) |
 | 残局胜负与列表状态标记 | 每步之后自动判定；打开面板时渲染列表 | [app.ts `endgameEvaluate()` / `showEndgameResult()` / `renderEndgameList()`](../src/renderer/app.ts)（将死即胜并记入 `localStorage` 的最少步数；被将死 / 困毙记失败；列表勾叉 = 完成 / 失败 / 未完成，外圈绿 / 灰 = 是否达成最优步数） | [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | 更换皮肤 | 首页「更换皮肤」 | [app.ts `switchSkin()`](../src/renderer/app.ts) → [board.ts `nextSkin()` / `loadSkinImages()`](../src/renderer/board.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
 | 选子 / 走子音效 | 点击棋子 / 收到走子广播时自动 | [sound.ts](../src/renderer/sound.ts)（`select.wav` / `click.wav`） | [ADR-0007](./adr/0007-renderer-ui.md) |
@@ -250,14 +260,15 @@ main / server-main（进程入口，装配 server 与页面）
 Chinese_chess/
 ├── src/
 │   ├── shared/            # 共享层：无 DOM/网络/Node 依赖，服务端与浏览器共用
-│   │   ├── types.ts       #   数据结构：Side/Piece/Board/PlayerRef/GameRecord/RoomSummary...
+│   │   ├── types.ts       #   数据结构：Side/Piece（含揭棋 hidden/real/free）/Board/PlayerRef/GameRecord/RoomSummary...
 │   │   ├── protocol.ts    #   通信协议：ClientMessage/ServerMessage/encode/decode/isValidPos/OnlinePlayer
 │   │   ├── rules.ts       #   规则引擎：走法/将军/将死/困毙/validateMove
 │   │   ├── game.ts        #   对局状态机：权威棋盘、走子校验、悔棋/超时/终局
 │   │   ├── ai.ts          #   人机引擎：negamax + α-β（服务端 AI 房间与客户端本地人机共用）
 │   │   ├── notation.ts    #   中文记谱：describeMove/describeHistory/capturedPieces
 │   │   ├── checkmate.ts   #   杀法识别：18 种经典杀法匹配（将死时给出具体杀法名与解说）
-│   │   └── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove/minMateDepth）+ 题库自检（checkPuzzle/checkEndgameBank）
+│   │   ├── endgame.ts     #   残局挑战：题库（9 局）+ 强制将死求解器（canForceMate/findMateMove/minMateDepth）+ 题库自检（checkPuzzle/checkEndgameBank）
+│   │   └── jieqi.ts       #   揭棋（暗棋）：洗子开局 / 起始兵种 / 翻子 / 公开快照抹除真实身份（纯函数）
 │   ├── server/            # 服务端（中心服务器）
 │   │   ├── server.ts      #   服务器：HTTP 静态+API、WS 路由、房间表、在线玩家、邀请、空闲回收、局域网 IP
 │   │   ├── room.ts        #   单局房间：席位/先手/猜先/宽限/读秒/AI 房间/邀请口令豁免/落库/销毁倒计时
@@ -269,7 +280,7 @@ Chinese_chess/
 │   ├── main/
 │   │   └── main.ts        #   Electron 客户端主进程（本机外壳服务 + client/server/lan 参数）
 │   └── renderer/          # 渲染层（客户端页面，浏览器与 Electron 共用）
-│       ├── app.ts         #   页面流转 / 服务器选择 / 房间与账号交互 / 邀请 / 本地人机 / 残局挑战（含下一关 / 自检）/ 消息处理
+│       ├── app.ts         #   页面流转 / 服务器选择 / 房间与账号交互 / 邀请 / 本地人机（标准 / 揭棋）/ 残局挑战（含下一关 / 自检）/ 消息处理
 │       ├── servers.ts     #   服务器地址工具（解析 / 网段推导 / 客户端形态判定）
 │       ├── board.ts       #   棋盘 Canvas 渲染（三套皮肤）、绘制计划、坐标换算、点击抬起帧与走子动画帧
 │       ├── banner.ts      #   棋盘正中提示条（将军 / 各杀法一套图案样式）的内容与样式（纯数据）
@@ -316,29 +327,30 @@ Chinese_chess/
 
 - 测试命令：`npm test`（vitest run，node 环境）；配套 `npm run lint` 与 `npm run format:check`。
 - 覆盖范围：规则引擎单测、状态机单测（含自定义局面 `setup` / 悔棋 / 终局清理）、棋盘 Canvas 渲染计划与点击命中、中文记谱与吃子统计、
-  AI 引擎、**残局题库与强制将死求解器（含最快取胜步数 `minMateDepth`、题库自检 `checkPuzzle` / `checkEndgameBank`）**、WebSocket 客户端心跳、完整对局端到端回放、服务器连接/消息/房间隔离/口令/宽限重连/观战/人机（含难度）/
+  AI 引擎、**残局题库与强制将死求解器（含最快取胜步数 `minMateDepth`、题库自检 `checkPuzzle` / `checkEndgameBank`）**、**揭棋（洗子 / 起始兵种 / 翻子 / 公开快照抹除 / 规则与状态机的揭棋行为）**、WebSocket 客户端心跳、完整对局端到端回放、服务器连接/消息/房间隔离/口令/宽限重连/观战/人机（含难度）/
   先手方式与猜先/对局回顾与 AI 推荐/计时/静态安全与素材 MIME 集成、账号与记录持久化、局域网 IP 与服务器发现、
-  复盘局面还原、主界面布局（署名遮盖 / 放大范围 / 大面板 / **6 入口挂板几何** / v2.4 视觉精修契约）。
+  复盘局面还原、主界面布局（署名遮盖 / 放大范围 / 大面板 / **6 入口挂板几何** / v2.4 视觉精修契约 / **v3.0 揭棋入口契约**）。
 
 | 测试文件 | 覆盖 |
 |---|---|
 | [rules.test.ts](../tests/rules.test.ts) | 开局棋盘、各棋子走法、将军/照面、将死/困毙、validateMove |
 | [game.test.ts](../tests/game.test.ts) | Game 状态机：走子、拒绝、认输、和棋、重开、终局清理 pending、悔棋回退、history 快照、**`setup()` 自定义局面（残局开局）与终局判定** |
-| [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转、**点击抬起（`liftFrame` 原地升降 / 放大 / 落影、进度越界夹取、翻转、抬起格跳过静态贴图、棋子离场时跳过）、走子动画（一帧几何：抬起高度 / 放大 / 平移 / 落影、`startLifted` 省去起身段、进度越界夹取、翻转、纯函数性、终点格跳过静态贴图）** |
+| [board.test.ts](../tests/board.test.ts) | 棋盘渲染：三套皮肤几何参数、素材路径、坐标换算与点击命中（含响应式缩放）、绘制计划、视角翻转、**点击抬起（`liftFrame` 原地升降 / 放大 / 落影、进度越界夹取、翻转、抬起格跳过静态贴图、棋子离场时跳过）、走子动画（一帧几何：抬起高度 / 放大 / 平移 / 落影、`startLifted` 省去起身段、进度越界夹取、翻转、纯函数性、终点格跳过静态贴图）**、**揭棋暗子背面（`BackOp` 素面背面 + 阵营色、明子对照、选中压暗作用于背面、抬起 / 走子动画帧 `back` 标记）** |
 | [banner.test.ts](../tests/banner.test.ts) | 棋盘正中提示条：**18 种杀法各有图案样式（pattern 与杀法 id 一致、强调色唯一、五种底纹齐备）**、将军样式独立、未知杀法回退兜底、样式表覆盖全部杀法 id、将军 / 绝杀内容组装（缺省退到「将死」与兜底图案） |
 | [checkmate.test.ts](../tests/checkmate.test.ts) | 杀法识别：18 种杀法各构造一个终局局面（先用规则引擎确认确为将死，再断言杀法名）、未匹配时兜底「将死」、红黑双方对称、同时成立的杀法进 `alsoMatched`、`capturedPieceAt` 推导吃子、杀法库条目唯一 |
 | [endgame.test.ts](../tests/endgame.test.ts) | 残局挑战：题库自洽（id 唯一、难度有序、棋子不重叠、双方有将、对方有子可走）、**9 局逐条由求解器验证「目标步数内可强制取胜且步数最少」**、正解首着合法且走完仍在杀棋内、非退化（不是随便走都赢）；**题库自检（内置题库逐条通过，能否抓出缺将/越界/重叠/不可解/非最少步数/后手已被将死，且不改动传入题目）**；求解器语义（一步杀 / 多步杀 / **困毙同将死** / **`minMateDepth` 最快取胜步数（含题库逐局 = `goalMoves`）** / 不改动传入棋盘 / 黑方对称）；**本机记录（完成/失败/未完成、最优步数判定、旧版数字格式兼容、失败不覆盖已通关、取胜清除失败标记、纯函数不改动传入对象）**；界面接线（首页 6 入口、残局面板、残局操作行与信息块、**不限步数（无「超出步数」判负）**、**列表状态标记（绿勾/红叉/白勾 + 绿/灰外圈）**、**「下一关」按钮与最后一关隐藏**、**「自检题库」入口与结果弹层**、**多步残局继续调度 AI 应招**、列表与样式契约） |
 | [review.test.ts](../tests/review.test.ts) | 复盘局面还原与越界收敛、行棋方交替、列表文案（玩家名/取先方式/时间/胜负）、**结果文案优先显示杀法名（killMethod）**、**复盘按着法即时识别杀法（mateOf）**、**列表请求路径 `historyUrl`（全部 / 我的历史 + URL 编码）** |
+| [jieqi.test.ts](../tests/jieqi.test.ts) | 揭棋（暗棋）：起始兵种映射与 15 个暗子位、**洗子开局（将帅明置 / 每方 2仕2相2马2车2炮5兵 / 固定 rng 可复现 / 暗子走法兵种 = 所在起始兵种）**、翻子（`t` ← 真实身份、士相置 `free`、明子不翻开）、**公开快照抹除 `real`（不动原盘）**；引擎（暗子按起始兵种走、`free` 士相出九宫 / 过河、塞象眼照旧）；状态机（`openJieqi`、走子翻开、暗子首步不能后退、**吃子记录真实身份并随悔棋回退**、**快照抹除且带变体 / 吃子记录**、标准对局无揭棋字段、揭棋下同样判定将死） |
 | [notation.test.ts](../tests/notation.test.ts) | 中文记谱（平/进/退/前后消歧/斜走目标列）、describeHistory 回放、capturedPieces 吃子统计 |
 | [ai.test.ts](../tests/ai.test.ts) | 一步杀、白吃子、无着法返回 null、开局着法合法与耗时 |
 | [net.test.ts](../tests/net.test.ts) | 连接建立与消息分发、pong 内部消化、心跳 5s、16s 无 pong 判离线、主动关闭不提示 |
 | [fullgame.test.ts](../tests/fullgame.test.ts) | 完整一盘棋 WS 回放：双方棋盘一致、seq 单调、history 一致、`game_over`「将死」、**对局记录带识别出的杀法名（killMethod）**、重开 |
-| [server.test.ts](../tests/server.test.ts) | 建房/加入/口令/房间列表/满员；走子与拒绝；认输/和棋/重开/悔棋/离开；观战；宽限重连与房间销毁；终局销毁；空闲回收；两房间隔离；先手方式与猜先；账号与记录归属；**API 跨源响应头与 OPTIONS 预检**、**`/api/history?user=` 我的历史过滤**；玩家列表与房间邀请（在线玩家、**离线账号 online=false 与不可邀请**、免口令加入、邀请校验）；**人机对局不计入对局回顾**；人机；计时；日志与端口回退；静态资源安全与 MIME |
+| [server.test.ts](../tests/server.test.ts) | 建房/加入/口令/房间列表/满员；走子与拒绝；认输/和棋/重开/悔棋/离开；观战；宽限重连与房间销毁；终局销毁；空闲回收；两房间隔离；先手方式与猜先；账号与记录归属；**API 跨源响应头与 OPTIONS 预检**、**`/api/history?user=` 我的历史过滤**；玩家列表与房间邀请（在线玩家、**离线账号 online=false 与不可邀请**、免口令加入、邀请校验）；**人机对局不计入对局回顾**；人机；计时；日志与端口回退；静态资源安全与 MIME；**揭棋房间（快照抹除真实身份 / 洗子开局双方各 15 暗子 / 走子翻开 / 观战者同样看不到底牌 / 不计入对局回顾 / 重开重新洗子）** |
 | [persistence.test.ts](../tests/persistence.test.ts) | 账号注册/登录/token 轮换、账号与对局记录落盘与重启读回（**含杀法名 killMethod**）、容量上限、损坏文件降级 |
 | [discover.test.ts](../tests/discover.test.ts) | 服务器探测、无服务端口返回 null、网段扫描聚合去重与进度 |
 | [servers.test.ts](../tests/servers.test.ts) | 服务器地址解析、网段推导、服务器键、页面地址回退与「浏览器 / 桌面客户端」判定 |
 | [lan-ip.test.ts](../tests/lan-ip.test.ts) | pickLanIp 网段优先级与虚拟网卡跳过 |
-| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构（**6 个入口：43×6 + 6 = 264 铺满内框，按钮素材等比缩放与悬停偏移**）、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）**、**v2.8 走子动画与正中提示条契约（`board-stage` 结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减少动态效果仍可见 / app.ts 接线）**、**v2.9 点击抬起契约（抬起帧与 `lifts` / 点击选中即抬起 / 取消落回 / 走子从抬起态直接平移 / 联机等待确认期间保持抬起）** |
+| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构（**6 个入口：43×6 + 6 = 264 铺满内框，按钮素材等比缩放与悬停偏移**）、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）**、**v2.8 走子动画与正中提示条契约（`board-stage` 结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减少动态效果仍可见 / app.ts 接线）**、**v2.9 点击抬起契约（抬起帧与 `lifts` / 点击选中即抬起 / 取消落回 / 走子从抬起态直接平移 / 联机等待确认期间保持抬起）**、**v3.0 揭棋入口契约（人机「标准象棋 / 揭棋」模式单选 / 创建房间「揭棋房间」勾选 / 渲染层接线 / `BackOp` 背面绘制）** |
 
 验收标准见 [Product-plan.md 第 14 节](./Product-plan.md)、[ADR-0008](./adr/0008-testing-strategy.md)
 与 [ADR-0010 §6](./adr/0010-room-server.md)。

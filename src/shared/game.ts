@@ -3,8 +3,9 @@
  * 唯一真实棋盘状态在这里维护，所有走子都必须经过 applyMove 校验。
  */
 
-import { Board, GameSnapshot, GameStatus, Move, Pos, Side } from './types.js';
+import { Board, GameSnapshot, GameStatus, GameVariant, Move, PieceType, Pos, Side } from './types.js';
 import { cloneBoard, initBoard, isInCheck, judgeAfterMove, makeMove, validateMove } from './rules.js';
+import { dealBoard, redactBoard, revealAt } from './jieqi.js';
 
 export interface MoveResult {
   ok: boolean;
@@ -20,6 +21,13 @@ export class Game {
   reason = '';
   lastMove: Move | null = null;
   check = false;
+
+  /** 对局变体：标准象棋 / 揭棋（暗棋）。揭棋下发快照时抹除暗子真实身份 */
+  variant: GameVariant = 'xiangqi';
+
+  /** 揭棋：红方 / 黑方已吃掉的子（含被吃暗子翻开后的真实身份） */
+  capturedByRed: PieceType[] = [];
+  capturedByBlack: PieceType[] = [];
 
   /** 待处理的求和 / 重开 / 悔棋请求发起方 */
   pendingDraw: Side | null = null;
@@ -39,6 +47,8 @@ export class Game {
     moveSeq: number;
     lastMove: Move | null;
     check: boolean;
+    capRed: PieceType[];
+    capBlack: PieceType[];
   }> = [];
 
   /** 重置为标准开局；status 默认 playing */
@@ -57,6 +67,19 @@ export class Game {
     this.history = [];
     this.past = [];
     this.deadline = null;
+    this.capturedByRed = [];
+    this.capturedByBlack = [];
+  }
+
+  /**
+   * 揭棋（暗棋）开局：置变体为 `jieqi` 并以洗子局面开始。
+   * 真实身份只留在本权威端（服务端 / 本地 AI 宿主），对外由 snapshot() 抹除。
+   */
+  openJieqi(): void {
+    this.variant = 'jieqi';
+    this.reset('playing');
+    this.board = dealBoard();
+    this.check = isInCheck(this.board, this.turn);
   }
 
   /**
@@ -70,10 +93,11 @@ export class Game {
     this.check = isInCheck(this.board, turn);
   }
 
-  /** 生成当前快照 */
+  /** 生成当前快照（揭棋下抹除暗子真实身份，并附带吃子记录） */
   snapshot(): GameSnapshot {
+    const jieqi = this.variant === 'jieqi';
     return {
-      board: this.board,
+      board: jieqi ? redactBoard(this.board) : this.board,
       turn: this.turn,
       moveSeq: this.moveSeq,
       status: this.status,
@@ -83,6 +107,13 @@ export class Game {
       check: this.check,
       history: this.history.map((m) => ({ from: [...m.from] as Pos, to: [...m.to] as Pos })),
       deadline: this.deadline,
+      ...(jieqi
+        ? {
+            variant: this.variant,
+            capturedByRed: [...this.capturedByRed],
+            capturedByBlack: [...this.capturedByBlack],
+          }
+        : {}),
     };
   }
 
@@ -97,6 +128,7 @@ export class Game {
     const err = validateMove(this.board, from, to, side);
     if (err) return { ok: false, reason: err };
 
+    const target = this.board[to[0]][to[1]];
     // 记录走子前局面，供悔棋回退
     this.past.push({
       board: cloneBoard(this.board),
@@ -104,8 +136,17 @@ export class Game {
       moveSeq: this.moveSeq,
       lastMove: this.lastMove,
       check: this.check,
+      capRed: [...this.capturedByRed],
+      capBlack: [...this.capturedByBlack],
     });
     makeMove(this.board, from, to);
+    if (this.variant === 'jieqi') {
+      // 揭棋：记录被吃子身份（暗子取真实身份），并把落点的暗子翻开
+      if (target) {
+        (side === 'r' ? this.capturedByRed : this.capturedByBlack).push(target.real ?? target.t);
+      }
+      revealAt(this.board, to);
+    }
     this.history.push({ from: [...from] as Pos, to: [...to] as Pos });
     this.lastMove = { from, to };
     this.moveSeq += 1;
@@ -137,6 +178,8 @@ export class Game {
       moveSeq: number;
       lastMove: Move | null;
       check: boolean;
+      capRed: PieceType[];
+      capBlack: PieceType[];
     };
     this.history.pop();
     this.board = prev.board;
@@ -144,6 +187,8 @@ export class Game {
     this.moveSeq = prev.moveSeq;
     this.lastMove = prev.lastMove;
     this.check = prev.check;
+    this.capturedByRed = prev.capRed;
+    this.capturedByBlack = prev.capBlack;
     this.pendingDraw = null;
     this.pendingUndo = null;
     this.deadline = null;
