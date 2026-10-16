@@ -4,13 +4,17 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { GameServer, listenWithFallback } from '../src/server/server.js';
+import { EngineLevel, EnginePort, LocalEngine } from '../src/shared/engine.js';
 import { ClientMessage } from '../src/shared/protocol.js';
 import { initBoard, validateMove } from '../src/shared/rules.js';
-import { Board, Pos } from '../src/shared/types.js';
+import { Board, Pos, Side } from '../src/shared/types.js';
 import { TestClient } from './ws-client.js';
 
 let server: GameServer | null = null;
 const clients: TestClient[] = [];
+
+/** 初始局面 FEN（与皮卡鱼实测一致） */
+const START_FEN = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1';
 
 interface ServerOpts {
   graceMs?: number;
@@ -20,6 +24,7 @@ interface ServerOpts {
   roomIdleMs?: number;
   maxRooms?: number;
   maxSpectators?: number;
+  engine?: EnginePort;
 }
 
 /** 随机取一个高位端口并启动服务，避开 fetch 屏蔽的端口与端口占用 */
@@ -771,6 +776,53 @@ describe('服务器 · 对局回顾与 AI 推荐', () => {
 
     const hint2 = (await (await fetch(`${base}/api/ai/hint?id=${id}&index=1`)).json()) as { side: string };
     expect(hint2.side).toBe('b');
+  });
+
+  it('AI 走子接口：POST /api/ai/move 由注入的引擎返回着法', async () => {
+    const seen: { side: Side; level: EngineLevel }[] = [];
+    const stub: EnginePort = {
+      bestMove(_board: Board, side: Side, level: EngineLevel) {
+        seen.push({ side, level });
+        return Promise.resolve({ move: { from: [9, 0], to: [8, 0] }, source: 'pikafish' });
+      },
+    };
+    const s = await startServer({ engine: stub });
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const res = await fetch(`${base}/api/ai/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fen: START_FEN, level: 3 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ from: [9, 0], to: [8, 0], source: 'pikafish' });
+    expect(seen).toEqual([{ side: 'r', level: 3 }]);
+  });
+
+  it('AI 走子接口：非法 FEN 返回 400，非 POST 返回 405', async () => {
+    const s = await startServer({ engine: new LocalEngine() });
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const bad = await fetch(`${base}/api/ai/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fen: 'not-a-fen', level: 2 }),
+    });
+    expect(bad.status).toBe(400);
+    expect((await fetch(`${base}/api/ai/move`)).status).toBe(405);
+  });
+
+  it('AI 走子接口：未配置引擎时回退纯 TS 引擎，仍返回合法着法', async () => {
+    // vitest 全局 env 设了 LANSCHESS_ENGINE=off，故此处 createEngine() 走纯 TS
+    const s = await startServer();
+    const base = `http://127.0.0.1:${s.address.port}`;
+    const res = await fetch(`${base}/api/ai/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fen: START_FEN, level: 1 }),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { from: Pos; to: Pos; source: string };
+    expect(data.source).toBe('ts');
+    expect(validateMove(initBoard(), data.from, data.to, 'r')).toBeNull();
   });
 
   it('对局未结束时不写入记录', async () => {

@@ -18,7 +18,7 @@
     "serve": "node dist/server/server-main.js",
     "host": "node dist/server/server-main.js",
     "start": "npm run build && electron .",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && node scripts/dist.mjs"
   },
   "build": {
     "appId": "com.lanchess.app",
@@ -29,6 +29,16 @@
     "files": [
       "dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "Reference/Pikafish皮卡鱼20260925/Pikafish-Windows-x86-64-universal.exe",
+        "to": "dist/engine/Pikafish-Windows-x86-64-universal.exe"
+      },
+      {
+        "from": "Reference/Pikafish皮卡鱼20260925/pikafish.nnue",
+        "to": "dist/engine/pikafish.nnue"
+      }
     ],
     "win": {
       "target": [

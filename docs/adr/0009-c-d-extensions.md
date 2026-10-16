@@ -1,6 +1,6 @@
 # ADR-0009：C/D 档与 v1.5 扩展模块规格（日志 / 记谱 / AI / 自动发现 / 先手方式 / 对局回顾）
 
-- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战；v2.6 更新 §3.12：残局「下一关」按钮 + 题库自检；v2.7 更新 §3.12：不限步数（将死即胜）+ 列表状态标记；v2.9 更新 §3.12：自建残局编辑器，保存时自动核验（取消「自检题库」手动入口））
+- 状态：已接受（记录现状实现；v1.5 追加 §3.9 先手方式与猜先、§3.10 对局回顾与 AI 推荐；v2.5 追加 §3.12 残局挑战；v2.6 更新 §3.12：残局「下一关」按钮 + 题库自检；v2.7 更新 §3.12：不限步数（将死即胜）+ 列表状态标记；v2.9 更新 §3.12：自建残局编辑器，保存时自动核验（取消「自检题库」手动入口）；**v3.0 更新 §3.3：AI 引擎改为皮卡鱼 UCI 原生引擎（纯 TS 保留为回退），详见 [ADR-0011](./0011-pikafish-engine.md)**）
 - 日期：2026-10-03（v1.5 追加：2026-10-06；v2.5 追加：2026-10-12；v2.9 追加：2026-10-15）
 - 关联入口：主机日志、棋谱与吃子、悔棋、观战、人机对战、计时读秒、局域网主机搜索、先手方式与猜先、对局回顾与 AI 推荐、残局挑战
 - 关联文档：[ADR-0003 通信协议](./0003-wire-protocol.md)、[ADR-0004 状态机](./0004-game-state-machine.md)、[ADR-0005 主机服务](./0005-host-server.md)、[ADR-0007 渲染层](./0007-renderer-ui.md)
@@ -43,15 +43,22 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 
 消歧约定：同一纵线 ≥2 枚同兵种时位置词前置（前车/后车；3 枚用前中后；≥4 枚首尾用前后、其余按从前序号编号）。
 
-### 3.3 AI 引擎（shared/ai.ts）
+### 3.3 AI 引擎（端口 shared/engine.ts + 实现 server/pikafish.ts）
+
+> **v3.0 变更**：AI 引擎更换为**皮卡鱼（Pikafish）UCI 原生引擎**；纯 TS negamax 保留为自动回退。
+> 完整决策与规格见 [ADR-0011](./0011-pikafish-engine.md)。
 
 | 项 | 规格 |
 |---|---|
-| 接口 | `pickMove(board, side, { depth=2, timeLimitMs=1500 })`，无合法着法返回 `null` |
-| 算法 | negamax + α-β；迭代加深 + 时间保护（超时回退已完成浅层）；吃子优先排序 |
+| 端口 | `EnginePort.bestMove(board, side, level)` → `{ move, source: 'pikafish' \| 'ts' }`；无合法着法时 `move = null` |
+| 实现 | 皮卡鱼优先（Node 侧常驻单进程 + 串行请求队列 + 空闲回收 + 崩溃重启 + 引擎发现）；出错 / 非法着法时回退纯 TS |
+| 难度 | 沿用外部契约 `level 1..4`（入门 / 菜鸟 / 中级 / 高手），映射 `Skill Level` + `go movetime` |
+| 换算 | `shared/uci.ts`：棋盘 ↔ 中国象棋 FEN、项目坐标 ↔ UCI 方格、`bestmove` 行解析 |
+| 纯 TS 回退 | `pickMove(board, side, { depth, timeLimitMs })`（`shared/ai.ts`）：negamax + α-β、迭代加深 + 时间保护、吃子优先排序 |
 | 评估 | 子力（车 900 / 炮 450 / 马 400 / 相·士 200 / 兵·卒 100 / 将 100000）+ 兵卒过河位置分，红黑对称 |
-| 性能 | 开局 depth=2 实测约 115–200ms（测试断言 < 1500ms） |
-| 局限 | 无置换表/静态搜索/长将判断（明确不做） |
+| 性能 | 纯 TS 回退：开局 depth=2 实测约 115–200ms（测试断言 < 1500ms） |
+| 安全网 | 引擎（或服务器）返回的 `from/to` 一律经 `validateMove` 复核；非法 / `(none)` / 超时一律回退 |
+| 调用方 | 服务端 AI 房间（[room.ts `runAiMove()`](../../src/server/room.ts)）、复盘 AI 推荐（`hintFor`）、渲染层本地人机 / 残局防守（`POST /api/ai/move` 由承载页面的服务器代跑） |
 
 ### 3.4 局域网自动发现（renderer/discover.ts）
 
@@ -84,7 +91,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 项 | 规格 |
 |---|---|
 | 入口 | `POST /api/host/start-ai`（可选 `?depth=1..4`）+ 首页「人机对弈」子菜单（选难度后点「开始对弈」） |
-| 难度 | `depth` 搜索深度：2 菜鸟 / 3 中级（默认选中）/ 4 高手；缺省或非法值沿用当前 `aiDepth`；响应回显生效的 `depth` |
+| 难度 | 外部契约 `depth 1..4`：1 入门 / 2 菜鸟 / 3 中级（默认选中）/ 4 高手；缺省或非法值沿用当前 `aiDepth`；响应回显生效的 `depth`。**v3.0：`depth` 不再等价于搜索深度，改由引擎映射为皮卡鱼 `Skill Level` + `go movetime`（见 [ADR-0011](./0011-pikafish-engine.md)）** |
 | 席位 | AI 占虚拟黑方（无连接）；`guest` 加入被拒（`人机对局，无法加入`）；观战者可加入 |
 | 行为 | 人类执红先行；AI 在 `aiDelayMs`（默认 400ms）后自动应招；`draw_request` → AI 拒绝；`undo_request` → 自动同意；`restart_request` → 自动同意并开新局 |
 | 与宽限 | AI 模式无客方连接，不触发断线宽限 |
@@ -120,7 +127,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 放弃开局 | 离开 / 宽限超时 / 停止托管时 `abandonGame()` 清空进行中记录，避免串到下一局 |
 | 列表 | `GET /api/history` → `{ games: GameRecordSummary[] }`（最近在前） |
 | 明细 | `GET /api/history/:id` → `GameRecord`（含 `moves`）；未知 id → 404 |
-| AI 推荐 | `GET /api/ai/hint?id=&index=&depth=`：按 `moves` 前 `index` 步用 `makeMove` 复原局面，行棋方 = `index % 2 === 0 ? 'r' : 'b'`，`pickMove`（depth 默认 2，上限 4，时限 1.2s）返回推荐着法 + `describeMove` 中文记谱；无着法回 `{ none: true }` |
+| AI 推荐 | `GET /api/ai/hint?id=&index=&depth=`：按 `moves` 前 `index` 步用 `makeMove` 复原局面，行棋方 = `index % 2 === 0 ? 'r' : 'b'`；**v3.0 起改由 `hintFor(record, index, level, engine)` 调引擎出着法**（`level` 默认 2、上限 4），经 `validateMove` 复核后返回推荐着法 + `describeMove` 中文记谱；无着法回 `{ none: true }`。HTTP 处理函数改为 async（`handleAiHint`） |
 | 客户端 | `review.ts`：列表 → 复盘；复盘棋盘复用 `renderBoard`（`hint` 高亮起点/终点），步进一次一步，AI 推荐 120ms 防抖 + 序号防乱序 |
 
 ### 3.11 杀法识别与终局展示（v2.4）
@@ -154,7 +161,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 状态机 | [game.ts `setup(board, turn)`](../../src/shared/game.ts)：以自定义局面开局（清空着法 / 悔棋栈 / 待处理请求，标记先行方是否被将军），残局与既有 `applyMove` / `undo` / 终局判定完全复用 |
 | 入口 | 首页木质挂板「残局挑战」（`btn-endgame`，v2.5 由 5 入口改为 6 入口）→ 大面板 `menu-endgame` 列出题库（名称 / 难度徽章 / **最优步数** / **状态标记**），点击任意一条即开局 |
 | 对局页 | 残局用独立操作行 `actions-endgame`：**悔棋**（连同 AI 应招一起回退）、**提示**（不限步数，用 `minMateDepth` 求出当前局面最少取胜步数，再由 `findMateMove` 给出对应着法——棋盘高亮起点 / 终点金环 + 轻提示记谱 + 步数；已走成无法强制取胜则提示重来）、**下一关**（`nextPuzzle` 直接进入题库中的下一局；题库中无下一局时按钮隐藏，已到末关点击提示「已经是最后一关了」）、**重来**（恢复初始局面）、**离开**；隐藏「和棋 / 认输」。侧栏 `eg-box` 显示残局名、难度、**最优步数**、已用步数与本局要点；状态框显示「轮到你走棋（第 x 步）」（不再有步数上限） |
-| 防守 AI | 复用 [shared/ai.ts `pickMove()`](../../src/shared/ai.ts)：执玩家的对方，搜索深度 4（高手水平）、时限 0.9s、延迟 0.35s 应招；玩家走完一步后由 `endgameEvaluate()` 继续调度 AI（未出结果时） |
+| 防守 AI | 执玩家的对方（高手档 level 4），延迟 0.35s 应招。**v3.0 起改由引擎出着法（皮卡鱼优先，见 [ADR-0011](./0011-pikafish-engine.md)）**：`app.ts runLocalAi()` 经 `POST /api/ai/move` 取着法，请求失败回退 [shared/ai.ts `pickMove()`](../../src/shared/ai.ts)（depth 4 / 0.9s）；玩家走完一步后由 `endgameEvaluate()` 继续调度 AI（未出结果时）。题库可解性由 `minMateDepth` 按「对**最优防守**仍可强制将死」校验，故加强防守不破坏契约 |
 | 胜负判定 | **不限步数**：每步（玩家与 AI）之后只看终局——我方取胜（将死 / 困毙）→ 成功并记录取胜最少步数；被对方将死 / 困毙 → 失败（「被将死 / 被困毙」）。成功弹层可「下一关 / 再来一次 / 返回首页」并显示「用时 N 步（最优 M 步 · 是否达成最优）」，失败弹层可「重来 / 返回首页」 |
 | 记录与状态标记 | 本机记录仅存 `localStorage['lanschess-endgame']`：`id → { win?: 取胜最少步数, fail?: 是否曾失败 }`（兼容 v2.5/v2.6 的「数字 = 最少步数」旧格式，读入时视为已通关；损坏数据按未完成处理）。列表每行状态标记：**勾叉表示完成 / 失败 / 未完成——绿勾（已完成）、红叉（失败）、白勾（未完成）；外圈绿色表示已达成最优步数（`win === goalMoves`）、灰色表示未达成**（[styles.css `.eg-mark`](../../src/renderer/styles.css)） |
 | 杀法展示 | 残局的终局同样走 [§3.11](#311-杀法识别与终局展示v24) 的杀法识别：状态框显示「挑战成功 · 卧槽马杀」并渲染杀法框；因残局不是从标准开局开始，`mateInfo()` 对残局改用 `classifyCheckmate(终局棋盘, 被将死方, { lastMove })`（不推导被吃子） |

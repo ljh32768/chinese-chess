@@ -17,6 +17,7 @@ import {
   GameRecord,
   GuessChoice,
   GuessResult,
+  Move,
   PlayerRef,
   Pos,
   RoomMode,
@@ -25,11 +26,11 @@ import {
 } from '../shared/types.js';
 import { describeMove } from '../shared/notation.js';
 import { classifyCheckmateFromHistory } from '../shared/checkmate.js';
-import { initBoard, makeMove } from '../shared/rules.js';
+import { EngineLevel, EnginePort } from '../shared/engine.js';
+import { cloneBoard, initBoard, makeMove, validateMove } from '../shared/rules.js';
 import { Conn, sendTo as wsSend } from './conn.js';
 import { Game, MoveResult } from '../shared/game.js';
 import { logDebug, logInfo } from './log.js';
-import { pickMove } from '../shared/ai.js';
 
 export const sideLabel = (s: Side): string => (s === 'r' ? '红方' : '黑方');
 export const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
@@ -54,6 +55,8 @@ export interface RoomDeps {
   overTtlMs: number;
   /** 观战人数上限 */
   maxSpectators: number;
+  /** AI 引擎（皮卡鱼优先；引擎不可用时纯 TS） */
+  engine: EnginePort;
   /** 终局落库（服务器统一持久化） */
   onRecord(rec: GameRecord): void;
   /** 房间销毁（终局超时 / 空闲回收 / 房主解散 / 服务器停止） */
@@ -689,7 +692,9 @@ export class Room {
   private armTurnTimer(): void {
     this.clearTurnTimer();
     const turnMs = this.deps.turnMs;
-    if (turnMs <= 0 || this.game.status !== 'playing') {
+    // AI 回合计时豁免：引擎思考耗时不可控，照常计时会把 AI 误判为超时负
+    const aiTurn = this.mode === 'ai' && this.game.turn === 'b';
+    if (turnMs <= 0 || aiTurn || this.game.status !== 'playing') {
       this.game.deadline = null;
       return;
     }
@@ -719,14 +724,45 @@ export class Room {
     if (this.mode !== 'ai' || this.game.status !== 'playing' || this.game.turn !== 'b') return;
     const timer = setTimeout(() => {
       this.aiTimer = null;
-      if (this.game.status !== 'playing' || this.game.turn !== 'b') return;
-      const move = pickMove(this.game.board, 'b', { depth: this.aiDepth });
-      if (!move) return;
-      logInfo(`房间 ${this.id}：AI 走子 ${move.from[0]},${move.from[1]} → ${move.to[0]},${move.to[1]}`);
-      this.applyAndBroadcast(move.from, move.to, 'b');
+      void this.runAiMove();
     }, this.deps.aiDelayMs);
     timer.unref();
     this.aiTimer = timer;
+  }
+
+  /**
+   * 取引擎着法并落子。
+   * 引擎异步返回期间局面可能已变（悔棋 / 重开 / 终局），故返回后必须复核步数与回合；
+   * 着法本身也要经规则引擎校验后才落子。
+   */
+  private async runAiMove(): Promise<void> {
+    if (this.game.status !== 'playing' || this.game.turn !== 'b') return;
+    const seq = this.game.moveSeq;
+    let move: Move | null;
+    try {
+      // 传入克隆棋盘：引擎实现不得改写权威棋盘
+      const result = await this.deps.engine.bestMove(cloneBoard(this.game.board), 'b', this.aiLevel());
+      move = result.move;
+    } catch (err) {
+      logInfo(`房间 ${this.id}：AI 取着法失败（${err instanceof Error ? err.message : String(err)}）`);
+      return;
+    }
+    if (!move) return;
+    if (this.game.moveSeq !== seq || this.game.status !== 'playing' || this.game.turn !== 'b') return;
+    if (validateMove(this.game.board, move.from, move.to, 'b') !== null) {
+      logInfo(`房间 ${this.id}：AI 返回非法着法，已忽略`);
+      return;
+    }
+    logInfo(`房间 ${this.id}：AI 走子 ${move.from[0]},${move.from[1]} → ${move.to[0]},${move.to[1]}`);
+    this.applyAndBroadcast(move.from, move.to, 'b');
+  }
+
+  /** 房间 AI 难度档位（1..4） */
+  private aiLevel(): EngineLevel {
+    const d = Math.floor(this.aiDepth);
+    if (d <= 1) return 1;
+    if (d >= 4) return 4;
+    return d as EngineLevel;
   }
 
   private clearAiTimer(): void {
@@ -888,13 +924,19 @@ export class Room {
 }
 
 /** AI 推荐：按记录 + 步数复原局面，返回该局面行棋方的推荐着法（复盘用） */
-export function hintFor(record: GameRecord, index: number, depth: number): AiHint | null {
+export async function hintFor(
+  record: GameRecord,
+  index: number,
+  level: EngineLevel,
+  engine: EnginePort,
+): Promise<AiHint | null> {
   const n = Math.max(0, Math.min(Number.isFinite(index) ? Math.floor(index) : 0, record.moves.length));
   const board = initBoard();
   for (let i = 0; i < n; i++) makeMove(board, record.moves[i].from, record.moves[i].to);
   const side: Side = n % 2 === 0 ? 'r' : 'b';
-  const level = Number.isFinite(depth) ? Math.min(4, Math.max(1, Math.floor(depth))) : 2;
-  const move = pickMove(board, side, { depth: level, timeLimitMs: 1200 });
-  if (!move) return null;
+  const result = await engine.bestMove(board, side, level);
+  const move = result.move;
+  // 引擎输出一律经规则引擎复核后再回给前端
+  if (!move || validateMove(board, move.from, move.to, side) !== null) return null;
   return { side, from: move.from, to: move.to, text: describeMove(board, move.from, move.to) };
 }

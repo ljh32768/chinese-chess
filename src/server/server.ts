@@ -14,12 +14,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { ClientMessage, OnlinePlayer, Role, ServerMessage, decode } from '../shared/protocol.js';
+import { EnginePort, normalizeLevel } from '../shared/engine.js';
 import { GameRecord, PlayerRef, RoomMode, RoomSummary, Side } from '../shared/types.js';
+import { fenToBoard } from '../shared/uci.js';
 import { AccountStore } from './accounts.js';
 import { Conn, sendTo as wsSend } from './conn.js';
 import { HistoryStore } from './history.js';
 import { logDebug, logInfo } from './log.js';
 import { hintFor, Room, RoomDeps } from './room.js';
+import { createEngine } from './engine-select.js';
 
 /** 服务器版本（供 /api/server-info 展示） */
 export const SERVER_VERSION = '2.0.0';
@@ -111,6 +114,8 @@ export interface GameServerOptions {
   overTtlMs?: number;
   /** 账号与对局记录的持久化目录；null 表示仅内存 */
   dataDir?: string | null;
+  /** AI 引擎；缺省按 `createEngine()` 自动选择（优先皮卡鱼，不可用时纯 TS） */
+  engine?: EnginePort;
 }
 
 export class GameServer {
@@ -123,7 +128,9 @@ export class GameServer {
   private readonly conns = new Set<Conn>();
   private port = 0;
   private aiDepth: number;
-  private readonly opts: Required<GameServerOptions>;
+  /** AI 引擎（皮卡鱼优先；引擎不可用时为纯 TS） */
+  private readonly engine: EnginePort;
+  private readonly opts: Required<Omit<GameServerOptions, 'engine'>>;
 
   constructor(opts: GameServerOptions = {}) {
     this.opts = {
@@ -141,6 +148,7 @@ export class GameServer {
       dataDir: opts.dataDir === undefined ? path.resolve(process.cwd(), 'data') : opts.dataDir,
     };
     this.aiDepth = this.opts.aiDepth;
+    this.engine = opts.engine ?? createEngine();
     this.accounts = new AccountStore(this.opts.dataDir);
     this.history = new HistoryStore(this.opts.dataDir);
   }
@@ -157,7 +165,10 @@ export class GameServer {
     wss.on('connection', (ws) => this.handleConnection(ws));
 
     return new Promise((resolve, reject) => {
-      const onError = (err: Error) => reject(err);
+      const onError = (err: Error) => {
+        this.engine.dispose?.();
+        reject(err);
+      };
       server.once('error', onError);
       server.listen(this.opts.port, this.opts.host, () => {
         server.off('error', onError);
@@ -172,6 +183,7 @@ export class GameServer {
   /** 关闭服务（销毁所有房间、断开连接并落盘） */
   close(): Promise<void> {
     for (const room of [...this.rooms.values()]) room.close('服务器已关闭');
+    this.engine.dispose?.();
     this.history.flush();
     logInfo('服务器已关闭');
     return new Promise((resolve) => {
@@ -250,15 +262,15 @@ export class GameServer {
         if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
         return this.sendJson(res, 200, record);
       }
+      // AI 走子：渲染层「本地人机对弈 / 残局防守」经承载页面的服务器取一步着法
+      if (pathname === '/api/ai/move') {
+        void this.handleAiMove(req, res).catch((err) => this.sendJson(res, 500, { error: String(err) }));
+        return;
+      }
       // AI 推荐：按记录 + 步数复原局面，返回该局面行棋方的推荐着法
       if (pathname === '/api/ai/hint') {
-        const id = url.searchParams.get('id') ?? '';
-        const record = this.history.get(id);
-        if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
-        const index = Number(url.searchParams.get('index') ?? '0');
-        const depth = Number(url.searchParams.get('depth') ?? '2');
-        const hint = hintFor(record, index, depth);
-        return this.sendJson(res, 200, hint ?? { none: true });
+        void this.handleAiHint(url, res).catch((err) => this.sendJson(res, 500, { error: String(err) }));
+        return;
       }
       if (pathname.startsWith('/api/')) {
         return this.sendJson(res, 404, { error: 'not found' });
@@ -267,6 +279,40 @@ export class GameServer {
     } catch (err) {
       this.sendJson(res, 500, { error: String(err) });
     }
+  }
+
+  /**
+   * AI 走子（渲染层「本地人机对弈 / 残局防守」用）：`{ fen, level }` →
+   * `{ from, to, source }`；无着法回 `{ none: true }`。由承载页面的服务器代跑引擎
+   * （浏览器上下文无法 spawn 原生进程）。
+   */
+  private async handleAiMove(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (req.method !== 'POST') return this.sendJson(res, 405, { error: '仅支持 POST' });
+    let body: { fen?: unknown; level?: unknown };
+    try {
+      body = JSON.parse((await readBody(req)) || '{}') as typeof body;
+    } catch {
+      return this.sendJson(res, 400, { error: '请求体格式不正确' });
+    }
+    const state = typeof body.fen === 'string' ? fenToBoard(body.fen) : null;
+    if (!state) return this.sendJson(res, 400, { error: '局面 FEN 非法' });
+    const result = await this.engine.bestMove(state.board, state.side, normalizeLevel(body.level));
+    if (!result.move) return this.sendJson(res, 200, { none: true, source: result.source });
+    return this.sendJson(res, 200, {
+      from: result.move.from,
+      to: result.move.to,
+      source: result.source,
+    });
+  }
+
+  /** 复盘 AI 推荐：`?id=&index=&depth=` → `AiHint | { none: true }` */
+  private async handleAiHint(url: URL, res: http.ServerResponse): Promise<void> {
+    const record = this.history.get(url.searchParams.get('id') ?? '');
+    if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
+    const index = Number(url.searchParams.get('index') ?? '0');
+    const level = normalizeLevel(url.searchParams.get('depth'));
+    const hint = await hintFor(record, index, level, this.engine);
+    return this.sendJson(res, 200, hint ?? { none: true });
   }
 
   /** 账号 REST 入口（与 WS 的 register / login 同源） */
@@ -290,6 +336,7 @@ export class GameServer {
   }
 
   private sendJson(res: http.ServerResponse, code: number, body: unknown): void {
+    if (res.headersSent) return;
     const data = JSON.stringify(body);
     res.writeHead(code, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store', ...CORS_HEADERS });
     res.end(data);
@@ -623,6 +670,7 @@ export class GameServer {
       aiDelayMs: this.opts.aiDelayMs,
       overTtlMs: this.opts.overTtlMs,
       maxSpectators: this.opts.maxSpectators,
+      engine: this.engine,
       onRecord: (rec: GameRecord) => this.history.add(rec),
       onClose: this.onRoomClose,
     };
