@@ -8,9 +8,9 @@
 | 编号 | 标题 | 覆盖模块 / 功能入口 |
 |---|---|---|
 | [0001](./0001-host-authoritative-architecture.md) | 主机权威 + WebSocket + 纯 TS 规则引擎的总体架构 | 分层与依赖、权威边界、进程形态、部署 |
-| [0002](./0002-rules-engine.md) | 规则引擎模块规格 | 走法生成、送将/照面过滤、将军/将死/困毙、`validateMove` |
+| [0002](./0002-rules-engine.md) | 规则引擎模块规格 | 走法生成、送将/照面过滤、将军/将死/困毙、`validateMove`、重复局面裁决（长将/长捉/三次重复，`repetition.ts`） |
 | [0003](./0003-wire-protocol.md) | 通信协议模块规格 | 全部消息类型（含先手方式 / 猜先）、字段约束、典型消息流、错误处理 |
-| [0004](./0004-game-state-machine.md) | 对局状态机模块规格 | 状态流转、`applyMove` 校验链、终局组合 |
+| [0004](./0004-game-state-machine.md) | 对局状态机模块规格 | 状态流转、`applyMove` 校验链、终局组合、重复局面裁决触发（`posKeys` / `moveNatures`） |
 | [0005](./0005-host-server.md) | 主机服务模块规格 | HTTP API（含对局回顾 / AI 推荐）、静态服务、WS 路由、席位分配、连接生命周期、局域网 IP 选择 |
 | [0006](./0006-process-entries.md) | 进程入口与构建规格 | Electron/CLI 入口、端口策略、tsc 构建与产物 |
 | [0007](./0007-renderer-ui.md) | 渲染层模块规格 | 页面流转、棋盘 Canvas 渲染与皮肤/音效、走子交互、对局回顾与复盘、心跳、视角翻转 |
