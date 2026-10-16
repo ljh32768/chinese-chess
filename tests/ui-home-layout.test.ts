@@ -439,13 +439,13 @@ describe('v2.8 走子动画与棋盘正中提示（v2.10：改为黑色大圆）
     expect(decl('.board-tactics', 'pointer-events')).toBe('none');
   });
 
-  it('正中提示 1.5s 渐入渐出：0% 透明 → 18% 显现 → 74% 保持 → 100% 透明', () => {
-    expect(decl('.board-banner.show', 'animation')).toContain('banner-cycle 1.5s');
+  it('正中提示 2.5s 渐入渐出：0% 透明 → 14% 显现 → 80% 保持 → 100% 透明', () => {
+    expect(decl('.board-banner.show', 'animation')).toContain('banner-cycle 2.5s');
     expect(CSS).toContain('@keyframes banner-cycle');
     const kf = CSS.slice(CSS.indexOf('@keyframes banner-cycle'));
     expect(kf).toContain('0% { opacity: 0');
-    expect(kf).toContain('18% { opacity: 1');
-    expect(kf).toContain('74% { opacity: 1');
+    expect(kf).toContain('14% { opacity: 1');
+    expect(kf).toContain('80% { opacity: 1');
     expect(kf).toContain('100% { opacity: 0');
   });
 
@@ -469,11 +469,11 @@ describe('v2.8 走子动画与棋盘正中提示（v2.10：改为黑色大圆）
     }
   });
 
-  it('app.ts：走子动画按 rAF 推进、提示按局面触发并在 1.5s 后隐藏', () => {
+  it('app.ts：走子动画按 rAF 推进、提示按局面触发并在 2.5s 后隐藏', () => {
     expect(APP).toContain('const MOVE_ANIM_MS');
     expect(APP).toContain('function animateMove(');
     expect(APP).toContain('requestAnimationFrame');
-    expect(APP).toContain('const BANNER_MS = 1500');
+    expect(APP).toContain('const BANNER_MS = 2500');
     expect(APP).toContain('function maybeBanner(');
     expect(APP).toContain('function showBanner(');
     expect(APP).toContain("bannerContent('check'");

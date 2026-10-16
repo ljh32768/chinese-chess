@@ -14,6 +14,8 @@
  * 2) 战术识别（闪击 / 闪将 / 将军抽 / 串打 / 捉双）：走子后给出「战术提示」的标签与被威胁的棋子。
  *    纯函数，复用 `shared/rules.ts` 的走法与攻击判定，便于单测；只做**启发式提示**，
  *    不参与任何规则 / 胜负判定。判定口径见 ADR-0007 §3.5.7。
+ *    凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都要求**两者必然失去其一**：对方无论怎样应着，
+ *    都至少有一枚被攻击的子仍会被吃到（排除「被攻击子反吃攻击子」「垫子挡线」「移走炮架」等可两全的伪战术）。
  */
 
 import { cloneBoard, findKing, isAttacked, legalMoves, pieceMoves, sideHasAnyMove } from './rules.js';
@@ -131,9 +133,6 @@ export interface TacticHit {
 /** 子力价值：用于「值得抽 / 值得捉」与判断被捉先后 */
 export const VALUE: Record<PieceType, number> = { K: 10000, R: 9, C: 4.5, N: 4, A: 2, B: 2, P: 1 };
 
-/** 值得一捉的子力门槛（马及以上） */
-const WORTH_M = VALUE.N;
-
 /** 兵种中文名（将军抽 X 用） */
 const PIECE_CN: Record<string, string> = { R: '车', C: '炮', N: '马' };
 
@@ -211,8 +210,53 @@ function isLinePiece(board: Board, pos: Pos): boolean {
 }
 
 /**
- * 车 / 炮的「串打」射线：某方向上「前一子之后还有一枚更值得捉的敌子」。
- * 返回每条射线上 [前子, 后子] 的坐标。
+ * 对方（`opp`）在当前局面下的全部合法应着（每种应着各返回一份局面副本）。
+ * 用于「两者必然失去其一」验证：逐个模拟对方的每一种应着。
+ */
+function repliesOf(board: Board, opp: Side): Board[] {
+  const out: Board[] = [];
+  for (let r = 0; r < board.length; r++) {
+    for (let c = 0; c < board[r].length; c++) {
+      const p = board[r][c];
+      if (!p || p.s !== opp) continue;
+      for (const [tr, tc] of legalMoves(board, r, c)) {
+        const nb = cloneBoard(board);
+        nb[tr][tc] = nb[r][c];
+        nb[r][c] = null;
+        out.push(nb);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 「两者必然失去其一」：走子方在 `actor` 处的子，是否能在对方**任意**应着之后，
+ * 仍然攻击到 `targets` 中至少一枚（该目标须仍是对方的子）。
+ * 用来排除三类「可两全」的伪战术：被攻击子反吃攻击子、垫子挡住射线、移走炮架。
+ * 按攻击关系（`pieceMoves`）判定，不再额外校验自身是否被将——本模块只做提示。
+ */
+function mustLoseOne(board: Board, actor: Pos, targets: Pos[], me: Side): boolean {
+  const opp = other(me);
+  const mine = board[actor[0]][actor[1]];
+  if (!mine || mine.s !== me || !targets.length) return false;
+  const replies = repliesOf(board, opp);
+  if (!replies.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
+  for (const nb of replies) {
+    const still = nb[actor[0]][actor[1]];
+    if (!still || still.s !== me) return false; // 攻击子被吃 → 被攻击子全部保住
+    const hit = targets.some((t) => {
+      const tp = nb[t[0]][t[1]];
+      return !!tp && tp.s === opp && attacks(nb, actor, t);
+    });
+    if (!hit) return false;
+  }
+  return true;
+}
+
+/**
+ * 车 / 炮的「串打」射线：某方向上「前一子之后还有一枚值得捉的敌子」，
+ * 且前 / 后两子都值得捉（马及以上）。返回每条射线上 [前子, 后子] 的坐标。
  */
 function skewerRays(board: Board, from: Pos, type: PieceType, opp: Side): Pos[][] {
   const rays: Pos[][] = [];
@@ -230,7 +274,14 @@ function skewerRays(board: Board, from: Pos, type: PieceType, opp: Side): Pos[][
     // 车：第一枚即为当前可吃目标（须为敌方）；炮：第一枚是炮架，第二枚才是可吃目标
     const front = type === 'R' ? line[0] : line[1];
     const back = type === 'R' ? line[1] : line[2];
-    if (front && back && front.piece.s === opp && back.piece.s === opp && VALUE[back.piece.t] >= WORTH_M) {
+    if (
+      front &&
+      back &&
+      front.piece.s === opp &&
+      back.piece.s === opp &&
+      isWorth(front.piece.t) &&
+      isWorth(back.piece.t)
+    ) {
       rays.push([front.pos, back.pos]);
     }
   }
@@ -267,12 +318,20 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
     if (discovered) hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
   }
 
-  // 将军抽：走动的子本身发出将军，且同时攻击敌方的马 / 车 / 炮
+  // 将军抽：走动的子本身发出将军，且同时新攻击敌方的马 / 车 / 炮，对方无法两全（必失其一）
   if (oppKing && attacks(after, move.to, oppKing)) {
     const forked = piecesOf(after, opp).filter(
       ({ pos, piece }) => isWorth(piece.t) && attacks(after, move.to, pos),
     );
-    if (forked.length) {
+    if (
+      forked.length &&
+      mustLoseOne(
+        after,
+        move.to,
+        forked.map((f) => f.pos),
+        me,
+      )
+    ) {
       const best = forked.reduce((a, b) => (VALUE[b.piece.t] > VALUE[a.piece.t] ? b : a));
       hits.push({
         kind: 'check-fork',
@@ -283,19 +342,29 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
     }
   }
 
-  // 串打：走动的车 / 炮形成「前子之后还有一枚更值得捉的敌子」
+  // 串打：走动的车 / 炮沿同一条射线攻击两枚值得捉的敌子，且对方无法两全（必失其一）
   if (moved.t === 'R' || moved.t === 'C') {
-    const rays = skewerRays(after, move.to, moved.t, opp);
-    if (rays.length) {
-      hits.push({ kind: 'skewer', label: '串打', actors: [move.to], threats: rays.flat() });
+    const ray = skewerRays(after, move.to, moved.t, opp).find(([front, back]) =>
+      mustLoseOne(after, move.to, [front, back], me),
+    );
+    if (ray) {
+      hits.push({ kind: 'skewer', label: '串打', actors: [move.to], threats: ray });
     }
   }
 
-  // 捉双：走动的子同时攻击两枚及以上「值得捉」的敌子（不含将）
+  // 捉双：走动的子同时攻击两枚及以上「值得捉」的敌子（不含将），且对方无法两全（必失其一）
   const valuable = piecesOf(after, opp).filter(
     ({ pos, piece }) => isWorth(piece.t) && attacks(after, move.to, pos),
   );
-  if (valuable.length >= 2) {
+  if (
+    valuable.length >= 2 &&
+    mustLoseOne(
+      after,
+      move.to,
+      valuable.map((f) => f.pos),
+      me,
+    )
+  ) {
     hits.push({ kind: 'fork', label: '捉双', actors: [move.to], threats: valuable.map((f) => f.pos) });
   }
 

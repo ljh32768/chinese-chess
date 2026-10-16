@@ -247,8 +247,8 @@ function toast(msg: string): void {
 
 // -------------------------------------------------------------- 正中提示条（将军 / 绝杀）
 
-/** 提示条显示时长（毫秒）：渐入 → 保持 → 渐出 */
-const BANNER_MS = 1500;
+/** 提示条显示时长（毫秒）：渐入 → 保持 → 渐出（较 v2.10 延长，便于看清将军 / 绝杀） */
+const BANNER_MS = 2500;
 let bannerTimer = 0;
 /** 上一帧提示条的局势键与时间：联机走子会连收 move_applied + game_over，按此去重 */
 let lastBannerKey = '';
@@ -535,13 +535,36 @@ function animateMove(from: Pos, to: Pos, startLifted = false): void {
   kickAnim();
 }
 
+/** 被将军的将 / 帅颤抖：短促衰减（不再一直抖），幅度取格距的一小部分；减少动态效果时不做 */
+const SHAKE_MS = 1100;
+const SHAKE_AMP_RATIO = 0.03;
+/** 当前颤抖的局势键（行棋方 + 步序）与起始时间：每次新将军重新起算，约 1.1s 后停止 */
+const shakeState = { key: '', start: 0 };
+
 /** 组装棋盘渲染视图（纯展示，不含规则判定） */
 function boardView(): BoardView {
   const playable = canPlay();
   const now = performance.now();
   const sk = skin();
-  // 被将军的将 / 帅：颤抖位移（约 ±0.06 格距；减少动态效果时不做）
-  const shakeAmp = sk.spaceX * 0.06;
+  // 被将军的将 / 帅：仅在将军出现后的短窗口内颤抖，幅度随时间衰减到 0
+  const key = `${S.turn}:${S.moveSeq}`;
+  if (S.check && S.status === 'playing') {
+    if (shakeState.key !== key) {
+      shakeState.key = key;
+      shakeState.start = now;
+    }
+  } else if (shakeState.key) {
+    shakeState.key = '';
+  }
+  const shakeElapsed = now - shakeState.start;
+  const shaking =
+    shakeState.key === key &&
+    S.check &&
+    S.status === 'playing' &&
+    !prefersReducedMotion() &&
+    shakeElapsed < SHAKE_MS;
+  const shakeDecay = Math.max(0, 1 - shakeElapsed / SHAKE_MS);
+  const shakeAmp = sk.spaceX * SHAKE_AMP_RATIO * shakeDecay;
   return {
     board: S.board,
     selected: S.selected,
@@ -559,10 +582,7 @@ function boardView(): BoardView {
       : null,
     lifts: S.lifts.length ? S.lifts.map((a) => ({ pos: a.pos, t: liftProgress(a, now) })) : null,
     checkKing: S.check ? findKing(S.board, S.turn) : null,
-    kingShake:
-      S.check && S.status === 'playing' && !prefersReducedMotion()
-        ? { dx: Math.sin(now / 28) * shakeAmp, dy: Math.cos(now / 19) * shakeAmp }
-        : null,
+    kingShake: shaking ? { dx: Math.sin(now / 28) * shakeAmp, dy: Math.cos(now / 19) * shakeAmp } : null,
     interactiveSide: playable ? S.side : null,
     hover: playable ? S.hover : null,
     threats: S.fx ? S.threats : null,

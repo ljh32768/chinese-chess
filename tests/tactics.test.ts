@@ -215,86 +215,97 @@ describe('闪击（discovered-attack）', () => {
 });
 
 describe('将军抽（check-fork）', () => {
-  it('走动的车将军且攻击敌车 → 将军抽车', () => {
+  it('走动的车将军且抽马（马无法反吃）→ 将军抽马', () => {
     const b = emptyBoard();
     kings(b);
-    put(b, 1, 0, 'R', 'r');
-    put(b, 1, 8, 'R', 'b');
-    const hits = run(b, [1, 0], [1, 4]);
+    put(b, 2, 0, 'R', 'r');
+    put(b, 2, 7, 'N', 'b'); // 被抽的马（与车同在第 2 行，马无法反吃车）
+    const hits = run(b, [2, 0], [2, 4]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].kind).toBe('check-fork');
+    expect(hits[0].label).toBe('将军抽马');
+    expect(hits[0].threats).toEqual([[2, 7]]);
+  });
+
+  it('同时抽到车与炮时取最高价值标签（车 > 炮）', () => {
+    const b = emptyBoard();
+    kings(b);
+    put(b, 4, 2, 'N', 'r');
+    put(b, 1, 5, 'R', 'b'); // 被抽的车（马位，车无法反吃马）
+    put(b, 4, 4, 'C', 'b'); // 被抽的炮（无炮架，无法反吃马）
+    const hits = run(b, [4, 2], [2, 3]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('check-fork');
     expect(hits[0].label).toBe('将军抽车');
-    expect(hits[0].threats).toEqual([[1, 8]]);
-  });
-
-  it('被抽的是马时标签为「将军抽马」', () => {
-    const b = emptyBoard();
-    kings(b);
-    put(b, 1, 0, 'R', 'r');
-    put(b, 1, 8, 'N', 'b');
-    const hits = run(b, [1, 0], [1, 4]);
-    expect(hits[0].label).toBe('将军抽马');
-  });
-
-  it('抽子按下车 > 炮 > 马 取最高价值标签', () => {
-    const b = emptyBoard();
-    kings(b);
-    put(b, 1, 0, 'R', 'r');
-    put(b, 1, 6, 'C', 'b'); // 炮（4.5）——与车同行
-    put(b, 3, 4, 'N', 'b'); // 马（4）——与车同列
-    const hits = run(b, [1, 0], [1, 4]);
-    expect(hits[0].label).toBe('将军抽炮');
     expect(hits[0].threats).toEqual([
-      [1, 6],
-      [3, 4],
+      [1, 5],
+      [4, 4],
     ]);
+  });
+
+  it('被抽的子可反吃攻击子（对方能两全）→ 不成立', () => {
+    const b = emptyBoard();
+    kings(b);
+    put(b, 1, 0, 'R', 'r');
+    put(b, 1, 8, 'R', 'b'); // 黑车可直取走到 (1,4) 的红车（黑将亦可吃），两子皆保
+    expect(run(b, [1, 0], [1, 4])).toHaveLength(0);
   });
 });
 
 describe('串打（skewer）', () => {
-  it('车在同一直线上前有敌车、后有敌炮 → 串打', () => {
+  it('车在同一射线以前马后车（对方两全不得）→ 串打', () => {
     const b = emptyBoard();
-    kings(b, [2, 5]);
-    put(b, 5, 1, 'R', 'r');
-    put(b, 5, 6, 'R', 'b'); // 前
-    put(b, 5, 8, 'C', 'b'); // 后（更值得捉）
-    const hits = run(b, [5, 1], [5, 4]);
+    kings(b, [0, 5]);
+    put(b, 5, 0, 'R', 'r');
+    put(b, 5, 5, 'N', 'b'); // 前子：马（与红车相邻，无法反吃）
+    put(b, 5, 6, 'R', 'b'); // 后子：车（被前马挡住，无法反吃红车）
+    const hits = run(b, [5, 0], [5, 4]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('skewer');
     expect(hits[0].label).toBe('串打');
     expect(hits[0].threats).toEqual([
+      [5, 5],
       [5, 6],
-      [5, 8],
     ]);
   });
 
-  it('炮借炮架后前有敌车、后有敌马 → 串打', () => {
+  it('炮借己方炮架后以前车后马 → 串打', () => {
     const b = emptyBoard();
-    kings(b, [2, 5]);
-    put(b, 7, 4, 'C', 'r'); // 红炮（走到 5,4）
-    put(b, 5, 5, 'P', 'r'); // 炮架
-    put(b, 5, 6, 'R', 'b'); // 前
-    put(b, 5, 8, 'N', 'b'); // 后
-    const hits = run(b, [7, 4], [5, 4]);
+    kings(b, [0, 5]);
+    put(b, 5, 1, 'C', 'r'); // 红炮（走到 5,4）
+    put(b, 5, 5, 'P', 'r'); // 己方炮架（对方无法移走）
+    put(b, 5, 6, 'R', 'b'); // 前子：车
+    put(b, 5, 7, 'N', 'b'); // 后子：马
+    const hits = run(b, [5, 1], [5, 4]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('skewer');
+    expect(hits[0].label).toBe('串打');
+  });
+
+  it('前子可反吃攻击子（对方能两全）→ 不成立（不误报串打）', () => {
+    const b = emptyBoard();
+    kings(b, [2, 5]);
+    put(b, 5, 1, 'R', 'r');
+    put(b, 5, 6, 'R', 'b'); // 前子：车（可直取走到 (5,4) 的红车）
+    put(b, 5, 8, 'C', 'b'); // 后子：炮
+    expect(run(b, [5, 1], [5, 4])).toHaveLength(0);
   });
 });
 
 describe('捉双（fork）', () => {
-  it('马同时捉住敌车与敌马（不同线路）→ 捉双', () => {
+  it('马同时捉住两枚敌车（不同线路、对方无法两全）→ 捉双', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 5, 2, 'N', 'r');
-    put(b, 2, 3, 'R', 'b');
-    put(b, 6, 5, 'N', 'b');
+    put(b, 2, 3, 'R', 'b'); // 马位可捉到的敌车（车无法反吃马）
+    put(b, 6, 3, 'R', 'b'); // 另一路敌车
     const hits = run(b, [5, 2], [4, 4]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('fork');
     expect(hits[0].label).toBe('捉双');
     expect(hits[0].threats).toEqual([
       [2, 3],
-      [6, 5],
+      [6, 3],
     ]);
   });
 
