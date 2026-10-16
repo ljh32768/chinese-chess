@@ -20,7 +20,8 @@ const CSS = readFileSync(path.join(ROOT, 'src', 'renderer', 'styles.css'), 'utf8
   '',
 );
 const HTML = readFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), 'utf8');
-const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8');
+// 统一为 LF：Windows 检出（core.autocrlf）会把换行变成 CRLF，多行断言不应因此失败
+const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8').replace(/\r\n/g, '\n');
 const BG_PNG = path.join(ROOT, 'src', 'renderer', 'assets', 'img', 'init_bg.png');
 
 // ---------------------------------------------------------------- CSS 解析辅助
@@ -473,5 +474,39 @@ describe('v2.8 走子动画与棋盘正中提示条', () => {
     expect(APP).toContain('applySnapshot(game.snapshot());\n  animateMove(from, to, opts.startLifted);');
     // 绘制侧：抬起帧与走子动画帧
     expect(APP).toContain('lifts: S.lifts.length ? S.lifts.map');
+  });
+});
+
+describe('吃子提示（绿色可吃 / 红色有险）', () => {
+  it('对局侧栏含「吃子提示」切换按钮，默认关闭并带按压态与说明', () => {
+    expect(HTML).toContain('id="btn-hint"');
+    expect(HTML).toContain('value="吃子提示"');
+    expect(HTML).toContain('aria-pressed="false"');
+    // 初始隐藏：进入对局后由 updatePanel 按状态放开
+    expect(HTML).toMatch(/id="btn-hint"[\s\S]{0,200}?hidden/);
+    expect(HTML).toContain('绿色 = 可以吃掉的对方无根子或小换大；红色 = 会被对方吃掉的己方子');
+  });
+
+  it('样式：开启态用金色实底强调，并有金色焦点环', () => {
+    expect(decl('#btn-hint', 'cursor')).toBe('pointer');
+    expect(declsOf('#btn-hint.on')).toContain('--accent');
+    // 焦点环：与 #btn-invite 同组
+    expect(CSS).toContain('#btn-hint:focus-visible');
+    // 窄屏下与状态框同列铺满
+    expect(CSS).toMatch(/#btn-hint\s*\{\s*flex:\s*1 1 100%/);
+  });
+
+  it('app.ts 接线：状态 / 计算 / 绘制 / 切换 / 状态刷新', () => {
+    expect(APP).toContain("import { CaptureHints, captureHints } from '../shared/tactics.js'");
+    expect(APP).toContain('captureHint: false,');
+    expect(APP).toContain('hints: null as CaptureHints | null,');
+    expect(APP).toContain('function refreshCaptureHints()');
+    expect(APP).toContain('captureHints(S.board, S.side)');
+    expect(APP).toContain('refreshCaptureHints();');
+    expect(APP).toContain('capture: S.hints,');
+    expect(APP).toContain('function toggleCaptureHint()');
+    expect(APP).toContain("$('btn-hint').addEventListener('click', toggleCaptureHint)");
+    expect(APP).toContain("hintBtn.classList.toggle('on', S.captureHint)");
+    expect(APP).toContain("hintBtn.setAttribute('aria-pressed'");
   });
 });

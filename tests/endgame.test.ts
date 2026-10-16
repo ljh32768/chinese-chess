@@ -35,7 +35,8 @@ import { Board, Cell, Move, PieceType, Side } from '../src/shared/types.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HTML = readFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), 'utf8');
 const CSS = readFileSync(path.join(ROOT, 'src', 'renderer', 'styles.css'), 'utf8');
-const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8');
+// 统一为 LF：Windows 检出（core.autocrlf）会把换行变成 CRLF，多行断言不应因此失败
+const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8').replace(/\r\n/g, '\n');
 
 const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
 

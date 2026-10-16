@@ -155,6 +155,20 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 记录与状态标记 | 本机记录仅存 `localStorage['lanschess-endgame']`：`id → { win?: 取胜最少步数, fail?: 是否曾失败 }`（兼容 v2.5/v2.6 的「数字 = 最少步数」旧格式，读入时视为已通关；损坏数据按未完成处理）。列表每行状态标记：**勾叉表示完成 / 失败 / 未完成——绿勾（已完成）、红叉（失败）、白勾（未完成）；外圈绿色表示已达成最优步数（`win === goalMoves`）、灰色表示未达成**（[styles.css `.eg-mark`](../../src/renderer/styles.css)） |
 | 杀法展示 | 残局的终局同样走 [§3.11](#311-杀法识别与终局展示v24) 的杀法识别：状态框显示「挑战成功 · 卧槽马杀」并渲染杀法框；因残局不是从标准开局开始，`mateInfo()` 对残局改用 `classifyCheckmate(终局棋盘, 被将死方, { lastMove })`（不推导被吃子） |
 
+### 3.13 吃子提示（v2.10）
+
+| 项 | 规格 |
+|---|---|
+| 视角 | 以本端玩家一方（`S.side`）为视角：绿色标「可吃的对方子」，红色标「会被吃的己方子」；观战无「自己 / 对方」之分，不提示 |
+| 分析模块 | 新增 [shared/tactics.ts](../../src/shared/tactics.ts)：纯函数、无 DOM / 网络依赖。`captureHints(board, side)` 返回 `{ targets, threats }`——`targets` 为可获利吃掉的对方棋子（绿），`threats` 为会被对方吃掉的己方棋子（红）；`threats` 即「以对方视角算 targets」，红黑天然对称 |
+| 可获利吃子 | `profitableTargets(board, side)`：对每个对方棋子（**不含将帅**）所在点 S——先一次性算出该方所有合法着法（`legalMoves`，已过滤送将 / 照面）得到每个落点最便宜的攻击者价值 `minAttacker`；再判 S 是否**有根**（见下）。判据：`minAttacker` 存在且「**无根 → 白吃**」或「**有根但目标价值 > `minAttacker` → 小换大**」 |
+| 「有根」判定 | 有根 = 己方能回头反吃：把 S 临时换成**对方占位子**后调 `isAttacked(S, side)`。不能用空格占位（炮吃子需炮架，空格会让炮被误判为有根），也不能直接用原盘面（S 上的己方子会被 `pieceMoves` 跳过 → 把无保护子误判为无根、把相邻/同线的保护子误判为无根） |
+| 价值表 | `PIECE_VALUE`：车 9 / 炮 4.5 / 马 4 / 士象 2 / 兵卒 1（帅将兜底极大值，正常不参与提示） |
+| 明确不做 | 只做一手静态估值：不考虑牵制（被牵制的「根」仍算有根）、不考虑多子连环交换与反吃链、不考虑机动性 / 位置价值；**价值相同的有根交换（一换一）不提示** |
+| 棋盘绘制 | [board.ts](../../src/renderer/board.ts) `BoardView.capture`（`CaptureHints`）：绿环 `HINT_TARGET_COLOR` / 红环 `HINT_THREAT_COLOR`，半径 `disc/2 + 4`、宽 3、alpha 0.9；画在棋子与「可吃子红环」之上、将军警示环之下（见 ADR-0007 §3.5 绘制计划） |
+| 交互 | 对局侧栏「吃子提示」按钮（`btn-hint`，**默认关闭**）：仅 `status === 'playing'` 且非观战时可见；点击切换，开启后用金色实底强调（`#btn-hint.on`）并置 `aria-pressed`；结果在 `render()` 时由 `refreshCaptureHints()` 重算，悬停 / 脉冲帧只读 `S.hints`（不重复计算） |
+| 覆盖范围 | 联机对战、本地人机、服务器 AI 房间与残局——凡有本地盘面且对局进行中的模式 |
+
 ## 4. 代码入口
 
 | 内容 | 位置 |
@@ -173,6 +187,8 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 残局界面 | [index.html `menu-endgame`（含 `btn-eg-check`）/ `actions-endgame`（含 `btn-eg-next`）/ `eg-box`](../../src/renderer/index.html)、[styles.css `.eg-row` / `.eg-mark` / `.eg-info` / `.eg-check-*`](../../src/renderer/styles.css) |
 | 杀法落库 | [room.ts `saveRecord()`](../../src/server/room.ts)、[history.ts `toSummary()`](../../src/server/history.ts)（`killMethod`） |
 | 杀法展示 | [app.ts `mateInfo()` / `kill-box`](../../src/renderer/app.ts)、[review.ts `mateOf()` / `replay-mate-box`](../../src/renderer/review.ts)、[index.html](../../src/renderer/index.html)、[styles.css](../../src/renderer/styles.css) |
+| 吃子提示分析 | [tactics.ts](../../src/shared/tactics.ts)（`captureHints` / `profitableTargets` / `PIECE_VALUE`） |
+| 吃子提示界面 | [app.ts `toggleCaptureHint()` / `refreshCaptureHints()`](../../src/renderer/app.ts)、[board.ts `BoardView.capture` / `HINT_TARGET_COLOR` / `HINT_THREAT_COLOR`](../../src/renderer/board.ts)、[index.html `btn-hint`](../../src/renderer/index.html)、[styles.css `#btn-hint`](../../src/renderer/styles.css) |
 | 状态机扩展 | [game.ts](../../src/shared/game.ts)（`history` / `undo` / `timeout` / `deadline`） |
 | 渲染层扩展 | [app.ts](../../src/renderer/app.ts)（吃子面板 / 悔棋 / 观战 / 倒计时 / 搜索 / 先手方式）、[review.ts](../../src/renderer/review.ts)（对局回顾 / 复盘 / AI 推荐） |
 | 工程化配置 | [package.json](../../package.json)（dev/lint/format/dist）、[.github/workflows/ci.yml](../../.github/workflows/ci.yml) |
@@ -202,3 +218,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
     新增 `minMateDepth` 单测（一步杀为 1、两步杀上限不足为 0、放宽上限仍取最少）与「题库逐局 `minMateDepth(…, 6) === goalMoves`」；本机记录纯函数单测（完成 / 失败 / 未完成、最优步数判定、旧版数字格式兼容、失败不覆盖已通关、取胜清除失败标记、不改动传入对象）；界面接线断言残局判定已无「超出步数」分支、列表/侧栏改为展示最优步数、状态标记类名（`eg-mark` 的 `win` / `fail` / `todo` / `optimal`）齐备。
   - 界面实测（浏览器）：残局列表 9 条，每行左侧为圆形状态标记、右侧显示「最优 N 步」（未通关时为白勾 + 灰圈）；进入残局后侧栏显示「残局：名 · 难度」「最优：N 步」「已用：M 步」，状态框「轮到你走棋（第 x 步）」，角色提示「不限步数 · 最优 N 步」（均无步数上限写法）；「提示」给出当前局面最快取胜着法并标注步数（实测「提示：车九进八（1 步内取胜）」）且棋盘出现金色高亮环；控制台无报错。
     （说明：将死后的列表标记变化属纯前端渲染逻辑，已由自动化用例覆盖；浏览器自动化工具无法点击 Canvas，故本轮未在浏览器内实盘走完整局。）
+- v2.10（吃子提示，2026-10-16）：
+  - 自动化：`npm test`（342 项，含新增 [tests/tactics.test.ts](../../tests/tactics.test.ts) 11 项）/ `npm run lint` / `npm run format:check` / `npm run build` 全绿；
+    分析用例覆盖开局无提示、无根白吃、有根小换大、等价交换不提示、**炮的「有根」判定（无炮架不算根 / 有炮架算根）**、将帅不参与提示、红黑对称与纯函数性；[tests/board.test.ts](../../tests/board.test.ts) 覆盖提示环的几何（半径 / 颜色 / 坐标 / 翻转）与「未开启不画环」；[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 覆盖按钮结构、开启态样式、焦点环与 `app.ts` 接线。
+  - 说明：提示的「分析 + 绘制 + 交互」三层均由自动化用例覆盖；浏览器自动化工具无法点击 Canvas，故本轮未在浏览器内实盘走完一盘棋验证绿 / 红环。

@@ -40,6 +40,7 @@ import {
   recordWin,
 } from '../shared/endgame.js';
 import { capturedPieces, describeMove } from '../shared/notation.js';
+import { CaptureHints, captureHints } from '../shared/tactics.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
   DEFAULT_PORT,
@@ -166,6 +167,10 @@ const S = {
   lifts: [] as LiftAnim[],
   /** 提示环（残局挑战的「提示」正解首着） */
   hint: null as Move | null,
+  /** 吃子提示是否开启（绿环 = 可吃的对方无根 / 小换大的子，红环 = 会被吃的己方子） */
+  captureHint: false,
+  /** 吃子提示结果；仅在开启且对局中计算，render() 时刷新（悬停 / 脉冲帧只读） */
+  hints: null as CaptureHints | null,
   /** 残局挑战进度；null 表示当前不是残局模式 */
   endgame: null as EndgameState | null,
   /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
@@ -478,6 +483,7 @@ function boardView(): BoardView {
     interactiveSide: playable ? S.side : null,
     hover: playable ? S.hover : null,
     hint: S.hint,
+    capture: S.hints,
   };
 }
 
@@ -528,7 +534,25 @@ function syncPulse(): void {
   }
 }
 
+/**
+ * 刷新吃子提示结果：仅在提示开启、对局进行中且非观战时计算（观战无「自己 / 对方」之分）。
+ * 计算量不大但不必每帧做，故只在 render() 时刷新，悬停 / 脉冲帧只读 `S.hints`。
+ */
+function refreshCaptureHints(): void {
+  const on = S.captureHint && S.status === 'playing' && !S.spectator;
+  S.hints = on ? captureHints(S.board, S.side) : null;
+}
+
+/** 切换吃子提示：绿环 = 可吃掉的对方无根子 / 小换大，红环 = 会被对方吃掉的己方子 */
+function toggleCaptureHint(): void {
+  if (S.status !== 'playing' || S.spectator) return;
+  S.captureHint = !S.captureHint;
+  render();
+  toast(S.captureHint ? '已开启吃子提示：绿环可吃 · 红环有险' : '已关闭吃子提示');
+}
+
 function render(): void {
+  refreshCaptureHints();
   paint();
   updatePanel();
   syncPulse();
@@ -614,6 +638,11 @@ function updatePanel(): void {
   $('actions-endgame').hidden = !eg || over;
   $('actions-over').hidden = !over || S.spectator;
   $('actions-spectate').hidden = !S.spectator;
+  // 吃子提示：仅对局进行中且非观战时可用（开启态用金色实底强调）
+  const hintBtn = $<HTMLInputElement>('btn-hint');
+  hintBtn.hidden = !active || S.spectator;
+  hintBtn.classList.toggle('on', S.captureHint);
+  hintBtn.setAttribute('aria-pressed', S.captureHint ? 'true' : 'false');
   rowTop.classList.toggle('active', active && S.turn === opp);
   rowBottom.classList.toggle('active', active && S.turn === S.side);
   $('p-top-tag').textContent = active && S.turn === opp ? '走棋中' : '';
@@ -2457,6 +2486,7 @@ function bindEvents(): void {
 
   // 对局
   $('btn-spectate-leave').addEventListener('click', leaveToHome);
+  $('btn-hint').addEventListener('click', toggleCaptureHint);
   $('btn-resign').addEventListener('click', resign);
   $('btn-draw').addEventListener('click', offerDraw);
   $('btn-undo').addEventListener('click', offerUndo);
