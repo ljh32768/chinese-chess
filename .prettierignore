@@ -2,6 +2,8 @@ node_modules/
 dist/
 release/
 Reference/
+.worktrees/
+.trae/
 src/renderer/assets/
 docs/
 AGENTS.md
