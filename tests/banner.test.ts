@@ -1,6 +1,7 @@
 /**
- * 棋盘正中提示条（将军 / 绝杀）的样式与内容测试。
- * 覆盖：每种杀法都有各自的图案样式（底纹 / 强调色 / 徽记）、未知杀法回退兜底、将军与绝杀的内容组装。
+ * 棋盘正中提示（将军 / 绝杀黑色大圆）的样式与内容测试。
+ * 覆盖：每种杀法都有各自的强调色（与底纹 / 徽记保留数据）、未知杀法回退兜底、
+ * 将军与绝杀的内容组装（主标题固定、副标题保留杀法名）。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -63,19 +64,21 @@ describe('提示条内容 bannerContent', () => {
     expect(bannerContent('check', { sub: '黑方被将军' }).sub).toBe('黑方被将军');
   });
 
-  it('绝杀：标题用具体杀法展示名，图案样式随杀法', () => {
-    const c = bannerContent('mate', { label: '马后炮杀', patternId: 'mahoupao', sub: '红方绝杀' });
+  it('绝杀：主标题固定「绝杀」，副标题保留具体杀法名，强调色随杀法', () => {
+    const c = bannerContent('mate', { label: '马后炮杀', patternId: 'mahoupao', sub: '马后炮杀 · 红方绝杀' });
     expect(c.kind).toBe('mate');
-    expect(c.name).toBe('马后炮杀');
-    expect(c.sub).toBe('红方绝杀');
+    expect(c.name).toBe('绝杀');
+    expect(c.sub).toBe('马后炮杀 · 红方绝杀');
     expect(c.style.pattern).toBe('mahoupao');
-    expect(c.style.emblem).toBe(bannerStyle('mahoupao').emblem);
+    expect(c.style.accent).toBe(bannerStyle('mahoupao').accent);
   });
 
-  it('绝杀缺省：未给出杀法时退到「将死」与兜底图案', () => {
+  it('绝杀缺省：主标题仍为「绝杀」，副标题退到「绝杀」，样式兜底', () => {
     const c = bannerContent('mate');
-    expect(c.name).toBe('将死');
+    expect(c.name).toBe('绝杀');
     expect(c.sub).toBe('绝杀');
     expect(c.style.pattern).toBe('generic');
+    // 给出 label 时用作副标题兜底（具体杀法名不丢）
+    expect(bannerContent('mate', { label: '闷杀' }).sub).toBe('闷杀');
   });
 });

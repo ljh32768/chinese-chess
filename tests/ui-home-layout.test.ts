@@ -14,14 +14,12 @@ import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** 读源码文件并统一换行为 LF（Windows 检出为 CRLF 时也能按 \n 断言） */
+const read = (p: string): string => readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
 // 注释先剥离，避免注释中的文字混入选择器
-const CSS = readFileSync(path.join(ROOT, 'src', 'renderer', 'styles.css'), 'utf8').replace(
-  /\/\*[\s\S]*?\*\//g,
-  '',
-);
-const HTML = readFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), 'utf8');
-// 统一为 LF：Windows 检出（core.autocrlf）会把换行变成 CRLF，多行断言不应因此失败
-const APP = readFileSync(path.join(ROOT, 'src', 'renderer', 'app.ts'), 'utf8').replace(/\r\n/g, '\n');
+const CSS = read('src/renderer/styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
+const HTML = read('src/renderer/index.html');
+const APP = read('src/renderer/app.ts');
 const BG_PNG = path.join(ROOT, 'src', 'renderer', 'assets', 'img', 'init_bg.png');
 
 // ---------------------------------------------------------------- CSS 解析辅助
@@ -411,26 +409,37 @@ describe('v2.4 终局杀法展示', () => {
   });
 });
 
-describe('v2.8 走子动画与棋盘正中提示条', () => {
-  it('画布包在 .board-stage 里，正中提示条压在棋盘之上且不接收事件', () => {
+describe('v2.8 走子动画与棋盘正中提示（v2.10：改为黑色大圆）', () => {
+  it('画布包在 .board-stage 里，上方提示条与正中提示压在棋盘之上且不接收事件', () => {
     expect(HTML).toContain('class="board-stage"');
-    for (const id of ['board-banner', 'banner-card', 'banner-emblem', 'banner-name', 'banner-sub']) {
+    for (const id of [
+      'board-banner',
+      'banner-card',
+      'banner-slash',
+      'banner-name',
+      'banner-sub',
+      'board-tactics',
+    ]) {
       expect(HTML).toContain(`id="${id}"`);
     }
-    // 结构顺序：board-stage → canvas → 提示条
+    // 结构顺序：board-stage → canvas → 上方提示条 → 正中提示
     const stage = HTML.indexOf('class="board-stage"');
     const canvas = HTML.indexOf('id="board"', stage);
+    const tactics = HTML.indexOf('id="board-tactics"', stage);
     const banner = HTML.indexOf('id="board-banner"', stage);
     expect(canvas).toBeGreaterThan(stage);
-    expect(banner).toBeGreaterThan(canvas);
+    expect(tactics).toBeGreaterThan(canvas);
+    expect(banner).toBeGreaterThan(tactics);
     // 定位：相对画布容器铺满、居中、不可点击
     expect(decl('.board-stage', 'position')).toBe('relative');
     expect(decl('.board-banner', 'position')).toBe('absolute');
     expect(decl('.board-banner', 'inset')).toBe('0');
     expect(decl('.board-banner', 'pointer-events')).toBe('none');
+    expect(decl('.board-tactics', 'position')).toBe('absolute');
+    expect(decl('.board-tactics', 'pointer-events')).toBe('none');
   });
 
-  it('提示条 1.5s 渐入渐出：0% 透明 → 18% 显现 → 74% 保持 → 100% 透明', () => {
+  it('正中提示 1.5s 渐入渐出：0% 透明 → 18% 显现 → 74% 保持 → 100% 透明', () => {
     expect(decl('.board-banner.show', 'animation')).toContain('banner-cycle 1.5s');
     expect(CSS).toContain('@keyframes banner-cycle');
     const kf = CSS.slice(CSS.indexOf('@keyframes banner-cycle'));
@@ -440,26 +449,27 @@ describe('v2.8 走子动画与棋盘正中提示条', () => {
     expect(kf).toContain('100% { opacity: 0');
   });
 
-  it('各杀法有各自的图案底纹（五种纹理）与统一强调色变量 --b-accent', () => {
-    for (const motif of ['ring', 'chevron', 'diamond', 'grid', 'stripe']) {
-      expect(RULES.some((r) => r.selectors.includes(`.banner-card[data-motif='${motif}']::before`))).toBe(
-        true,
-      );
-    }
+  it('正中提示为黑色大圆：将军白字 / 绝杀红字，仅绝杀有暗红斜线，强调色取 --b-accent', () => {
     expect(decl('.banner-card', 'border')).toContain('--b-accent');
-    expect(decl('.banner-emblem', 'background')).toContain('--b-accent');
-    expect(decl('.banner-name', 'color')).toContain('--b-accent');
+    expect(decl('.banner-card', 'border-radius')).toBe('50%');
+    expect(decl('.banner-card', 'background')).toContain('radial-gradient');
+    expect(decl(".banner-card[data-kind='check'] .banner-name", 'color')).toBe('#fff');
+    expect(decl(".banner-card[data-kind='mate'] .banner-name", 'color')).toBe('#ff3b30');
+    // 暗红斜线：默认隐藏，仅绝杀显示
+    expect(decl('.orb-slash', 'display')).toBe('none');
+    expect(decl(".banner-card[data-kind='mate'] .orb-slash", 'display')).toBe('block');
+    expect(decl(".banner-card[data-kind='mate'] .orb-slash", 'background')).toContain('gradient');
   });
 
-  it('「减少动态效果」下提示条仍可见（只去掉缩放淡入动效）', () => {
-    const rule = RULES.find(
-      (r) => r.selectors.includes('.board-banner.show') && r.decls.includes('animation: none'),
-    );
-    expect(rule).toBeTruthy();
-    expect(rule!.decls).toContain('opacity: 1');
+  it('「减少动态效果」下提示仍可见（正中圆环与上方提示条只去掉缩放 / 淡入动效）', () => {
+    for (const sel of ['.board-banner.show', '.board-tactics.show']) {
+      const rule = RULES.find((r) => r.selectors.includes(sel) && r.decls.includes('animation: none'));
+      expect(rule, sel).toBeTruthy();
+      expect(rule!.decls).toContain('opacity: 1');
+    }
   });
 
-  it('app.ts：走子动画按 rAF 推进、提示条按局面触发并在 1.5s 后隐藏', () => {
+  it('app.ts：走子动画按 rAF 推进、提示按局面触发并在 1.5s 后隐藏', () => {
     expect(APP).toContain('const MOVE_ANIM_MS');
     expect(APP).toContain('function animateMove(');
     expect(APP).toContain('requestAnimationFrame');
@@ -468,7 +478,7 @@ describe('v2.8 走子动画与棋盘正中提示条', () => {
     expect(APP).toContain('function showBanner(');
     expect(APP).toContain("bannerContent('check'");
     expect(APP).toContain("bannerContent('mate'");
-    // 联机走子（move_applied / game_over）与本地走子都接上动画与提示条
+    // 联机走子（move_applied / game_over）与本地走子都接上动画与提示
     expect(APP).toContain('animateMove(msg.from, msg.to, hasLiftAt(msg.from))');
     expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
   });
@@ -487,6 +497,39 @@ describe('v2.8 走子动画与棋盘正中提示条', () => {
     expect(APP).toContain('applySnapshot(game.snapshot());\n  animateMove(from, to, opts.startLifted);');
     // 绘制侧：抬起帧与走子动画帧
     expect(APP).toContain('lifts: S.lifts.length ? S.lifts.map');
+  });
+});
+
+describe('v2.10 提示特效（黑色大圆、将颤抖、战术闪电与开局提示）', () => {
+  it('上方提示条浮于棋盘中上部、不接收事件，2.5s 渐入渐出', () => {
+    expect(decl('.board-tactics', 'top')).toBeTruthy();
+    expect(decl('.board-tactics.show', 'animation')).toContain('tactic-cycle 2.5s');
+    expect(CSS).toContain('@keyframes tactic-cycle');
+  });
+
+  it('app.ts：战术识别 / 开局提示 / 将颤抖 / 闪电 / 上方提示条均已接线', () => {
+    expect(APP).toContain(
+      "import { CaptureHints, TacticHit, captureHints, detectTactics } from '../shared/tactics.js'",
+    );
+    expect(APP).toContain("import { detectOpening } from './openings.js'");
+    expect(APP).toContain('function applyMoveEffects(');
+    expect(APP).toContain('detectTactics(before, move, S.board)');
+    expect(APP).toContain('detectOpening(S.history)');
+    expect(APP).toContain('function showTactics(');
+    expect(APP).toContain('card.dataset.kind = c.kind');
+    expect(APP).toContain('threats: S.fx ? S.threats : null');
+    expect(APP).toContain('kingShake:');
+    // 取「走子前」局面（联机在提交新盘面之前 / 本地在 applyMove 之前）
+    expect(APP).toContain('const before = cloneBoard(S.board);');
+    expect(APP).toContain('const before = cloneBoard(g.board);');
+    // 全量同步（悔棋 / 重开 / 重连）后清掉特效
+    expect(APP).toContain('S.threats = [];');
+  });
+
+  it('战术 / 开局的文字放在棋盘上方提示条（不与正中圆环重复）', () => {
+    expect(APP).toContain('showTactics(text)');
+    expect(APP).toContain('hits[0].label');
+    expect(APP).toContain('开局：');
   });
 });
 
@@ -556,7 +599,9 @@ describe('吃子提示（绿色可吃 / 红色有险）', () => {
   });
 
   it('app.ts 接线：状态 / 计算 / 绘制 / 切换 / 状态刷新', () => {
-    expect(APP).toContain("import { CaptureHints, captureHints } from '../shared/tactics.js'");
+    expect(APP).toContain(
+      "import { CaptureHints, TacticHit, captureHints, detectTactics } from '../shared/tactics.js'",
+    );
     expect(APP).toContain('captureHint: false,');
     expect(APP).toContain('hints: null as CaptureHints | null,');
     expect(APP).toContain('function refreshCaptureHints()');

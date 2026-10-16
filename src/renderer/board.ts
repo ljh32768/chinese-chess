@@ -192,6 +192,10 @@ export interface BoardView {
   hint?: { from: Pos; to: Pos } | null;
   /** 吃子提示（可选）：绿色环 = 可吃的对方棋子（无根 / 小换大），红色环 = 会被吃的己方棋子 */
   capture?: CaptureHints | null;
+  /** 被将军一方的将 / 帅的抖动位移（颤抖特效；省略 / null 表示不抖，见 §3.5.7） */
+  kingShake?: { dx: number; dy: number } | null;
+  /** 被战术威胁的敌方棋子（周围画闪电，见 §3.5.7） */
+  threats?: Pos[] | null;
 }
 
 /** 交叉点的贴图起点（视图坐标）：`space*坐标 + pointStart`，可再叠加固定偏移 */
@@ -306,7 +310,20 @@ export interface DiscOp {
   alpha: number;
 }
 
-export type RenderOp = DrawOp | RingOp | ShadowOp | ArrowOp | DiscOp;
+/** 程序绘制的战术闪电（被威胁棋子周围；`seed` 决定折线形状，`renderBoard` 按时间闪烁） */
+export interface BoltOp {
+  bolt: true;
+  cx: number;
+  cy: number;
+  /** 基准半径（闪电围绕该半径向外伸出） */
+  radius: number;
+  color: string;
+  alpha: number;
+  /** 确定性种子（`r*9+c`，替代随机，保证纯函数可测） */
+  seed: number;
+}
+
+export type RenderOp = DrawOp | RingOp | ShadowOp | ArrowOp | DiscOp | BoltOp;
 
 // ------------------------------------------------------------ 走子动画
 
@@ -455,8 +472,30 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
       if (lifted(r, c)) continue;
       const { x, y } = at([r, c]);
       const selected = !!v.selected && v.selected[0] === r && v.selected[1] === c;
-      ops.push({ img: `${p.s}_${PIECE_IMG[p.t]}`, x, y, alpha: selected ? 0.75 : 1 });
+      // 被将军的将 / 帅：叠加颤抖位移（见 §3.5.7）
+      const shake =
+        v.kingShake && v.checkKing && v.checkKing[0] === r && v.checkKing[1] === c ? v.kingShake : null;
+      ops.push({
+        img: `${p.s}_${PIECE_IMG[p.t]}`,
+        x: x + (shake?.dx ?? 0),
+        y: y + (shake?.dy ?? 0),
+        alpha: selected ? 0.75 : 1,
+      });
     }
+  }
+
+  // 战术闪电：被威胁的敌方棋子周围（画在棋子之后，见 §3.5.7）
+  for (const pos of v.threats ?? []) {
+    const { x, y } = center(pos);
+    ops.push({
+      bolt: true,
+      cx: x,
+      cy: y,
+      radius: skin.disc / 2 + 6,
+      color: '#ffe066',
+      alpha: 0.9,
+      seed: pos[0] * 9 + pos[1],
+    });
   }
 
   // 可吃子：在棋子之上画空心环（参考项目无此提示，属本项目增强）
@@ -568,6 +607,30 @@ function ringAlpha(op: RingOp, time: number): number {
   return op.alpha * (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time / 260)));
 }
 
+/** 闪电的瞬时透明度（`time = 0`（减弱动效）时保持静态） */
+function boltAlpha(op: BoltOp, time: number): number {
+  if (!time) return op.alpha;
+  return op.alpha * (0.55 + 0.45 * Math.sin(time / 90 + op.seed));
+}
+
+/** 闪电折线顶点（以圆心为原点、基准半径为单位；由 `seed` 确定性派生，无随机） */
+function boltPoints(seed: number): Array<Array<[number, number]>> {
+  const bolts: Array<Array<[number, number]>> = [];
+  for (let k = 0; k < 3; k++) {
+    const base = (((seed * 47 + k * 120) % 360) * Math.PI) / 180;
+    const pts: Array<[number, number]> = [];
+    const steps = 4;
+    for (let i = 0; i <= steps; i++) {
+      const rad = 0.95 + (i / steps) * 0.5; // 自 0.95R 向外伸至 1.45R
+      const wob = (((seed * 13 + k * 7 + i * 5) % 7) / 7 - 0.5) * 0.22;
+      const ang = base + (i % 2 === 0 ? 0.16 : -0.16) + wob;
+      pts.push([Math.cos(ang) * rad, Math.sin(ang) * rad]);
+    }
+    bolts.push(pts);
+  }
+  return bolts;
+}
+
 /** 把一帧绘制计划画到画布上 */
 export function renderBoard(
   canvas: HTMLCanvasElement,
@@ -644,6 +707,28 @@ export function renderBoard(
       ctx.beginPath();
       ctx.ellipse(op.cx, op.cy, op.rx, op.ry, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+      continue;
+    }
+    if ('bolt' in op) {
+      // 战术闪电：绕棋子的折线锯齿 + 辉光；按时间闪烁（`time = 0` 时静态，见 §3.5.7）
+      ctx.save();
+      ctx.globalAlpha = boltAlpha(op, time);
+      ctx.strokeStyle = op.color;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = op.color;
+      ctx.shadowBlur = 8;
+      for (const pts of boltPoints(op.seed)) {
+        ctx.beginPath();
+        pts.forEach(([ux, uy], i) => {
+          const x = op.cx + ux * op.radius;
+          const y = op.cy + uy * op.radius;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
       ctx.restore();
       continue;
     }

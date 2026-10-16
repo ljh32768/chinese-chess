@@ -163,10 +163,12 @@
           <div class="cap-strip" id="cap-red" aria-hidden="true"></div>
           <div class="board-stage">
             <canvas id="board" width="523" height="580"></canvas>
-            <!-- 棋盘正中提示条：将军 / 绝杀（各杀法一套图案样式），显示 1.5s 渐入渐出 -->
+            <!-- 棋盘上方提示条：战术（闪击 / 闪将 / 将军抽 / 串打 / 捉双）与开局招法提示 -->
+            <div class="board-tactics" id="board-tactics" hidden></div>
+            <!-- 棋盘正中提示：将军 / 绝杀（黑色大圆；绝杀另带暗红斜线），显示 1.5s 渐入渐出 -->
             <div class="board-banner" id="board-banner" role="status" aria-live="assertive" hidden>
-              <div class="banner-card" id="banner-card">
-                <span class="banner-emblem" id="banner-emblem" aria-hidden="true"></span>
+              <div class="banner-card" id="banner-card" data-kind="check">
+                <span class="orb-slash" id="banner-slash" aria-hidden="true"></span>
                 <span class="banner-text">
                   <span class="banner-name" id="banner-name"></span>
                   <span class="banner-sub" id="banner-sub"></span>

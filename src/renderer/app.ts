@@ -6,7 +6,7 @@
  * 客户端只发送「走子意图」，联机对局一切以服务器广播为准。
  */
 
-import { findKing, initBoard, legalMoves, validateMove } from '../shared/rules.js';
+import { cloneBoard, findKing, initBoard, legalMoves, validateMove } from '../shared/rules.js';
 import { ClientMessage, OnlinePlayer, ServerMessage } from '../shared/protocol.js';
 import {
   Board,
@@ -24,6 +24,7 @@ import { Game } from '../shared/game.js';
 import { pickMove } from '../shared/ai.js';
 import { boardToFen } from '../shared/uci.js';
 import { CheckmateInfo, classifyCheckmate, classifyCheckmateFromHistory } from '../shared/checkmate.js';
+import { CaptureHints, TacticHit, captureHints, detectTactics } from '../shared/tactics.js';
 import {
   CUSTOM_LEVEL,
   EndgamePuzzle,
@@ -44,7 +45,6 @@ import {
   upsertCustomEndgame,
 } from '../shared/endgame.js';
 import { capturedPieces, describeMove } from '../shared/notation.js';
-import { CaptureHints, captureHints } from '../shared/tactics.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
   DEFAULT_PORT,
@@ -74,6 +74,7 @@ import { initReview, ReviewController } from './review.js';
 import { playClick, playSelect } from './sound.js';
 import { Net } from './net.js';
 import { BannerContent, bannerContent } from './banner.js';
+import { detectOpening } from './openings.js';
 import { EndgameEditorController, initEndgameEditor } from './endgame-editor.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -174,6 +175,10 @@ const S = {
   captureHint: false,
   /** 吃子提示结果；仅在开启且对局中计算，render() 时刷新（悬停 / 脉冲帧只读） */
   hints: null as CaptureHints | null,
+  /** 本步识别出的战术（棋盘上方提示 + 被威胁棋子闪电）；null 表示当前无 */
+  fx: null as { seq: number; hits: TacticHit[] } | null,
+  /** 被威胁的敌方棋子（供 board.ts 画闪电） */
+  threats: [] as Pos[],
   /** 残局挑战进度；null 表示当前不是残局模式 */
   endgame: null as EndgameState | null,
   /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
@@ -241,14 +246,13 @@ let bannerTimer = 0;
 let lastBannerKey = '';
 let lastBannerAt = 0;
 
-/** 在棋盘正中显示将军 / 绝杀提示条（各杀法一套图案样式），1.5s 后渐出消失 */
+/** 在棋盘正中显示将军 / 绝杀黑色大圆（绝杀另带暗红斜线），1.5s 后渐出消失 */
 function showBanner(c: BannerContent): void {
   const el = $('board-banner');
   const card = $('banner-card');
-  card.dataset.motif = c.style.motif;
+  card.dataset.kind = c.kind;
   card.dataset.pattern = c.style.pattern;
   card.style.setProperty('--b-accent', c.style.accent);
-  $('banner-emblem').textContent = c.style.emblem;
   $('banner-name').textContent = c.name;
   $('banner-sub').textContent = c.sub;
   el.classList.remove('show');
@@ -286,7 +290,7 @@ function maybeBanner(): void {
         bannerContent('mate', {
           label: mate ? mate.pattern.label : '将死',
           patternId: id,
-          sub: `${sideName(winner)}绝杀`,
+          sub: `${mate ? mate.pattern.label : '将死'} · ${sideName(winner)}绝杀`,
         }),
       ),
     );
@@ -295,6 +299,67 @@ function maybeBanner(): void {
       showBanner(bannerContent('check', { sub: `${sideName(S.turn)}被将军` })),
     );
   }
+}
+
+// -------------------------------------------------------------- 棋盘上方提示（战术 / 开局）
+
+/** 棋盘上方提示的显示时长（毫秒）：渐入 → 保持 → 渐出 */
+const TACTIC_MS = 2500;
+let tacticTimer = 0;
+/** 闪电清除定时器（与上方提示同时消失） */
+let fxTimer = 0;
+/** 上一步已处理的 moveSeq（联机重复广播时去重） */
+let lastFxSeq = -1;
+
+/** 在棋盘上方显示战术 / 开局提示（约 2.5s 渐入渐出） */
+function showTactics(text: string): void {
+  const el = $('board-tactics');
+  el.textContent = text;
+  el.classList.remove('show');
+  void el.offsetWidth; // 强制回流，让连续触发的动画能重新播放
+  el.hidden = false;
+  el.classList.add('show');
+  window.clearTimeout(tacticTimer);
+  tacticTimer = window.setTimeout(() => {
+    el.classList.remove('show');
+    el.hidden = true;
+  }, TACTIC_MS);
+}
+
+/**
+ * 走子后的特效：战术识别（棋盘上方提示 + 被威胁棋子闪电）与开局招法提示。
+ * 每步只算一次并存入 `S`（供渲染帧读取），不在 `paint()` 里重算。
+ * @param before 走子前局面（须在提交新盘面之前 `cloneBoard(S.board)` 取得）
+ * @param move   该步
+ * @param seq    该步的 moveSeq（重复广播去重）
+ */
+function applyMoveEffects(before: Board, move: Move, seq: number): void {
+  S.fx = null;
+  S.threats = [];
+  if (seq === lastFxSeq) return;
+  lastFxSeq = seq;
+  if (S.status !== 'playing') return; // 将死（绝杀）由正中圆环表达，不做战术提示与闪电
+  const hits = detectTactics(before, move, S.board);
+  let text = '';
+  // 开局招法提示：仅标准开局，且恰为红方首着那一步
+  if (!S.endgame) {
+    const opening = detectOpening(S.history);
+    if (opening && opening.index === S.history.length - 1) text = `开局：${opening.name}`;
+  }
+  if (hits.length) {
+    S.fx = { seq, hits };
+    S.threats = hits[0].threats;
+    text = text ? `${hits[0].label} · ${text}` : hits[0].label;
+    // 与文字一同消失：约 2.5s 后清掉闪电并停帧
+    window.clearTimeout(fxTimer);
+    fxTimer = window.setTimeout(() => {
+      S.fx = null;
+      S.threats = [];
+      syncPulse();
+      paint();
+    }, TACTIC_MS);
+  }
+  if (text) showTactics(text);
 }
 
 interface ModalButton {
@@ -466,6 +531,9 @@ function animateMove(from: Pos, to: Pos, startLifted = false): void {
 function boardView(): BoardView {
   const playable = canPlay();
   const now = performance.now();
+  const sk = skin();
+  // 被将军的将 / 帅：颤抖位移（约 ±0.06 格距；减少动态效果时不做）
+  const shakeAmp = sk.spaceX * 0.06;
   return {
     board: S.board,
     selected: S.selected,
@@ -483,8 +551,13 @@ function boardView(): BoardView {
       : null,
     lifts: S.lifts.length ? S.lifts.map((a) => ({ pos: a.pos, t: liftProgress(a, now) })) : null,
     checkKing: S.check ? findKing(S.board, S.turn) : null,
+    kingShake:
+      S.check && S.status === 'playing' && !prefersReducedMotion()
+        ? { dx: Math.sin(now / 28) * shakeAmp, dy: Math.cos(now / 19) * shakeAmp }
+        : null,
     interactiveSide: playable ? S.side : null,
     hover: playable ? S.hover : null,
+    threats: S.fx ? S.threats : null,
     hint: S.hint,
     capture: S.hints,
   };
@@ -492,7 +565,9 @@ function boardView(): BoardView {
 
 /** 重绘棋盘（不做面板与状态同步，供悬停 / 脉冲帧调用） */
 function paint(): void {
-  renderBoard(boardEl, boardView(), skin(), loadedImages[S.skin] ?? {}, performance.now());
+  // 减少动态效果时传 0：脉冲环保持静态、闪电不闪烁、将不颤抖
+  const time = prefersReducedMotion() ? 0 : performance.now();
+  renderBoard(boardEl, boardView(), skin(), loadedImages[S.skin] ?? {}, time);
 }
 
 /** 按皮肤套用页面背景（木质底图，与参考项目一致） */
@@ -521,19 +596,19 @@ let review: ReviewController | null = null;
 /** 自建残局编辑器（棋盘摆子 + 保存前自动核验）；在 init() 中装配 */
 let editor: EndgameEditorController | null = null;
 
-/** 将军警示环的脉冲动画：仅在需要时运行定时重绘 */
+/** 将军警示环的脉冲 / 将的颤抖 / 战术闪电闪烁：仅在需要时运行定时重绘（约 40ms 一帧） */
 let pulseTimer = 0;
 function syncPulse(): void {
-  const need = S.check && S.status === 'playing' && $('screen-game').classList.contains('active');
+  const need = (S.check || !!S.fx) && S.status === 'playing' && $('screen-game').classList.contains('active');
   if (need && !pulseTimer) {
     pulseTimer = window.setInterval(() => {
-      if (!S.check || S.status !== 'playing') {
+      if ((!S.check && !S.fx) || S.status !== 'playing') {
         window.clearInterval(pulseTimer);
         pulseTimer = 0;
         return;
       }
       paint();
-    }, 100);
+    }, 40);
   } else if (!need && pulseTimer) {
     window.clearInterval(pulseTimer);
     pulseTimer = 0;
@@ -789,6 +864,9 @@ function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void
   // 全量同步（含悔棋 / 重开）默认不做走子动画；终局的 game_over 紧跟 move_applied，需保留在跑的动画
   if (!opts.keepAnim) S.anim = null;
   clearLifts(); // 抬起状态由本端交互驱动，全量同步后一律复位
+  S.fx = null; // 战术特效由走子驱动，全量同步（悔棋 / 重开 / 重连）后一律复位
+  S.threats = [];
+  lastFxSeq = -1;
   S.history = s.history ?? [];
   S.deadline = s.deadline ?? null;
   if ($('screen-game').classList.contains('active')) render();
@@ -943,7 +1021,8 @@ function handleMessage(msg: ServerMessage): void {
       }
       return;
     }
-    case 'move_applied':
+    case 'move_applied': {
+      const before = cloneBoard(S.board); // 战术识别需要「走子前」局面
       S.board = msg.board;
       S.turn = msg.turn;
       S.moveSeq = msg.seq;
@@ -962,7 +1041,9 @@ function handleMessage(msg: ServerMessage): void {
       render();
       animateMove(msg.from, msg.to, hasLiftAt(msg.from));
       maybeBanner();
+      applyMoveEffects(before, { from: msg.from, to: msg.to }, msg.seq);
       return;
+    }
     case 'move_rejected':
       toast(`走子无效：${msg.reason}`);
       lowerAllLifts(); // 抬起中的棋子落回原处
@@ -1613,6 +1694,7 @@ function createAiRoom(): void {
 function localMove(from: Pos, to: Pos, opts: { startLifted?: boolean } = {}): void {
   const game = localGame;
   if (!game) return;
+  const before = cloneBoard(S.board); // 战术识别需要「走子前」局面（须在 applyMove 前取）
   const result = game.applyMove(from, to, S.side);
   if (!result.ok) {
     toast(result.reason ?? '非法走子');
@@ -1624,6 +1706,7 @@ function localMove(from: Pos, to: Pos, opts: { startLifted?: boolean } = {}): vo
   applySnapshot(game.snapshot());
   animateMove(from, to, opts.startLifted);
   maybeBanner();
+  applyMoveEffects(before, { from, to }, S.moveSeq);
   if (S.endgame) {
     endgameEvaluate();
     return;
@@ -1666,12 +1749,14 @@ async function runLocalAi(aiSide: Side): Promise<void> {
   // 复核：游戏实例 / 步数 / 回合均未变才落子
   if (localGame !== g || g.moveSeq !== seq || g.status !== 'playing' || g.turn !== aiSide) return;
   if (S.endgame?.result) return;
+  const before = cloneBoard(g.board); // 战术识别需要「走子前」局面（须在 applyMove 前取）
   g.applyMove(move.from, move.to, aiSide);
   playClick();
   S.hint = null; // 走子后清除提示环
   applySnapshot(g.snapshot());
   animateMove(move.from, move.to);
   maybeBanner();
+  applyMoveEffects(before, move, S.moveSeq);
   if (S.endgame) endgameEvaluate();
 }
 
