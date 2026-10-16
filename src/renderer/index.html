@@ -54,7 +54,8 @@
       </div>
       <label for="create-pass">房间口令（可选）</label>
       <input type="password" id="create-pass" autocomplete="off" placeholder="留空即任何人可加入">
-      <p class="hint">设置口令后，对手需输入口令才能加入。默认取先方式为「猜先」：对手加入后双方直接进入棋盘，再猜单双。</p>
+      <label class="radio-row"><input type="checkbox" id="create-jieqi"> 揭棋（暗棋）房间</label>
+      <p class="hint">设置口令后，对手需输入口令才能加入。默认取先方式为「猜先」：对手加入后双方直接进入棋盘，再猜单双。勾选「揭棋」后，开局将把双方除将帅外的棋子洗匀背面摆放，暗子首步按所在位置兵种走并翻开。</p>
       <button type="button" class="btn block" id="btn-create-start">创建房间</button>
     </div>
 
@@ -63,10 +64,12 @@
         <span class="menu_fh" id="btn-ai-back" title="返回"></span>
         <span class="panel-lg-title">人机对弈</span>
       </div>
+      <label class="radio-row"><input name="ai-variant" type="radio" value="xiangqi" checked> 标准象棋</label>
+      <label class="radio-row"><input name="ai-variant" type="radio" value="jieqi"> 揭棋（暗棋）</label>
       <label class="radio-row"><input name="ai-depth" type="radio" value="2"> 菜鸟水平</label>
       <label class="radio-row"><input name="ai-depth" type="radio" value="3" checked> 中级水平</label>
       <label class="radio-row"><input name="ai-depth" type="radio" value="4"> 高手水平</label>
-      <p class="hint">本地对弈，无需连接服务器；人机对局不计入「对局回顾」。</p>
+      <p class="hint">本地对弈，无需连接服务器；人机对局不计入「对局回顾」。揭棋：除将帅外全部棋子背面随机摆放，暗子首步按所在位置的兵种走并随即翻开（翻开的士 / 相可出九宫、过河），把对方将死即胜。</p>
       <button type="button" class="btn block" id="btn-ai-start">开始对弈</button>
     </div>
 

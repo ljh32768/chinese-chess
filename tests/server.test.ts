@@ -7,7 +7,7 @@ import { GameServer, listenWithFallback } from '../src/server/server.js';
 import { EngineLevel, EnginePort, LocalEngine } from '../src/shared/engine.js';
 import { ClientMessage } from '../src/shared/protocol.js';
 import { initBoard, validateMove } from '../src/shared/rules.js';
-import { Board, Pos, Side } from '../src/shared/types.js';
+import { Board, Piece, Pos, Side } from '../src/shared/types.js';
 import { TestClient } from './ws-client.js';
 
 let server: GameServer | null = null;
@@ -92,6 +92,16 @@ async function joinRoom(s: GameServer, roomId: string, msg: JoinRoomMsg = {}) {
 /** 建房 + 加入并等待开局（默认房主执红） */
 async function setupGame(s: GameServer) {
   const { c: host, roomId, playerId } = await createRoom(s);
+  const guest = await joinRoom(s, roomId);
+  const gJoined = await guest.waitType('room_joined');
+  const hStart = await host.waitType('start');
+  const gStart = await guest.waitType('start');
+  return { host, guest, roomId, hostId: playerId, guestId: gJoined.playerId, hStart, gStart };
+}
+
+/** 揭棋房间：建房 + 加入并等待开局（洗子局面） */
+async function setupJieqiGame(s: GameServer) {
+  const { c: host, roomId, playerId } = await createRoom(s, { mode: 'jieqi' });
   const guest = await joinRoom(s, roomId);
   const gJoined = await guest.waitType('room_joined');
   const hStart = await host.waitType('start');
@@ -1362,5 +1372,99 @@ describe('服务器 · 在线玩家与房间邀请', () => {
     const c = await open(s.address.port);
     c.send({ type: 'invite_player', playerId: 'guest:x', role: 'player' });
     expect((await c.waitType('error')).message).toBe('尚未加入房间');
+  });
+});
+
+describe('服务器 · 揭棋（暗棋）房间', () => {
+  /** 服务端下发的棋盘里某方尚未翻开的暗子数 */
+  const hiddenCount = (board: Board, s: Side): number =>
+    board.flat().filter((p): p is Piece => !!p && p.s === s && !!p.hidden).length;
+  /** 棋盘是否已抹除全部真实身份（客户端 / 观战者都看不到底牌） */
+  const noSecrets = (board: Board): boolean => board.flat().every((p) => !p || p.real === undefined);
+
+  it('创建揭棋房间：快照标记 variant=jieqi，房间列表带 jieqi 模式', async () => {
+    const s = await startServer();
+    const { c: host, joined, roomId } = await createRoom(s, { mode: 'jieqi' });
+    expect(joined.state.variant).toBe('jieqi');
+    expect(joined.state.status).toBe('waiting');
+
+    host.send({ type: 'list_rooms' });
+    const list = await host.waitType('room_list');
+    expect(list.rooms.find((r) => r.roomId === roomId)?.mode).toBe('jieqi');
+  });
+
+  it('开局洗子：双方各 15 暗子、将帅明置、下发棋盘不含真实身份', async () => {
+    const s = await startServer();
+    const { c: host, roomId } = await createRoom(s, { mode: 'jieqi' });
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
+    const hStart = await host.waitType('start');
+    const gStart = await guest.waitType('start');
+
+    expect(hStart.state.variant).toBe('jieqi');
+    expect(hStart.side).toBe('r');
+    expect(gStart.side).toBe('b');
+    expect(hiddenCount(hStart.state.board, 'r')).toBe(15);
+    expect(hiddenCount(hStart.state.board, 'b')).toBe(15);
+    expect(hStart.state.board[9][4]).toEqual({ t: 'K', s: 'r' });
+    expect(hStart.state.board[0][4]).toEqual({ t: 'K', s: 'b' });
+    // 权威端持有真实身份，但下发的棋盘已抹除
+    expect(hStart.state.board.flat().some((p) => !!p?.hidden)).toBe(true);
+    expect(noSecrets(hStart.state.board)).toBe(true);
+    // 双方看到完全相同的（已抹除）棋盘
+    expect(gStart.state.board).toEqual(hStart.state.board);
+  });
+
+  it('走子：落点暗子翻开并广播（含变体与吃子记录），观战者同样看不到底牌', async () => {
+    const s = await startServer();
+    const { c: host, roomId } = await createRoom(s, { mode: 'jieqi' });
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
+    await host.waitType('start');
+
+    const watcher = await joinRoom(s, roomId, { role: 'spectator' });
+    const wJoined = await watcher.waitType('room_joined');
+    expect(wJoined.seat).toBeNull();
+    expect(wJoined.state.variant).toBe('jieqi');
+    expect(noSecrets(wJoined.state.board)).toBe(true);
+
+    // 红方 (9,0) 是「车」位的暗子，首步按车走子
+    host.send({ type: 'move', from: [9, 0], to: [8, 0] });
+    const applied = await host.waitType('move_applied');
+    expect(applied.variant).toBe('jieqi');
+    expect(applied.capturedByRed).toEqual([]);
+    expect(applied.capturedByBlack).toEqual([]);
+    expect(applied.board[8][0]!.hidden).toBeUndefined(); // 已翻开
+    expect(applied.board[8][0]!.real).toBeUndefined();
+    expect(noSecrets(applied.board)).toBe(true);
+  });
+
+  it('揭棋对局不计入对局回顾（终局后记录为空）', async () => {
+    const s = await startServer();
+    const { host } = await setupJieqiGame(s);
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+
+    const list = (await (await fetch(`http://127.0.0.1:${s.address.port}/api/history`)).json()) as {
+      games: unknown[];
+    };
+    expect(list.games).toHaveLength(0);
+  });
+
+  it('重开：揭棋重新洗子并回到第 0 步', async () => {
+    const s = await startServer();
+    const { host, guest } = await setupJieqiGame(s);
+    host.send({ type: 'resign' });
+    await host.waitType('game_over');
+
+    host.send({ type: 'restart_request' });
+    const req = await guest.waitType('restart_request');
+    expect(req).toBeDefined();
+    guest.send({ type: 'restart_response', accept: true });
+    const restarted = await host.waitType('start');
+    expect(restarted.state.variant).toBe('jieqi');
+    expect(restarted.state.moveSeq).toBe(0);
+    expect(hiddenCount(restarted.state.board, 'r')).toBe(15);
+    expect(hiddenCount(restarted.state.board, 'b')).toBe(15);
   });
 });

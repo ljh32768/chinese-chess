@@ -682,3 +682,42 @@ describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', 
     expect(focusRule!.selectors).toContain('.replay-line-row:focus-visible');
   });
 });
+
+describe('v3.0 揭棋（暗棋）入口与接线契约', () => {
+  const BOARD = readFileSync(path.join(ROOT, 'src', 'renderer', 'board.ts'), 'utf8');
+
+  it('人机对弈面板提供「标准象棋 / 揭棋（暗棋）」模式单选', () => {
+    expect(HTML).toContain('name="ai-variant"');
+    expect(HTML).toContain('value="xiangqi"');
+    expect(HTML).toContain('value="jieqi"');
+    expect(HTML).toContain('揭棋（暗棋）');
+  });
+
+  it('创建房间面板提供「揭棋（暗棋）房间」勾选', () => {
+    expect(HTML).toContain('id="create-jieqi"');
+    expect(HTML).toContain('揭棋（暗棋）房间');
+  });
+
+  it('渲染层接线：本地揭棋开局 / 揭棋房间 / 暗子统计 / 吃子按快照', () => {
+    // 本地人机揭棋：按面板选项以洗子开局
+    expect(APP).toContain('localGame.openJieqi()');
+    expect(APP).toContain("aiVariant() === 'jieqi'");
+    // 揭棋房间
+    expect(APP).toContain("mode: jieqi ? 'jieqi' : 'pvp'");
+    // 暗子统计与揭棋标记
+    expect(APP).toContain('coveredCount(S.board');
+    // 吃子与变体随快照 / 广播更新
+    expect(APP).toContain("S.jieqi = s.variant === 'jieqi'");
+    expect(APP).toContain("S.jieqi = msg.variant === 'jieqi'");
+    expect(APP).toContain('s.capturedByRed ?? []');
+    expect(APP).toContain('msg.capturedByRed ?? []');
+    // 揭棋不做杀法识别
+    expect(APP).toContain('if (S.jieqi) return null;');
+  });
+
+  it('棋盘渲染含暗子背面绘制（BackOp / hidden 分支）', () => {
+    expect(BOARD).toContain('export interface BackOp');
+    expect(BOARD).toContain('back: true');
+    expect(BOARD).toContain('p.hidden');
+  });
+});

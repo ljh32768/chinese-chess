@@ -469,7 +469,7 @@ export class GameServer {
     if (this.rooms.size >= this.opts.maxRooms) {
       return wsSend(conn, { type: 'error', message: '房间数已达上限' });
     }
-    const mode: RoomMode = msg.mode === 'ai' ? 'ai' : 'pvp';
+    const mode: RoomMode = msg.mode === 'ai' ? 'ai' : msg.mode === 'jieqi' ? 'jieqi' : 'pvp';
     const depth = Number(msg.depth);
     if (mode === 'ai' && Number.isInteger(depth) && depth >= 1 && depth <= 4) this.aiDepth = depth;
 

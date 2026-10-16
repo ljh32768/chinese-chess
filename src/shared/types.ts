@@ -9,11 +9,27 @@ export type Side = 'r' | 'b';
 /** 棋子类型：帅仕相马车炮兵 */
 export type PieceType = 'K' | 'A' | 'B' | 'N' | 'R' | 'C' | 'P';
 
-/** 单颗棋子 */
+/**
+ * 单颗棋子。
+ * 揭棋（暗棋）下追加隐藏信息字段：
+ * - `hidden`（暗子，公开信息，客户端据此画背面）
+ * - `real`（真实身份，**仅权威端持有**，下发前由 redactBoard 抹除）
+ * - `free`（翻开的士 / 相不受九宫 / 河界限制）
+ * `t` 始终表示「当前生效的走法兵种」：暗子为所在起始位置的兵种，翻开后为真实身份。
+ */
 export interface Piece {
   t: PieceType;
   s: Side;
+  /** 揭棋：未翻开的暗子 */
+  hidden?: boolean;
+  /** 揭棋：暗子的真实身份（仅权威端持有） */
+  real?: PieceType;
+  /** 揭棋：翻开的士 / 相免九宫 / 河界限制 */
+  free?: boolean;
 }
+
+/** 对局变体：标准象棋 / 揭棋（暗棋） */
+export type GameVariant = 'xiangqi' | 'jieqi';
 
 /** 棋盘单元格，空格为 null */
 export type Cell = Piece | null;
@@ -47,6 +63,11 @@ export interface GameSnapshot {
   history: Move[];
   /** 本回合截止时间（epoch ms）；null 表示不限时（计时读秒关闭） */
   deadline: number | null;
+  /** 对局变体（标准对局省略；揭棋为 `jieqi`，客户端据此渲染暗子） */
+  variant?: GameVariant;
+  /** 揭棋：红方 / 黑方已吃掉的子（含被吃暗子翻开后的真实身份） */
+  capturedByRed?: PieceType[];
+  capturedByBlack?: PieceType[];
 }
 
 /** 棋盘尺寸常量 */
@@ -109,8 +130,8 @@ export interface GuessResult {
   guestWon: boolean;
 }
 
-/** 房间模式：双人对战 / 人机对战 */
-export type RoomMode = 'pvp' | 'ai';
+/** 房间模式：双人对战 / 人机对战 / 双人揭棋（暗棋） */
+export type RoomMode = 'pvp' | 'ai' | 'jieqi';
 
 /** 房间摘要（房间列表展示用） */
 export interface RoomSummary {

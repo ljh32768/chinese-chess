@@ -39,9 +39,9 @@ export function initBoard(): Board {
   return b;
 }
 
-/** 深拷贝棋盘 */
+/** 深拷贝棋盘（保留 `hidden` / `real` / `free` 等揭棋字段，供试走与悔棋快照） */
 export function cloneBoard(b: Board): Board {
-  return b.map((row) => row.map((x) => (x ? { t: x.t, s: x.s } : null)));
+  return b.map((row) => row.map((x) => (x ? { ...x } : null)));
 }
 
 /**
@@ -78,7 +78,9 @@ export function pieceMoves(b: Board, r: number, c: number): Pos[] {
       ]) {
         const rr = r + dr;
         const cc = c + dc;
-        if (!inPalace(rr, cc, s)) continue;
+        if (!inBoard(rr, cc)) continue;
+        // 揭棋：翻开的仕 / 士不受九宫限制（`free`）；标准象棋与暗子仍限九宫
+        if (!p.free && !inPalace(rr, cc, s)) continue;
         const q = b[rr][cc];
         if (!q || q.s !== s) res.push([rr, cc]);
       }
@@ -94,8 +96,11 @@ export function pieceMoves(b: Board, r: number, c: number): Pos[] {
         const rr = r + dr;
         const cc = c + dc;
         if (!inBoard(rr, cc)) continue;
-        if (s === 'r' && rr < 5) continue; // 红相不过河
-        if (s === 'b' && rr > 4) continue; // 黑象不过河
+        // 揭棋：翻开的相 / 象可以过河（`free`）；标准象棋与暗子仍不过河
+        if (!p.free) {
+          if (s === 'r' && rr < 5) continue; // 红相不过河
+          if (s === 'b' && rr > 4) continue; // 黑象不过河
+        }
         if (b[r + dr / 2][c + dc / 2]) continue; // 塞象眼
         const q = b[rr][cc];
         if (q && q.s === s) continue;

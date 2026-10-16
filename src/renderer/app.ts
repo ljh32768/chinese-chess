@@ -45,6 +45,7 @@ import {
   upsertCustomEndgame,
 } from '../shared/endgame.js';
 import { capturedPieces, describeMove } from '../shared/notation.js';
+import { coveredCount } from '../shared/jieqi.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
   DEFAULT_PORT,
@@ -181,6 +182,11 @@ const S = {
   threats: [] as Pos[],
   /** 残局挑战进度；null 表示当前不是残局模式 */
   endgame: null as EndgameState | null,
+  /** 揭棋（暗棋）模式：棋盘含暗子，吃子按快照记录展示 */
+  jieqi: false,
+  /** 揭棋：双方吃子记录（快照下发，含被吃暗子翻开后的身份） */
+  capRed: [] as PieceType[],
+  capBlack: [] as PieceType[],
   /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
   firstMode: 'guess' as FirstMode,
   /** 猜先阶段：双方到齐后先进入棋盘界面，再在棋盘上抓子 / 猜单双 */
@@ -211,6 +217,8 @@ const resultText = () => (S.winner === 'r' ? '红方胜' : S.winner === 'b' ? '�
  */
 function mateInfo(): CheckmateInfo | null {
   if (S.reason !== '将死' || !S.winner) return null;
+  // 揭棋局面含暗子，无「经典杀法」可言：不做杀法识别，终局只显示将死
+  if (S.jieqi) return null;
   // 残局从自定义局面开始，无法从标准开局回放着法（「被吃的棋子」需按终局盘面推导）
   const info = S.endgame
     ? classifyCheckmate(S.board, S.winner === 'r' ? 'b' : 'r', { lastMove: S.lastMove })
@@ -639,9 +647,15 @@ function render(): void {
   syncPulse();
 }
 
+/** 揭棋标记（含双方剩余暗子数）；非揭棋返回空串 */
+function jieqiTag(): string {
+  if (!S.jieqi) return '';
+  return ` · 揭棋（暗棋）· 暗子 红${coveredCount(S.board, 'r')}/黑${coveredCount(S.board, 'b')}`;
+}
+
 function updateRoleHint(): void {
   if (S.spectator) {
-    $('role-hint').textContent = `房间 ${S.roomId} · 观战 · 只读`;
+    $('role-hint').textContent = `房间 ${S.roomId} · 观战 · 只读${jieqiTag()}`;
     return;
   }
   if (S.endgame) {
@@ -651,20 +665,20 @@ function updateRoleHint(): void {
     return;
   }
   if (S.offline) {
-    $('role-hint').textContent = '人机对战（本地）· 你执红 · AI 执黑';
+    $('role-hint').textContent = `人机对战（本地）· 你执红 · AI 执黑${jieqiTag()}`;
     return;
   }
   if (S.aiMode) {
-    $('role-hint').textContent = `房间 ${S.roomId} · 人机对战 · AI 执黑`;
+    $('role-hint').textContent = `房间 ${S.roomId} · 人机对战 · AI 执黑${jieqiTag()}`;
     return;
   }
   if (S.guessPhase) {
-    $('role-hint').textContent = `房间 ${S.roomId} · 猜先`;
+    $('role-hint').textContent = `房间 ${S.roomId} · 猜先${jieqiTag()}`;
     return;
   }
   $('role-hint').textContent = `房间 ${S.roomId} · 你执${S.side === 'r' ? '红' : '黑'}${
     S.isOwner ? ' · 房主' : ''
-  }`;
+  }${jieqiTag()}`;
 }
 
 /** 猜先阶段的状态文案（未在猜先中返回 null） */
@@ -823,12 +837,12 @@ function updatePanel(): void {
   renderCaptured();
 }
 
-/** 渲染被吃掉的棋子：棋盘两侧的灰色缩略图（由着法序列推导，纯展示） */
+/** 渲染被吃掉的棋子：棋盘两侧的灰色缩略图（标准对局由着法序列推导；揭棋按快照下发的吃子记录） */
 function renderCaptured(): void {
   const cap = capturedPieces(S.history);
-  // 左条 = 红方吃掉的（即黑方的子），右条 = 黑方吃掉的（即红方的子）
-  fillCapStrip($('cap-red'), cap.byRed, 'b');
-  fillCapStrip($('cap-black'), cap.byBlack, 'r');
+  // 左条 = 红方所吃（黑方的子），右条 = 黑方所吃（红方的子）；揭棋用快照记录的吃子（含暗子真实身份）
+  fillCapStrip($('cap-red'), S.jieqi ? S.capRed : cap.byRed, 'b');
+  fillCapStrip($('cap-black'), S.jieqi ? S.capBlack : cap.byBlack, 'r');
 }
 
 /** 把一组被吃棋子渲染为灰色素材缩略图；内容（皮肤 + 棋子序列）未变则跳过重建，避免闪烁 */
@@ -869,6 +883,10 @@ function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void
   lastFxSeq = -1;
   S.history = s.history ?? [];
   S.deadline = s.deadline ?? null;
+  // 揭棋：变体与吃子记录随快照下发（标准对局无 variant，保持 false）
+  S.jieqi = s.variant === 'jieqi';
+  S.capRed = s.capturedByRed ?? [];
+  S.capBlack = s.capturedByBlack ?? [];
   if ($('screen-game').classList.contains('active')) render();
 }
 
@@ -1035,6 +1053,9 @@ function handleMessage(msg: ServerMessage): void {
       S.moves = [];
       S.history = msg.history;
       S.deadline = msg.deadline;
+      S.jieqi = msg.variant === 'jieqi';
+      S.capRed = msg.capturedByRed ?? [];
+      S.capBlack = msg.capturedByBlack ?? [];
       S.anim = null;
       // 本端点选时已把该子抬起（等待服务器确认期间保持抬起）→ 走子动画直接从平移开始
       playClick();
@@ -1361,6 +1382,9 @@ function resetLocal(): void {
   S.guessPhase = null;
   S.hint = null;
   S.endgame = null;
+  S.jieqi = false;
+  S.capRed = [];
+  S.capBlack = [];
   S.anim = null;
   clearLifts();
   window.cancelAnimationFrame(animRAF);
@@ -1633,10 +1657,11 @@ function backToIndex(): void {
   showHomePanel('index');
 }
 
-/** 创建双人对战房间（口令可选，留空即任何人可加入） */
+/** 创建双人对战房间（口令可选，留空即任何人可加入；可勾选揭棋） */
 async function createRoom(): Promise<void> {
   if (!requireServer()) return;
   const password = $<HTMLInputElement>('create-pass').value.trim();
+  const jieqi = $<HTMLInputElement>('create-jieqi').checked;
   // 服务端房间的缺省取先方式是「房主执红」，客户端缺省是「猜先」：
   // 建房成功后立即把本端默认同步给服务器，并回写本端状态（否则会被 room_joined 覆盖成服务端缺省值）
   const firstMode = FIRST_MODE_DEFAULT;
@@ -1645,11 +1670,17 @@ async function createRoom(): Promise<void> {
     S.aiMode = false;
     S.offline = false;
     S.guessPhase = null;
-    await request({ type: 'create_room', mode: 'pvp', password: password || null, token: S.account?.token });
+    await request({
+      type: 'create_room',
+      mode: jieqi ? 'jieqi' : 'pvp',
+      password: password || null,
+      token: S.account?.token,
+    });
     S.firstMode = firstMode;
     renderSidePick();
     net?.send({ type: 'choose_first', mode: firstMode });
     backToIndex();
+    if (jieqi) toast('已创建揭棋房间，等待对手加入');
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
     show('screen-home');
@@ -1661,6 +1692,12 @@ function aiDepth(): number {
   const el = document.querySelector<HTMLInputElement>('input[name="ai-depth"]:checked');
   const depth = Number(el?.value ?? 3);
   return Number.isInteger(depth) && depth >= 1 && depth <= 4 ? depth : 3;
+}
+
+/** 读取本地人机对弈的棋种：标准象棋 / 揭棋（暗棋） */
+function aiVariant(): 'xiangqi' | 'jieqi' {
+  const el = document.querySelector<HTMLInputElement>('input[name="ai-variant"]:checked');
+  return el?.value === 'jieqi' ? 'jieqi' : 'xiangqi';
 }
 
 /** 人机对弈（本地）：不依赖服务器，AI 执黑，规则与搜索都在本机运行 */
@@ -1680,13 +1717,15 @@ function createAiRoom(): void {
   S.firstMode = 'r';
   S.side = 'r';
   S.oppName = 'AI';
+  const jieqi = aiVariant() === 'jieqi';
   localGame = new Game();
-  localGame.reset('playing');
+  if (jieqi) localGame.openJieqi();
+  else localGame.reset('playing');
   clearSession();
   applySnapshot(localGame.snapshot());
   backToIndex();
   enterGame();
-  toast('开始人机对弈（本地，无需服务器）');
+  toast(jieqi ? '开始揭棋人机对弈（本地，无需服务器）' : '开始人机对弈（本地，无需服务器）');
   scheduleLocalAi();
 }
 
@@ -2231,7 +2270,7 @@ async function refreshRooms(): Promise<void> {
 function renderRoomList(rooms: RoomSummary[]): void {
   const box = $('room-list');
   box.replaceChildren();
-  const joinable = rooms.filter((r) => r.mode === 'pvp');
+  const joinable = rooms.filter((r) => r.mode !== 'ai');
   if (joinable.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'room-empty';
@@ -2250,7 +2289,9 @@ function renderRoomList(rooms: RoomSummary[]): void {
     const info = document.createElement('span');
     info.className = 'room-info';
     const state = r.status === 'playing' ? '对局中' : r.players >= 2 ? '已满' : '等待中';
-    info.textContent = `${r.ownerName} · ${r.players}/2 · ${state}${r.locked ? ' · 需口令' : ''}`;
+    info.textContent = `${r.ownerName} · ${r.players}/2 · ${state}${r.mode === 'jieqi' ? ' · 揭棋' : ''}${
+      r.locked ? ' · 需口令' : ''
+    }`;
     const joinBtn = document.createElement('button');
     joinBtn.type = 'button';
     joinBtn.className = 'btn small';
@@ -2546,7 +2587,8 @@ function requestRestart(): void {
   if (S.endgame) return restartPuzzle();
   if (S.status !== 'over') return toast('对局结束后才能重开');
   if (S.offline) {
-    localGame?.reset('playing');
+    if (localGame?.variant === 'jieqi') localGame.openJieqi();
+    else localGame?.reset('playing');
     if (localGame) applySnapshot(localGame.snapshot());
     scheduleLocalAi();
     toast('已重新开局');

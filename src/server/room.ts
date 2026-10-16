@@ -128,6 +128,8 @@ export class Room {
       // AI 占虚拟黑席：没有连接，不参与宽限
       this.b = { conn: null, player: AI_PLAYER, seat: 'b', graceTimer: null };
     } else {
+      // 揭棋房间：与双人房同构，仅开局方式与快照抹除不同
+      if (mode === 'jieqi') this.game.variant = 'jieqi';
       // 双人房：创建后即进入「等待对手」状态
       this.game.reset('waiting');
     }
@@ -517,7 +519,7 @@ export class Room {
   // ------------------------------------------------------------ 开局与走子
 
   private maybeStart(): void {
-    if (this.closed || this.mode !== 'pvp') return;
+    if (this.closed || this.mode === 'ai') return;
     if (!this.a?.conn || !this.b?.conn) return;
     if (this.game.status !== 'idle' && this.game.status !== 'waiting') return;
     switch (this.firstMode) {
@@ -562,10 +564,11 @@ export class Room {
     this.startGame();
   }
 
-  /** 开局：重置对局并向各连接下发各自阵营 + 记录本局信息 */
+  /** 开局：重置对局（揭棋为洗子开局）并向各连接下发各自阵营 + 记录本局信息 */
   private startGame(): void {
     this.cancelOverTimer();
-    this.game.reset('playing');
+    if (this.mode === 'jieqi') this.game.openJieqi();
+    else this.game.reset('playing');
     this.afterMoveApplied(); // 开局即开始回合计时（若启用）
     this.dispatchStart();
     this.currentRecord = {
@@ -623,6 +626,14 @@ export class Room {
       lastMove: s.lastMove,
       history: s.history,
       deadline: s.deadline,
+      // 揭棋：随广播下发变体标记与吃子记录（棋盘已在 snapshot 中抹除暗子真实身份）
+      ...(s.variant
+        ? {
+            variant: s.variant,
+            capturedByRed: s.capturedByRed,
+            capturedByBlack: s.capturedByBlack,
+          }
+        : {}),
     };
     this.broadcast(applied);
     logInfo(
@@ -650,6 +661,11 @@ export class Room {
     if (!cur) return;
     if (cur.ai) {
       logInfo(`房间 ${this.id}：人机对战不计入对局回顾，跳过落库`);
+      return;
+    }
+    if (this.mode === 'jieqi') {
+      // 揭棋初始暗子分布无法由「标准开局 + 着法」复原，本版不落库（见 ADR-0011 §4）
+      logInfo(`房间 ${this.id}：揭棋对局不计入对局回顾，跳过落库`);
       return;
     }
     const s = this.game.snapshot();

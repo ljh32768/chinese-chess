@@ -17,6 +17,7 @@ import {
   SKIN_IDS,
   arrowSegment,
   assetUrl,
+  BackOp,
   BoltOp,
   boardBgUrl,
   canvasPoint,
@@ -55,6 +56,8 @@ const draws = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is 
 const rings = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is RingOp => 'ring' in o);
 const arrows = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is ArrowOp => 'arrow' in o);
 const discs = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is DiscOp => 'disc' in o);
+/** 揭棋暗子背面绘制指令 */
+const backs = (ops: ReturnType<typeof computeDrawList>) => ops.filter((o): o is BackOp => 'back' in o);
 const findImage = (ops: ReturnType<typeof computeDrawList>, img: string) =>
   draws(ops).filter((o) => o.img === img);
 
@@ -536,5 +539,52 @@ describe('战术闪电与将颤抖（v2.10）', () => {
     expect(imgOp(shaken, 'r_j').x).toBe(imgOp(base, 'r_j').x + 5);
     expect(imgOp(shaken, 'r_j').y).toBe(imgOp(base, 'r_j').y - 3);
     expect(imgOp(shaken, 'r_c')).toEqual(imgOp(base, 'r_c'));
+  });
+});
+
+describe('揭棋暗子背面（computeDrawList / 动画帧）', () => {
+  const covered: Piece = { t: 'R', s: 'r', hidden: true, real: 'P' };
+
+  it('暗子绘制背面（素面圆盘 + 阵营），不贴棋子正图', () => {
+    const b = emptyBoard();
+    b[9][0] = covered;
+    const ops = computeDrawList(view({ board: b }), skin2);
+    const bk = backs(ops);
+    expect(bk).toHaveLength(1);
+    expect(bk[0].side).toBe('r');
+    const c = cellCenter(toView([9, 0], false), skin2);
+    expect(bk[0].cx).toBeCloseTo(c.x, 6);
+    expect(bk[0].cy).toBeCloseTo(c.y, 6);
+    expect(bk[0].radius).toBeCloseTo(skin2.disc / 2, 6);
+    expect(findImage(ops, 'r_c')).toHaveLength(0); // 不贴暗子的「明面兵种」正图
+  });
+
+  it('明子仍按素材贴图（对照），选中压暗作用于背面', () => {
+    const b = emptyBoard();
+    b[9][0] = covered;
+    b[9][8] = { t: 'R', s: 'r' };
+    const ops = computeDrawList(view({ board: b, selected: [9, 0] }), skin2);
+    expect(backs(ops)).toHaveLength(1);
+    expect(backs(ops)[0].alpha).toBeCloseTo(0.75, 6);
+    expect(findImage(ops, 'r_c')).toHaveLength(1);
+  });
+
+  it('抬起 / 走子动画帧带 back 标记（暗子按背面绘制，明子为 null）', () => {
+    expect(liftFrame([9, 0], covered, 1, skin2, false).back).toBe('r');
+    expect(moveAnimFrame({ from: [6, 0], to: [5, 0], piece: covered, t: 0.5 }, skin2, false).back).toBe('r');
+    expect(liftFrame([9, 0], { t: 'R', s: 'r' }, 1, skin2, false).back).toBeNull();
+  });
+
+  it('动画中的暗子以背面绘制（带缩放，不出现明面正图）', () => {
+    const b = emptyBoard();
+    b[5][0] = covered;
+    const ops = computeDrawList(
+      view({ board: b, anim: { from: [5, 0], to: [5, 0], piece: covered, t: 0.5 } }),
+      skin2,
+    );
+    const bk = backs(ops);
+    expect(bk).toHaveLength(1);
+    expect(bk[0].scale).toBeGreaterThan(1);
+    expect(findImage(ops, 'r_c')).toHaveLength(0);
   });
 });

@@ -6,9 +6,10 @@
  * （长将 / 长捉 / 长打判负，或不变作和），见 [repetition.ts](./repetition.ts)。
  */
 
-import { Board, GameSnapshot, GameStatus, Move, Pos, Side } from './types.js';
+import { Board, GameSnapshot, GameStatus, GameVariant, Move, PieceType, Pos, Side } from './types.js';
 import { cloneBoard, initBoard, isInCheck, judgeAfterMove, makeMove, validateMove } from './rules.js';
 import { classifyMove, judgeRepetition, MoveNature, positionKey } from './repetition.js';
+import { dealBoard, redactBoard, revealAt } from './jieqi.js';
 
 export interface MoveResult {
   ok: boolean;
@@ -24,6 +25,13 @@ export class Game {
   reason = '';
   lastMove: Move | null = null;
   check = false;
+
+  /** 对局变体：标准象棋 / 揭棋（暗棋）。揭棋下发快照时抹除暗子真实身份 */
+  variant: GameVariant = 'xiangqi';
+
+  /** 揭棋：红方 / 黑方已吃掉的子（含被吃暗子翻开后的真实身份） */
+  capturedByRed: PieceType[] = [];
+  capturedByBlack: PieceType[] = [];
 
   /** 待处理的求和 / 重开 / 悔棋请求发起方 */
   pendingDraw: Side | null = null;
@@ -43,6 +51,8 @@ export class Game {
     moveSeq: number;
     lastMove: Move | null;
     check: boolean;
+    capRed: PieceType[];
+    capBlack: PieceType[];
   }> = [];
 
   /** 每个局面的键（下标 i = 第 i 手之后），用于重复局面裁决 */
@@ -69,6 +79,19 @@ export class Game {
     this.posKeys = [positionKey(this.board, this.turn)];
     this.moveNatures = [];
     this.deadline = null;
+    this.capturedByRed = [];
+    this.capturedByBlack = [];
+  }
+
+  /**
+   * 揭棋（暗棋）开局：置变体为 `jieqi` 并以洗子局面开始。
+   * 真实身份只留在本权威端（服务端 / 本地 AI 宿主），对外由 snapshot() 抹除。
+   */
+  openJieqi(): void {
+    this.variant = 'jieqi';
+    this.reset('playing');
+    this.board = dealBoard();
+    this.check = isInCheck(this.board, this.turn);
   }
 
   /**
@@ -83,10 +106,11 @@ export class Game {
     this.posKeys = [positionKey(this.board, this.turn)];
   }
 
-  /** 生成当前快照 */
+  /** 生成当前快照（揭棋下抹除暗子真实身份，并附带吃子记录） */
   snapshot(): GameSnapshot {
+    const jieqi = this.variant === 'jieqi';
     return {
-      board: this.board,
+      board: jieqi ? redactBoard(this.board) : this.board,
       turn: this.turn,
       moveSeq: this.moveSeq,
       status: this.status,
@@ -96,6 +120,13 @@ export class Game {
       check: this.check,
       history: this.history.map((m) => ({ from: [...m.from] as Pos, to: [...m.to] as Pos })),
       deadline: this.deadline,
+      ...(jieqi
+        ? {
+            variant: this.variant,
+            capturedByRed: [...this.capturedByRed],
+            capturedByBlack: [...this.capturedByBlack],
+          }
+        : {}),
     };
   }
 
@@ -110,6 +141,7 @@ export class Game {
     const err = validateMove(this.board, from, to, side);
     if (err) return { ok: false, reason: err };
 
+    const target = this.board[to[0]][to[1]];
     // 记录走子前局面，供悔棋回退与「捉」判定
     this.past.push({
       board: cloneBoard(this.board),
@@ -117,9 +149,18 @@ export class Game {
       moveSeq: this.moveSeq,
       lastMove: this.lastMove,
       check: this.check,
+      capRed: [...this.capturedByRed],
+      capBlack: [...this.capturedByBlack],
     });
     const before = this.past[this.past.length - 1].board;
     makeMove(this.board, from, to);
+    if (this.variant === 'jieqi') {
+      // 揭棋：记录被吃子身份（暗子取真实身份），并把落点的暗子翻开
+      if (target) {
+        (side === 'r' ? this.capturedByRed : this.capturedByBlack).push(target.real ?? target.t);
+      }
+      revealAt(this.board, to);
+    }
     this.history.push({ from: [...from] as Pos, to: [...to] as Pos });
     // 记录本手性质（将 / 捉 / 闲）与走子后的局面键，供重复局面裁决
     this.moveNatures.push({ side, nature: classifyMove(before, this.board, side) });
@@ -165,6 +206,8 @@ export class Game {
       moveSeq: number;
       lastMove: Move | null;
       check: boolean;
+      capRed: PieceType[];
+      capBlack: PieceType[];
     };
     this.history.pop();
     this.posKeys.pop();
@@ -174,6 +217,8 @@ export class Game {
     this.moveSeq = prev.moveSeq;
     this.lastMove = prev.lastMove;
     this.check = prev.check;
+    this.capturedByRed = prev.capRed;
+    this.capturedByBlack = prev.capBlack;
     this.pendingDraw = null;
     this.pendingUndo = null;
     this.deadline = null;
