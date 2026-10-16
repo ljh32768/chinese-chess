@@ -94,7 +94,7 @@ export function nextSkin(id: SkinId): SkinId {
 }
 
 /** 棋子类型 → 素材文件名前缀（帅仕相马车炮兵 → j s x m c p z） */
-const PIECE_IMG: Record<PieceType, string> = {
+export const PIECE_IMG: Record<PieceType, string> = {
   K: 'j',
   A: 's',
   B: 'x',

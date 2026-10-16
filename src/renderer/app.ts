@@ -53,8 +53,10 @@ import {
 import {
   BoardView,
   DEFAULT_SKIN,
+  PIECE_IMG,
   SkinId,
   SKINS,
+  assetUrl,
   boardBgUrl,
   canvasPoint,
   isSkinId,
@@ -96,12 +98,6 @@ interface EndgameState {
   /** 结果原因文案（将死 / 困毙 / 超出步数 / 被将死…） */
   reason: string;
 }
-
-/** 棋子汉字（红黑两套用字，用于吃子展示） */
-const PIECE_NAME: Record<Side, Record<PieceType, string>> = {
-  r: { K: '帅', A: '仕', B: '相', N: '马', R: '车', C: '炮', P: '兵' },
-  b: { K: '将', A: '士', B: '象', N: '马', R: '车', C: '炮', P: '卒' },
-};
 
 /** 选中棋子的抬起动画：进度在 from → to 之间推进（to=1 保持抬起，to=0 落回原处） */
 interface LiftAnim {
@@ -706,11 +702,28 @@ function updatePanel(): void {
   renderCaptured();
 }
 
-/** 渲染吃子面板（由着法序列推导，纯展示） */
+/** 渲染被吃掉的棋子：棋盘两侧的灰色缩略图（由着法序列推导，纯展示） */
 function renderCaptured(): void {
   const cap = capturedPieces(S.history);
-  $('cap-red-list').textContent = cap.byRed.map((t) => PIECE_NAME.b[t]).join(' ') || '—';
-  $('cap-black-list').textContent = cap.byBlack.map((t) => PIECE_NAME.r[t]).join(' ') || '—';
+  // 左条 = 红方吃掉的（即黑方的子），右条 = 黑方吃掉的（即红方的子）
+  fillCapStrip($('cap-red'), cap.byRed, 'b');
+  fillCapStrip($('cap-black'), cap.byBlack, 'r');
+}
+
+/** 把一组被吃棋子渲染为灰色素材缩略图；内容（皮肤 + 棋子序列）未变则跳过重建，避免闪烁 */
+function fillCapStrip(el: HTMLElement, types: PieceType[], side: Side): void {
+  const sig = `${S.skin}:${types.join('')}`;
+  if (el.dataset.sig === sig) return;
+  el.dataset.sig = sig;
+  el.replaceChildren(
+    ...types.map((t) => {
+      const img = document.createElement('img');
+      img.className = 'cap-piece';
+      img.alt = '';
+      img.src = assetUrl(skin(), `${side}_${PIECE_IMG[t]}`);
+      return img;
+    }),
+  );
 }
 
 function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void {

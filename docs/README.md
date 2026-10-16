@@ -5,8 +5,8 @@
 
 > 一句话：局域网内任一台设备打开服务器地址，就能创建 / 加入房间，完整、正确地下一盘棋。
 
-- 版本：v2.9（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 改为点击棋子即抬起：选子抬起 / 取消落回 / 走子从抬起态直接平移**）
-- 状态：v2.9 完成；324 项自动化测试通过，lint / format / build / CI 全绿
+- 版本：v2.9（v0.1.0 为 MVP 代码基线；v1.1–v1.6 为主机权威时代的优化与功能迭代；**v2.0 迁移到局域网中心服务器**；**v2.1 客户端自选服务器 + 房间列表 / 邀请 + 本地人机对弈**；**v2.2 点击板块后的大面板 UI + 邀请玩家列表 + 猜先进入棋盘 + 人机对局不计入回顾**；**v2.3 修复桌面客户端对局回顾 Failed to fetch（API 跨源）+ 新增「我的历史」**；**v2.4 界面视觉与交互精修 + 象棋杀法识别**；**v2.5 残局挑战：内置经典杀法题库 + 强制将死求解器，本地对弈、提示 / 悔棋 / 重来与通关记录**；**v2.6 残局优化：残局页面「下一关」按钮 + 题库自检（`checkPuzzle` / `checkEndgameBank`）**；**v2.7 残局不限步数（将死即胜）+ 列表状态标记（绿勾 / 红叉 / 白勾 + 绿 / 灰外圈表示是否最优）**；**v2.8 走子动画（抬起 / 移动 / 放下）+ 将军 / 绝杀棋盘正中提示条（各杀法一套图案样式，1.5s 渐入渐出）**；**v2.9 走子动画改为「点击棋子抬起」+ 被吃掉的棋子改为棋盘两侧灰色缩略图 + 自建残局编辑器**）
+- 状态：v2.9 完成；321 项自动化测试通过，lint / format / build / CI 全绿
 - 更新日期：2026-10-15
 
 版本里程碑：
@@ -31,6 +31,7 @@
 | **v2.7** | **残局改为不限步数：把对方将死即挑战成功（不再按步数判负），题库给出的步数改为展示「最优步数」；「提示」改用 `minMateDepth` + `findMateMove` 给出当前局面仍能取胜的最快着法；列表新增状态标记——勾叉表示完成 / 失败 / 未完成（绿勾 / 红叉 / 白勾），外圈绿色表示已达成最优步数、灰色表示未达成；本机记录改为「取胜最少步数 + 是否曾失败」并兼容旧的数字格式** | 见 [ADR-0009 §3.12](./adr/0009-c-d-extensions.md) |
 | **v2.8** | **对局动效：走子动画「抬起 → 移动 → 放下」（`board.ts` 增 `anim` / `moveAnimFrame` / 落影，`app.ts` 走子后按 rAF 在 460ms 内推进）；将军 / 绝杀在棋盘正中弹**提示条**（新增纯数据模块 `renderer/banner.ts`：18 种杀法各一套图案样式——五种底纹 + 强调色 + 徽记，未收录杀法回退兜底），显示 1.5s 渐入渐出（`banner-cycle`），`prefers-reduced-motion` 下不做走子动画、提示条去掉动效但保持可见** | 见 [ADR-0007 §3.5.5](./adr/0007-renderer-ui.md) |
 | **v2.9** | **走子动画改为「点击棋子抬起」：新增 `board.ts liftFrame()` 与 `BoardView.lifts`（原地升起 / 落下，抬高 + 放大 + 落影），`app.ts liftPiece()` / `lowerAllLifts()` 绑定选中与取消（同一时刻只抬起一枚，`LIFT_MS = 200ms`）；走子时该子已在抬起态，`animateMove(from, to, startLifted)` 直接从平移开始、落点再放下（对手 / AI 走子仍是完整三段）；联机点击落点后保持抬起等待服务器确认，被拒则落回；抬起与走子共用一条 rAF 帧循环，保持抬起时停帧不空转；`prefers-reduced-motion` 下不做抬起动画（选中仍以压暗 + 落点框表达）** | 见 [ADR-0007 §3.5.5](./adr/0007-renderer-ui.md) |
+| **v2.9** | **吃子展示改造：删除侧栏「红方吃子 / 黑方吃子」文字面板，改为棋盘两侧的三栏结构（左 = 红方所吃 / 右 = 黑方所吃），被吃掉的子以素材缩略图统一置灰（`filter: grayscale(1) opacity(0.55)`）实时摆到棋盘旁；吃子条随棋盘高度拉伸并纵向居中，左右对称保证棋盘居中** | 见 [ADR-0007 §3.5.6](./adr/0007-renderer-ui.md) |
 
 ---
 
@@ -219,7 +220,7 @@ main / server-main（进程入口，装配 server 与页面）
 | 走子动画（移动 / 放下） | 走子后自动（联机 / 人机 / 残局） | [app.ts `animateMove()`](../src/renderer/app.ts) → [board.ts `moveAnimFrame()` / `computeDrawList()`](../src/renderer/board.ts)（本端点选时已抬起 → 省去起身段直接平移；起点 / 终点格跳过静态贴图，动画帧 + 椭圆落影画在最上层） | [ADR-0007 §3.5.5](./adr/0007-renderer-ui.md) |
 | 将军 / 绝杀正中提示条 | 走子后自动（将军或致将死） | [app.ts `maybeBanner()` / `showBanner()`](../src/renderer/app.ts) → [banner.ts `bannerStyle()` / `bannerContent()`](../src/renderer/banner.ts)（棋盘正中显示 1.5s 渐入渐出，各杀法一套图案样式） | [ADR-0007 §3.5.5](./adr/0007-renderer-ui.md) |
 | 悬停预高亮 | 鼠标悬停棋盘 | [app.ts `bindEvents()`](../src/renderer/app.ts) + [board.ts `computeDrawList()`](../src/renderer/board.ts) | [ADR-0007](./adr/0007-renderer-ui.md) |
-| 吃子统计 | 侧栏吃子面板自动更新 | [app.ts `renderCaptured()`](../src/renderer/app.ts) → [notation.ts `capturedPieces()`](../src/shared/notation.ts) | [ADR-0009 §3.2](./adr/0009-c-d-extensions.md) |
+| 被吃掉的棋子展示 | 对局页棋盘两侧吃子条自动更新（左 = 红方所吃 / 右 = 黑方所吃，灰色素材缩略图） | [app.ts `renderCaptured()` / `fillCapStrip()`](../src/renderer/app.ts) → [notation.ts `capturedPieces()`](../src/shared/notation.ts)、素材经 [board.ts `PIECE_IMG` / `assetUrl()`](../src/renderer/board.ts) | [ADR-0007 §3.5.6](./adr/0007-renderer-ui.md)、[ADR-0009 §3.2](./adr/0009-c-d-extensions.md) |
 | 悔棋（申请/同意） | 对局页「悔棋」 | 联机：[app.ts `offerUndo()`](../src/renderer/app.ts) → `undo_request` / `undo_response` → [room.ts `handleMessage()`](../src/server/room.ts) → [game.ts `undo()`](../src/shared/game.ts)；本地人机：直接回退到本方回合 | [ADR-0009 §3.6](./adr/0009-c-d-extensions.md) |
 | 计时读秒 | 状态框显示「剩余 xx s」 | [room.ts `armTurnTimer()`](../src/server/room.ts) → 快照 `deadline` → [app.ts `updatePanel()`](../src/renderer/app.ts) | [ADR-0009 §3.8](./adr/0009-c-d-extensions.md) |
 | 断线重连（宽限恢复） | 对手意外断线时自动提示，重连后恢复原局 | [room.ts `startGrace()` / `expireGrace()`](../src/server/room.ts) → `opponent_away`；客户端凭 `playerId` 重连（[app.ts `tryResumeSession()`](../src/renderer/app.ts)） | [ADR-0010 §3.4](./adr/0010-room-server.md) |
@@ -338,7 +339,7 @@ Chinese_chess/
 | [discover.test.ts](../tests/discover.test.ts) | 服务器探测、无服务端口返回 null、网段扫描聚合去重与进度 |
 | [servers.test.ts](../tests/servers.test.ts) | 服务器地址解析、网段推导、服务器键、页面地址回退与「浏览器 / 桌面客户端」判定 |
 | [lan-ip.test.ts](../tests/lan-ip.test.ts) | pickLanIp 网段优先级与虚拟网卡跳过 |
-| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构（**6 个入口：43×6 + 6 = 264 铺满内框，按钮素材等比缩放与悬停偏移**）、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）**、**v2.8 走子动画与正中提示条契约（`board-stage` 结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减少动态效果仍可见 / app.ts 接线）**、**v2.9 点击抬起契约（抬起帧与 `lifts` / 点击选中即抬起 / 取消落回 / 走子从抬起态直接平移 / 联机等待确认期间保持抬起）** |
+| [ui-home-layout.test.ts](../tests/ui-home-layout.test.ts) | 主界面布局：主页背景署名已被 cover.bmp 覆盖（索引 PNG 像素级验证）、首页木质挂板缩放与入口结构（**6 个入口：43×6 + 6 = 264 铺满内框，按钮素材等比缩放与悬停偏移**）、**点击板块后的大面板已取代木框对齐窄面板（620 宽 / 与对局回顾同款 / 不再有 280 内框尺寸）**、列表行不被按钮撑破、**邀请玩家列表置灰与宽版弹层**、底部小字已删除、取先方式下拉框（默认猜先）、**对局回顾「全部对局 / 我的历史」页签**、**v2.4 视觉精修契约（设计令牌 / 焦点环 / 切屏与弹层动效 / 减少动态效果 / 状态框「轮到你走棋」强调 / toast 换行与 aria 语义）**、**v2.4 终局杀法展示契约（杀法框结构 / 只引用设计令牌 / 小屏同列铺满 / 复盘页「终局杀法」面板）**、**v2.8 走子动画与正中提示条契约（`board-stage` 结构 / 1.5s 渐入渐出 / 五种底纹与 `--b-accent` / 减少动态效果仍可见 / app.ts 接线）**、**v2.9 点击抬起契约（抬起帧与 `lifts` / 点击选中即抬起 / 取消落回 / 走子从抬起态直接平移 / 联机等待确认期间保持抬起）**、**v2.9 被吃掉的棋子展示契约（侧栏文字面板与其样式已删除 / 两侧吃子条三栏居中 / 缩略图置灰 / app.ts 素材渲染且不再有文字映射）** |
 
 验收标准见 [Product-plan.md 第 14 节](./Product-plan.md)、[ADR-0008](./adr/0008-testing-strategy.md)
 与 [ADR-0010 §6](./adr/0010-room-server.md)。
