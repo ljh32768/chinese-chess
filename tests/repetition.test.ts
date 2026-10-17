@@ -126,7 +126,7 @@ describe('重复局面裁决（纯函数）', () => {
     expect(judgeRepetition(h)).toEqual({ outcome: 'lose', loser: 'b', reason: '长打判负' });
   });
 
-  it('双方都是长打 → 不变作和', () => {
+  it('双方都是长打 → 不判和，提示「请变招」', () => {
     const h = hist(
       ['a', 'x', 'a', 'x', 'a'],
       [
@@ -136,10 +136,10 @@ describe('重复局面裁决（纯函数）', () => {
         ['b', 'chase'],
       ],
     );
-    expect(judgeRepetition(h)).toEqual({ outcome: 'draw', reason: '重复局面判和' });
+    expect(judgeRepetition(h)).toEqual({ outcome: 'hint', reason: '请变招' });
   });
 
-  it('双方都是长闲（重复局面但无人长打）→ 不变作和', () => {
+  it('双方都是长闲（重复局面但无人长打）→ 不判和，提示「请变招」', () => {
     const h = hist(
       ['a', 'x', 'a', 'x', 'a'],
       [
@@ -149,7 +149,7 @@ describe('重复局面裁决（纯函数）', () => {
         ['b', 'idle'],
       ],
     );
-    expect(judgeRepetition(h)).toEqual({ outcome: 'draw', reason: '重复局面判和' });
+    expect(judgeRepetition(h)).toEqual({ outcome: 'hint', reason: '请变招' });
   });
 
   it('只看最后一次重复循环（更早的循环不影响当前裁决）', () => {
@@ -164,7 +164,7 @@ describe('重复局面裁决（纯函数）', () => {
         ['b', 'idle'],
       ],
     );
-    expect(judgeRepetition(h)).toEqual({ outcome: 'draw', reason: '重复局面判和' });
+    expect(judgeRepetition(h)).toEqual({ outcome: 'hint', reason: '请变招' });
   });
 });
 
@@ -258,15 +258,37 @@ describe('重复局面裁决（对局状态机集成）', () => {
     expect(g.reason).toBe('长捉判负');
   });
 
-  it('双方长闲三次重复 → 不变作和', () => {
+  it('双方长闲三次重复 → 不判和，提示「请变招」（对局继续）', () => {
     const g = new Game();
     g.setup(IDLE_BOARD(), 'r');
     play(g, IDLE_SEQ, 7);
     expect(g.status).toBe('playing');
+    expect(g.repetitionHint).toBe(false); // 第 2 次重复不提示
     play(g, IDLE_SEQ.slice(7));
-    expect(g.status).toBe('over');
+    expect(g.status).toBe('playing'); // 不判和，继续对局
     expect(g.winner).toBeNull();
-    expect(g.reason).toBe('重复局面判和');
+    expect(g.reason).toBe('');
+    expect(g.repetitionHint).toBe(true);
+    expect(g.snapshot().repetitionHint).toBe(true); // 随快照下发，供渲染层提示
+  });
+
+  it('提示「请变招」后改成新着法 → repetitionHint 清除', () => {
+    const g = new Game();
+    g.setup(IDLE_BOARD(), 'r');
+    play(g, IDLE_SEQ); // 第 18 手构成第 3 次重复 → 提示「请变招」
+    expect(g.repetitionHint).toBe(true);
+    expect(g.applyMove([9, 0], [8, 0], 'r').ok).toBe(true); // 换一招
+    expect(g.status).toBe('playing');
+    expect(g.repetitionHint).toBe(false);
+  });
+
+  it('悔棋会一并回退重复局面提示', () => {
+    const g = new Game();
+    g.setup(IDLE_BOARD(), 'r');
+    play(g, IDLE_SEQ);
+    expect(g.repetitionHint).toBe(true);
+    expect(g.undo()).toBe(true);
+    expect(g.repetitionHint).toBe(false);
   });
 
   it('悔棋会一并回退重复局面计数，不会提前裁决', () => {

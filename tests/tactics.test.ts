@@ -270,18 +270,18 @@ describe('将军抽（check-fork）', () => {
 
   it('同时抽到车与炮、两子皆无救 → 取最高价值标签（车 > 炮）', () => {
     const b = emptyBoard();
-    kings(b);
-    put(b, 4, 2, 'N', 'r');
-    // 马跳到 (2,3) 照将，同时咬住 (3,5) 的黑车与 (4,4) 的黑炮；
-    // 二者既不能反吃马、也够不到马腿 (1,3) 去蹩腿挡将，故皆必失，取最高价值「车」。
-    put(b, 3, 5, 'R', 'b');
+    kings(b); // 红帅 (7,3)、黑将 (0,4)
+    // 马跳到 (2,5) 照将（马腿 (1,5) 空），同时咬住 (3,7) 的黑车与 (4,4) 的黑炮；
+    // 二者既不能反吃马、也够不到马腿 (1,5) 去蹩腿挡将，故皆必失，取最高价值「车」。
+    put(b, 4, 6, 'N', 'r');
+    put(b, 3, 7, 'R', 'b');
     put(b, 4, 4, 'C', 'b');
-    const hits = run(b, [4, 2], [2, 3]);
+    const hits = run(b, [4, 6], [2, 5]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('check-fork');
     expect(hits[0].label).toBe('将军抽车');
     expect(hits[0].threats).toEqual([
-      [3, 5],
+      [3, 7],
       [4, 4],
     ]);
   });
@@ -289,14 +289,25 @@ describe('将军抽（check-fork）', () => {
   it('被抽子可移去「蹩马腿」同时挡将（对方能两全）→ 只抽得另一子（将军抽炮）', () => {
     const b = emptyBoard();
     kings(b);
-    put(b, 4, 2, 'N', 'r');
-    put(b, 1, 5, 'R', 'b'); // 被抽的车：可横走到马腿 (1,3) 蹩腿挡将，自身脱险
+    put(b, 4, 6, 'N', 'r');
+    put(b, 1, 7, 'R', 'b'); // 被抽的车：可横走到马腿 (1,5) 蹩腿挡将，自身脱险
     put(b, 4, 4, 'C', 'b'); // 被抽的炮：无救
-    const hits = run(b, [4, 2], [2, 3]);
+    const hits = run(b, [4, 6], [2, 5]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('check-fork');
     expect(hits[0].label).toBe('将军抽炮');
     expect(hits[0].threats).toEqual([[4, 4]]);
+  });
+
+  it('被抽的炮有根（等价一换一不赚）→ 不判将军抽炮（获利口径）', () => {
+    const b = emptyBoard();
+    put(b, 0, 4, 'K', 'b');
+    put(b, 9, 5, 'K', 'r'); // 帅不在 4 路，避免黑将左移时照面
+    put(b, 2, 0, 'R', 'r'); // 红车走到 (2,4) 沿 4 路照将
+    put(b, 2, 7, 'C', 'b'); // 被抽的炮：有根（黑车保护）
+    put(b, 5, 7, 'R', 'b'); // 黑车同列保护 (2,7)
+    // 红车 9 吃有根的黑炮 4.5 会被反吃 → 不划算，不算「抽」
+    expect(run(b, [2, 0], [2, 4])).toHaveLength(0);
   });
 
   it('闪将（让线车照将）+ 走动的马同时捉车 → 将军抽车（将军来源可为闪将）', () => {
@@ -384,20 +395,15 @@ describe('串打（skewer）', () => {
     expect(run(b, [5, 1], [5, 4])).toHaveLength(0);
   });
 
-  it('前子有根（受后子保护）仍成立：对方无法一举化解两处威胁 → 串打（不按获利口径漏报）', () => {
+  it('前子有根（受后子保护）且吃它不赚 → 不判串打（获利口径）', () => {
     const b = emptyBoard();
     kings(b, [0, 5]);
     put(b, 5, 0, 'R', 'r');
     put(b, 5, 5, 'N', 'b'); // 前子：马（被后车保护 → 有根）
     put(b, 5, 6, 'R', 'b'); // 后子：车
-    // 黑方移开前马 → 红车转打后车；不移开 → 前马仍被咬。两处威胁无法同时化解，故仍判串打
-    const hits = run(b, [5, 0], [5, 4]);
-    expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('skewer');
-    expect(hits[0].threats).toEqual([
-      [5, 5],
-      [5, 6],
-    ]);
+    // 黑方只要走一步与射线无关的闲棋（如移将）：红车吃前马会被后车反吃（车 9 换马 4），
+    // 后车又被前马挡住打不到 → 我方无从获利，故不构成串打（v3.5 起对多子战术统一用获利口径）
+    expect(run(b, [5, 0], [5, 4])).toHaveLength(0);
   });
 });
 

@@ -187,6 +187,8 @@ const S = {
   /** 揭棋：双方吃子记录（快照下发，含被吃暗子翻开后的身份） */
   capRed: [] as PieceType[],
   capBlack: [] as PieceType[],
+  /** 重复局面提示：本手构成三次重复且无人长打 → 状态框提示「请变招」（对局继续，不判和） */
+  repetitionHint: false,
   /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
   firstMode: 'guess' as FirstMode,
   /** 猜先阶段：双方到齐后先进入棋盘界面，再在棋盘上抓子 / 猜单双 */
@@ -243,6 +245,17 @@ function toast(msg: string): void {
   el.classList.add('show');
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+/**
+ * 重复局面「请变招」轻提示：本手构成三次重复且无人长打时提示一次。
+ * 同一手只提示一次——联机走子会连收 `move_applied` + 后续 `state` 同步，按 `seq` 去重。
+ */
+let lastVarySeq = -1;
+function maybeVaryHint(seq: number, hint: boolean): void {
+  if (!hint || seq === lastVarySeq) return;
+  lastVarySeq = seq;
+  toast('重复局面，请变招');
 }
 
 // -------------------------------------------------------------- 正中提示条（将军 / 绝杀）
@@ -802,6 +815,9 @@ function updatePanel(): void {
       : S.turn === S.side
         ? '⚠ 你被将军了'
         : '⚠ 对方被将军';
+  } else if (active && S.repetitionHint) {
+    // 三次重复但无人长打：不判和，提示双方变招（将军警示优先于本行）
+    statusText = '重复局面 · 请变招';
   } else if (active) {
     statusText = S.spectator
       ? `${sideName(S.turn)}行棋中…`
@@ -908,6 +924,8 @@ function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void
   S.jieqi = s.variant === 'jieqi';
   S.capRed = s.capturedByRed ?? [];
   S.capBlack = s.capturedByBlack ?? [];
+  S.repetitionHint = !!s.repetitionHint;
+  maybeVaryHint(s.moveSeq, S.repetitionHint);
   if ($('screen-game').classList.contains('active')) render();
 }
 
@@ -1077,12 +1095,14 @@ function handleMessage(msg: ServerMessage): void {
       S.jieqi = msg.variant === 'jieqi';
       S.capRed = msg.capturedByRed ?? [];
       S.capBlack = msg.capturedByBlack ?? [];
+      S.repetitionHint = !!msg.repetitionHint;
       S.anim = null;
       // 本端点选时已把该子抬起（等待服务器确认期间保持抬起）→ 走子动画直接从平移开始
       playClick();
       render();
       animateMove(msg.from, msg.to, hasLiftAt(msg.from));
       maybeBanner();
+      maybeVaryHint(msg.seq, S.repetitionHint);
       applyMoveEffects(before, { from: msg.from, to: msg.to }, msg.seq);
       return;
     }

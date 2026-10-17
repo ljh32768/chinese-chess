@@ -20,8 +20,11 @@
  *    不照将走「串打 / 捉双 / 闪击」分支。
  *    「将军抽」的将军来源可为**直接将军或闪将**，被抽子可为**走子后直接攻击到的大子**，
  *    也可为**被照之将同线后方的大子**（对方应将、将移开该线后即落入照将直线子的攻击口——经典抽将）。
- *    凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都要求**两者必然失去其一**：对方无论怎样应着，
- *    都至少有一枚被攻击的子仍会被吃到（排除「被攻击子反吃攻击子」「垫子挡线」「移走炮架」等可两全的伪战术）。
+ *    凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都要求**两者必然失去其一**，且**必须真能获利吃到**：
+ *    对方无论怎样应着，都至少有一枚被攻击的子仍会被吃到，而这个「吃到」按**获利口径**
+ *    （无根白吃 / 小换大，与吃子提示 `profitableTargets` 一致）成立——
+ *    据此排除「被攻击子反吃攻击子」「垫子挡线」「移走炮架」以及**有根且不划算**等可两全的伪战术
+ *    （对方弃子反吃即可两全，我方并未得子）。「获利口径」对将军抽 / 串打 / 捉双一视同仁。
  */
 
 import { cloneBoard, findKing, isAttacked, legalMoves, pieceMoves, sideHasAnyMove } from './rules.js';
@@ -267,25 +270,33 @@ function repliesOf(board: Board, opp: Side): Board[] {
 }
 
 /**
- * 「两者必然失去其一」：走子方在 `actor` 处的子，是否能在对方**任意**应着之后，
- * 仍然攻击到 `targets` 中至少一枚（该目标须仍是对方的子）。
- * 用来排除三类「可两全」的伪战术：被攻击子反吃攻击子、垫子挡住射线、移走炮架。
- * 按攻击关系（`pieceMoves`）判定，不额外要求「获利」——被威胁子是否有根只影响该子
- * 交换是否划算，并不改变「对方必须同时应付两处威胁」的战术事实：即便前子有根，
- * 只要它与后子同处一条射线且对方无法一举化解，仍属串打（此前按获利口径会漏报）。
+ * 局面 `board` 中 `side` 当前「可获利吃到」的敌子位置键集合（无根白吃 / 小换大）。
+ * 直接复用吃子提示的 `profitableTargets`，保证战术的「能吃到」口径与绿环提示完全一致。
  */
-function mustLoseOne(board: Board, actor: Pos, targets: Pos[], me: Side): boolean {
+function winnableKeys(board: Board, side: Side): Set<string> {
+  return new Set(profitableTargets(board, side).map(key));
+}
+
+/**
+ * 「两者必然失去其一」且**必能获利吃到**：走子方在 `actor` 处的子，在对方**任意**应着之后，
+ * 都至少有一枚 `targets` 中的子「仍被 `actor` 攻击」且「按获利口径真能吃到」
+ * （`actor` 吃它无根白吃，或该子价值 > `actor` 价值即小换大）。
+ * 据此排除五类「可两全」的伪战术：被攻击子反吃攻击子、垫子挡住射线、移走炮架，
+ * 以及**有根且不划算**的棋——对方可弃子反吃（等价甚至赚）而两全，我方并未得子。
+ * @param replies 对方全部合法应着局面（调用方一次性算好并复用，见 `detectTactics`）
+ */
+function mustLoseOne(replies: Board[], actor: Pos, targets: Pos[], me: Side): boolean {
   const opp = other(me);
-  const mine = board[actor[0]][actor[1]];
-  if (!mine || mine.s !== me || !targets.length) return false;
-  const replies = repliesOf(board, opp);
-  if (!replies.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
+  if (!targets.length || !replies.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
   for (const nb of replies) {
     const still = nb[actor[0]][actor[1]];
     if (!still || still.s !== me) return false; // 攻击子被吃 → 被攻击子全部保住
+    const actorValue = VALUE[still.t];
     const hit = targets.some((t) => {
       const tp = nb[t[0]][t[1]];
-      return !!tp && tp.s === opp && attacks(nb, actor, t);
+      if (!tp || tp.s !== opp || !attacks(nb, actor, t)) return false;
+      // 有根（受对方保护）且不是「小换大」→ 对方弃子反吃即可两全，不计为必失
+      return !isDefended(nb, opp, t, actor) || VALUE[tp.t] > actorValue;
     });
     if (!hit) return false;
   }
@@ -293,24 +304,15 @@ function mustLoseOne(board: Board, actor: Pos, targets: Pos[], me: Side): boolea
 }
 
 /**
- * 「两者必然失去其一」（不限定攻击子版）：用于**将军抽**——只要我方**任意**子
- * （走动的子、被让线的后方子力，乃至将移开后重新落入攻击口的直线子）在对方**任意**应着之后
- * 仍攻击到 `targets` 中至少一枚即可。将军抽的「捉」不要求是**走动的这枚子**发出的，
- * 也不要求是「新攻击」——照将本身就是本次新造成的强制威胁。
+ * 将军抽用：`target`（某一位置）在对方**每一种**应着之后都仍能被走子方**获利吃到**
+ * （无根白吃 / 小换大，与吃子提示同口径）。
+ * 与 `mustLoseOne` 的区别：被抽子可由我方**任意**子吃下（走动的子、被让线的后方子力，
+ * 乃至将移开后重新落入攻击口的直线子），不限于某一枚子，故按位置键判定即可。
+ * @param wins 与对方各应着局面一一对应的「我方此时可获利吃到的敌子位置键」集合
  */
-function unavoidablyLost(board: Board, targets: Pos[], me: Side): boolean {
-  const opp = other(me);
-  if (!targets.length) return false;
-  const replies = repliesOf(board, opp);
-  if (!replies.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
-  for (const nb of replies) {
-    const live = targets.some((t) => {
-      const tp = nb[t[0]][t[1]];
-      return !!tp && tp.s === opp && isAttacked(nb, t[0], t[1], me);
-    });
-    if (!live) return false;
-  }
-  return true;
+function unavoidablyLost(wins: Array<Set<string>>, target: Pos): boolean {
+  if (!wins.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
+  return wins.every((w) => w.has(key(target)));
 }
 
 /**
@@ -389,6 +391,13 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
   const hits: TacticHit[] = [];
   const givesCheck = !!oppKing && isAttacked(after, oppKing[0], oppKing[1], me);
 
+  // 「两者必然失去其一」验证要逐个模拟对方的每一种合法应着（较贵），只在实际需要时算一次
+  let replies: Board[] | null = null;
+  const repliesOnce = (): Board[] => replies ?? (replies = repliesOf(after, opp));
+  // 每种应着局面下「我方此时可获利吃到的敌子位置键」，与 repliesOnce() 一一对应（将军抽用）
+  let wins: Array<Set<string>> | null = null;
+  const winsOnce = (): Array<Set<string>> => wins ?? (wins = repliesOnce().map((nb) => winnableKeys(nb, me)));
+
   // 严格判定顺序：先看是否照将——照将走「闪将 / 将军抽」分支，否则走「串打 / 捉双 / 闪击」分支。
   if (givesCheck && oppKing) {
     // 将军抽（将军抽车 / 马 / 炮）：本着一身二任——将军（直接将军或闪将）+ 同时捉大子，对方必失其一。
@@ -405,13 +414,14 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       const p = after[victim[0]][victim[1]];
       if (p) candidates.push({ pos: victim, piece: p });
     }
-    // 去重后逐个验证「对方必失其一」
+    // 去重后逐个验证「对方必失其一」——被抽子须在对方每种应着后都仍能被我方获利吃到
+    const w = winsOnce();
     const seen = new Set<string>();
     const lost = candidates.filter(({ pos }) => {
-      const k = `${pos[0]},${pos[1]}`;
+      const k = key(pos);
       if (seen.has(k)) return false;
       seen.add(k);
-      return unavoidablyLost(after, [pos], me);
+      return unavoidablyLost(w, pos);
     });
     if (lost.length) {
       const best = lost.reduce((a, b) => (VALUE[b.piece.t] > VALUE[a.piece.t] ? b : a));
@@ -429,24 +439,24 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       if (discovered) hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
     }
   } else {
-    // 串打：走动的车 / 炮沿同一条射线攻击两枚值得捉的敌子，且对方无法两全（必失其一）
+    // 串打：走动的车 / 炮沿同一条射线攻击两枚值得捉的敌子，且对方无法两全（必失其一、且能获利吃到）
     if (moved.t === 'R' || moved.t === 'C') {
       const ray = skewerRays(after, move.to, moved.t, opp).find(([front, back]) =>
-        mustLoseOne(after, move.to, [front, back], me),
+        mustLoseOne(repliesOnce(), move.to, [front, back], me),
       );
       if (ray) {
         hits.push({ kind: 'skewer', label: '串打', actors: [move.to], threats: ray });
       }
     }
 
-    // 捉双：走动的子同时攻击两枚及以上「值得捉」的敌子（不含将），且对方无法两全（必失其一）
+    // 捉双：走动的子同时攻击两枚及以上「值得捉」的敌子（不含将），且对方无法两全（必失其一、且能获利吃到）
     const valuable = piecesOf(after, opp).filter(
       ({ pos, piece }) => isWorth(piece.t) && attacks(after, move.to, pos),
     );
     if (
       valuable.length >= 2 &&
       mustLoseOne(
-        after,
+        repliesOnce(),
         move.to,
         valuable.map((f) => f.pos),
         me,
