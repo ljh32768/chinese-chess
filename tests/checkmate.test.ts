@@ -3,6 +3,8 @@
  *
  * 每种经典杀法构造一个终局局面：先验证该局面确实是「将死」（规则引擎判定），
  * 再验证识别出的杀法名，避免「局面本身不是将死却通过了识别」的假阳性。
+ *
+ * 判定口径见《象棋杀法与局面状态严格判定》：本模块只处理「将死」（困毙不属于此）。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -38,7 +40,7 @@ function expectMate(items: Spec[], mated: Side, id: string): void {
 }
 
 describe('杀法识别：每种杀法一个终局局面', () => {
-  it('马后炮：炮借己方马为炮架将军（马前炮后）', () => {
+  it('马后炮：炮借己方马为炮架将军，且该马控将（马前炮后）', () => {
     expectMate(
       [
         [0, 4, 'bK'],
@@ -51,7 +53,7 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
-  it('重炮：双炮同线重叠，后炮借前炮为架', () => {
+  it('重炮：双炮同线叠架，后炮借前炮为架', () => {
     expectMate(
       [
         [0, 3, 'bK'],
@@ -63,38 +65,6 @@ describe('杀法识别：每种杀法一个终局局面', () => {
       ],
       'b',
       'chongpao',
-    );
-  });
-
-  it('大刀剜心：车吃去对方宫心士成杀（最后一步吃士）', () => {
-    const board = boardOf([
-      [0, 4, 'bK'],
-      [1, 4, 'bA'],
-      [0, 3, 'bN'],
-      [9, 4, 'rK'],
-      [1, 0, 'rR'],
-      [1, 5, 'rP'],
-    ]);
-    // 车（1,0）→（1,4）吃宫心士后成杀
-    makeMove(board, [1, 0], [1, 4]);
-    expect(judgeAfterMove(board, 'b')?.reason).toBe('将死');
-    const info = classifyCheckmate(board, 'b', { lastMove: { from: [1, 0], to: [1, 4] }, captured: 'A' });
-    expect(info.pattern.id).toBe('daodao-wanxin');
-  });
-
-  it('铁门栓：中炮镇中路，车封住将门', () => {
-    expectMate(
-      [
-        [0, 4, 'bK'],
-        [0, 3, 'bA'],
-        [0, 5, 'bA'],
-        [9, 4, 'rK'],
-        [1, 4, 'rR'],
-        [4, 4, 'rC'],
-        [2, 2, 'rN'],
-      ],
-      'b',
-      'tiemenshuan',
     );
   });
 
@@ -113,7 +83,23 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
-  it('天地炮：一炮镇中路、一炮沉底，配合车成杀', () => {
+  it('铁门栓：中炮镇住将门纵线，车 / 兵贴帅攻击', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [0, 3, 'bA'],
+        [0, 5, 'bA'],
+        [9, 4, 'rK'],
+        [1, 4, 'rR'],
+        [4, 4, 'rC'],
+        [2, 2, 'rN'],
+      ],
+      'b',
+      'tiemenshuan',
+    );
+  });
+
+  it('天地炮：一炮镇中路、一炮沉底线，配合车成杀', () => {
     expectMate(
       [
         [0, 4, 'bK'],
@@ -144,6 +130,133 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
+  it('海底捞月：车炮对单车残局，炮沉底借架、车贴帅成杀', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [0, 2, 'bR'],
+        [9, 4, 'rK'],
+        [1, 4, 'rR'],
+        [0, 0, 'rC'],
+      ],
+      'b',
+      'haidilaoyue',
+    );
+  });
+
+  it('列马车：马控将 + 车贴帅照将，车在马口保护下', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [0, 5, 'bA'],
+        [9, 3, 'rK'],
+        [0, 3, 'rR'],
+        [2, 2, 'rN'],
+      ],
+      'b',
+      'liemache',
+    );
+  });
+
+  it('列马车：红方被将死的镜像（杀法识别不依赖阵营）', () => {
+    expectMate(
+      [
+        [9, 4, 'rK'],
+        [9, 5, 'rA'],
+        [0, 3, 'bK'],
+        [9, 3, 'bR'],
+        [7, 2, 'bN'],
+      ],
+      'r',
+      'liemache',
+    );
+  });
+
+  it('卧槽马：马在对方下二路象前的「卧槽」位控将门一侧', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [0, 3, 'bA'],
+        [0, 5, 'bA'],
+        [9, 4, 'rK'],
+        [1, 2, 'rN'],
+        [2, 4, 'rP'],
+      ],
+      'b',
+      'wocaoma',
+    );
+  });
+
+  it('钓鱼马：马占三·八 / 七·八位封锁将门（控位子，不直接将军），车成杀', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [0, 5, 'bA'],
+        [9, 3, 'rK'],
+        [0, 0, 'rR'],
+        [2, 2, 'rN'],
+      ],
+      'b',
+      'diaoyuma',
+    );
+  });
+
+  it('侧面虎：马占对方卒（兵）位侧控将门，同侧车成杀', () => {
+    expectMate(
+      [
+        [0, 5, 'bK'],
+        [0, 4, 'bN'],
+        [9, 4, 'rK'],
+        [0, 8, 'rR'],
+        [3, 6, 'rN'],
+      ],
+      'b',
+      'cemianhu',
+    );
+  });
+
+  it('八角马：马在士角与将对角定将，由车将军成杀', () => {
+    expectMate(
+      [
+        [1, 4, 'bK'],
+        [0, 4, 'bP'],
+        [9, 3, 'rK'],
+        [1, 0, 'rR'],
+        [0, 3, 'rN'],
+      ],
+      'b',
+      'bajiaoma',
+    );
+  });
+
+  it('双车错：双车分占两条不同的线交错将军', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [9, 4, 'rK'],
+        [1, 0, 'rR'],
+        [0, 8, 'rR'],
+        [5, 4, 'rP'],
+      ],
+      'b',
+      'shuangchecuo',
+    );
+  });
+
+  it('闷杀：将（帅）的逃路全被自家子力堵死（不限炮架）', () => {
+    expectMate(
+      [
+        [0, 3, 'bK'],
+        [0, 4, 'bN'],
+        [1, 3, 'bN'],
+        [9, 4, 'rK'],
+        [2, 2, 'rN'],
+      ],
+      'b',
+      'mengsha',
+    );
+  });
+
   it('双将：两子同时将军（车 + 马）', () => {
     expectMate(
       [
@@ -159,7 +272,7 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
-  it('白脸将：车在将门、借帅力封口（对面笑）', () => {
+  it('对面笑：车在将门、借帅力封口（白脸将 / 千里照面）', () => {
     expectMate(
       [
         [0, 4, 'bK'],
@@ -173,37 +286,38 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
-  it('双马饮泉：一马控将、另一马将军', () => {
+  it('大刀剜心：车吃去对方宫心士成杀（附加条目；最后一步吃士）', () => {
+    const board = boardOf([
+      [0, 4, 'bK'],
+      [1, 4, 'bA'],
+      [0, 3, 'bN'],
+      [9, 4, 'rK'],
+      [1, 0, 'rR'],
+      [1, 5, 'rP'],
+    ]);
+    // 车（1,0）→（1,4）吃宫心士后成杀
+    makeMove(board, [1, 0], [1, 4]);
+    expect(judgeAfterMove(board, 'b')?.reason).toBe('将死');
+    const info = classifyCheckmate(board, 'b', { lastMove: { from: [1, 0], to: [1, 4] }, captured: 'A' });
+    expect(info.pattern.id).toBe('daodao-wanxin');
+  });
+
+  it('双马饮泉：一马控将、另一马将军（附加条目）', () => {
     expectMate(
       [
         [0, 4, 'bK'],
         [0, 3, 'bA'],
         [0, 5, 'bA'],
         [9, 3, 'rK'],
-        [1, 2, 'rN'],
-        [3, 3, 'rN'],
+        [2, 3, 'rN'],
+        [3, 5, 'rN'],
       ],
       'b',
       'shuangma-yinquan',
     );
   });
 
-  it('卧槽马：马在对方二路三 / 七路交叉点将军', () => {
-    expectMate(
-      [
-        [0, 4, 'bK'],
-        [0, 3, 'bA'],
-        [0, 5, 'bA'],
-        [9, 4, 'rK'],
-        [1, 2, 'rN'],
-        [2, 4, 'rP'],
-      ],
-      'b',
-      'wocaoma',
-    );
-  });
-
-  it('挂角马：马在对方士角将军', () => {
+  it('挂角马：马在宫顶角直接将军（附加条目）', () => {
     expectMate(
       [
         [0, 4, 'bK'],
@@ -215,90 +329,6 @@ describe('杀法识别：每种杀法一个终局局面', () => {
       ],
       'b',
       'guajiaoma',
-    );
-  });
-
-  it('钓鱼马：马占三·八 / 七·八位封锁将门，车成杀', () => {
-    expectMate(
-      [
-        [0, 4, 'bK'],
-        [0, 5, 'bA'],
-        [9, 3, 'rK'],
-        [0, 0, 'rR'],
-        [2, 2, 'rN'],
-      ],
-      'b',
-      'diaoyuma',
-    );
-  });
-
-  it('侧面虎：马占对方卒（兵）位控将，同侧车成杀', () => {
-    expectMate(
-      [
-        [0, 5, 'bK'],
-        [0, 4, 'bN'],
-        [9, 4, 'rK'],
-        [0, 8, 'rR'],
-        [3, 6, 'rN'],
-      ],
-      'b',
-      'cemianhu',
-    );
-  });
-
-  it('八角马：马封住将（帅）两处以上出路，由车将军成杀', () => {
-    expectMate(
-      [
-        [0, 4, 'bK'],
-        [9, 3, 'rK'],
-        [0, 8, 'rR'],
-        [1, 0, 'rR'],
-        [2, 4, 'rN'],
-      ],
-      'b',
-      'bajiaoma',
-    );
-  });
-
-  it('双车错：双车分占两线交错将军', () => {
-    expectMate(
-      [
-        [0, 4, 'bK'],
-        [9, 4, 'rK'],
-        [1, 0, 'rR'],
-        [0, 8, 'rR'],
-        [5, 4, 'rP'],
-      ],
-      'b',
-      'shuangchecuo',
-    );
-  });
-
-  it('海底捞月：车沉底在对方底线发起攻击，己方帅（将）占中', () => {
-    expectMate(
-      [
-        [0, 4, 'bK'],
-        [0, 3, 'bA'],
-        [9, 4, 'rK'],
-        [0, 8, 'rR'],
-        [2, 4, 'rP'],
-      ],
-      'b',
-      'haidilaoyue',
-    );
-  });
-
-  it('闷杀：将（帅）的出路被自家子力堵死', () => {
-    expectMate(
-      [
-        [0, 3, 'bK'],
-        [0, 4, 'bN'],
-        [1, 3, 'bN'],
-        [9, 4, 'rK'],
-        [2, 2, 'rN'],
-      ],
-      'b',
-      'mengsha',
     );
   });
 
@@ -332,16 +362,26 @@ describe('杀法识别：每种杀法一个终局局面', () => {
 });
 
 describe('杀法库与辅助函数', () => {
-  it('杀法库条目 id / 名称唯一，且包含兜底条目', () => {
+  it('杀法库条目 id / 名称唯一，且包含兜底条目与新增「列马车」', () => {
     const ids = CHECKMATE_PATTERNS.map((p) => p.id);
     const names = CHECKMATE_PATTERNS.map((p) => p.name);
     expect(new Set(ids).size).toBe(ids.length);
     expect(new Set(names).size).toBe(names.length);
     expect(ids).toContain('generic');
+    expect(ids).toContain('liemache');
     for (const p of CHECKMATE_PATTERNS) {
       expect(p.label.length).toBeGreaterThan(0);
       expect(p.definition.length).toBeGreaterThan(0);
     }
+  });
+
+  it('清单外附加条目（大刀剜心 / 双马饮泉 / 挂角马）排在主判定顺序之后', () => {
+    const ids = CHECKMATE_PATTERNS.map((p) => p.id);
+    const attached = ['daodao-wanxin', 'shuangma-yinquan', 'guajiaoma'];
+    const mainLast = ids.findIndex((id) => attached.includes(id));
+    // 附加条目之前不应再有其他附加条目，且都紧邻兜底之前
+    for (const id of attached) expect(ids.indexOf(id)).toBeGreaterThanOrEqual(mainLast);
+    expect(ids.indexOf('generic')).toBe(ids.length - 1);
   });
 
   it('同时成立的杀法记入 alsoMatched（铁门栓同时是双将）', () => {

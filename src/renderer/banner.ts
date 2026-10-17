@@ -52,6 +52,7 @@ const STYLES: Record<string, BannerStyle> = {
   bajiaoma: { pattern: 'bajiaoma', motif: 'ring', accent: '#d7b3ff', emblem: '八马' },
   shuangchecuo: { pattern: 'shuangchecuo', motif: 'chevron', accent: '#ff9f9f', emblem: '车车' },
   haidilaoyue: { pattern: 'haidilaoyue', motif: 'stripe', accent: '#7fe3d4', emblem: '捞月' },
+  liemache: { pattern: 'liemache', motif: 'chevron', accent: '#f2a65a', emblem: '马车' },
   mengsha: { pattern: 'mengsha', motif: 'grid', accent: '#c9b38a', emblem: '闷' },
   generic: { pattern: 'generic', motif: 'diamond', accent: '#ffcf7a', emblem: '杀' },
 };
