@@ -16,6 +16,10 @@
  * 2) 战术识别（闪击 / 闪将 / 将军抽 / 串打 / 捉双）：走子后给出「战术提示」的标签与被威胁的棋子。
  *    纯函数，复用 `shared/rules.ts` 的走法与攻击判定，便于单测；只做**启发式提示**，
  *    不参与任何规则 / 胜负判定。判定口径见 ADR-0007 §3.5.7。
+ *    严格判定顺序：**先看是否照将**——照将走「闪将 / 将军抽」分支（只将军 = 闪将；将军 + 捉大子 = 将军抽），
+ *    不照将走「串打 / 捉双 / 闪击」分支。
+ *    「将军抽」的将军来源可为**直接将军或闪将**，被抽子可为**走子后直接攻击到的大子**，
+ *    也可为**被照之将同线后方的大子**（对方应将、将移开该线后即落入照将直线子的攻击口——经典抽将）。
  *    凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都要求**两者必然失去其一**：对方无论怎样应着，
  *    都至少有一枚被攻击的子仍会被吃到（排除「被攻击子反吃攻击子」「垫子挡线」「移走炮架」等可两全的伪战术）。
  */
@@ -289,6 +293,47 @@ function mustLoseOne(board: Board, actor: Pos, targets: Pos[], me: Side): boolea
 }
 
 /**
+ * 「两者必然失去其一」（不限定攻击子版）：用于**将军抽**——只要我方**任意**子
+ * （走动的子、被让线的后方子力，乃至将移开后重新落入攻击口的直线子）在对方**任意**应着之后
+ * 仍攻击到 `targets` 中至少一枚即可。将军抽的「捉」不要求是**走动的这枚子**发出的，
+ * 也不要求是「新攻击」——照将本身就是本次新造成的强制威胁。
+ */
+function unavoidablyLost(board: Board, targets: Pos[], me: Side): boolean {
+  const opp = other(me);
+  if (!targets.length) return false;
+  const replies = repliesOf(board, opp);
+  if (!replies.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
+  for (const nb of replies) {
+    const live = targets.some((t) => {
+      const tp = nb[t[0]][t[1]];
+      return !!tp && tp.s === opp && isAttacked(nb, t[0], t[1], me);
+    });
+    if (!live) return false;
+  }
+  return true;
+}
+
+/**
+ * 照将的直线子（车 / 炮）与被照之将同线时，返回将被照之将**同线后方**的第一枚敌方大子（车 / 马 / 炮）。
+ * 对方应将、将移开该线后，此子即落入该直线子的攻击口——经典「抽将」（将军抽子）的得子对象。
+ * 非同行 / 同列（马 / 兵照将）无「线后」可言，返回 null。
+ */
+function behindKingVictim(board: Board, checker: Pos, king: Pos, opp: Side): Pos | null {
+  if (checker[0] !== king[0] && checker[1] !== king[1]) return null; // 须同行 / 同列
+  const dr = Math.sign(king[0] - checker[0]);
+  const dc = Math.sign(king[1] - checker[1]);
+  let r = king[0] + dr;
+  let c = king[1] + dc;
+  while (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
+    const p = board[r][c];
+    if (p) return p.s === opp && isWorth(p.t) ? [r, c] : null;
+    r += dr;
+    c += dc;
+  }
+  return null;
+}
+
+/**
  * 车 / 炮的「串打」射线：某方向上「前一子之后还有一枚值得捉的敌子」，
  * 且前 / 后两子都值得捉（马及以上）。返回每条射线上 [前子, 后子] 的坐标。
  */
@@ -344,81 +389,90 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
   const hits: TacticHit[] = [];
   const givesCheck = !!oppKing && isAttacked(after, oppKing[0], oppKing[1], me);
 
-  // 闪将：被将军，且存在一个「非走动的子」的 checker 因让线而成将（checker 限车 / 炮）
+  // 严格判定顺序：先看是否照将——照将走「闪将 / 将军抽」分支，否则走「串打 / 捉双 / 闪击」分支。
   if (givesCheck && oppKing) {
-    const discovered = attackersOf(after, oppKing, me).some(
-      (c) => !samePos(c, move.to) && isLinePiece(after, c) && openedLine(c, oppKing, move.from),
-    );
-    if (discovered) hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
-  }
-
-  // 将军抽：走动的子本身发出将军，且同时新攻击敌方的马 / 车 / 炮，对方无法两全（必失其一）
-  if (oppKing && attacks(after, move.to, oppKing)) {
-    const forked = piecesOf(after, opp).filter(
-      ({ pos, piece }) => isWorth(piece.t) && attacks(after, move.to, pos),
-    );
-    if (
-      forked.length &&
-      mustLoseOne(
-        after,
-        move.to,
-        forked.map((f) => f.pos),
-        me,
-      )
-    ) {
-      const best = forked.reduce((a, b) => (VALUE[b.piece.t] > VALUE[a.piece.t] ? b : a));
+    // 将军抽（将军抽车 / 马 / 炮）：本着一身二任——将军（直接将军或闪将）+ 同时捉大子，对方必失其一。
+    // 被抽子两类：① 走子后直接攻击到的敌方大子（车 / 马 / 炮，攻击者可为走动的子或后方子力）；
+    //             ② 被照之将同线后方的大子（将移开后落入照将直线子的攻击口——经典抽将）。
+    const candidates: Array<{ pos: Pos; piece: Piece }> = [];
+    for (const { pos, piece } of piecesOf(after, opp)) {
+      if (isWorth(piece.t) && isAttacked(after, pos[0], pos[1], me)) candidates.push({ pos, piece });
+    }
+    for (const checker of attackersOf(after, oppKing, me)) {
+      if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
+      const victim = behindKingVictim(after, checker, oppKing, opp);
+      if (!victim) continue;
+      const p = after[victim[0]][victim[1]];
+      if (p) candidates.push({ pos: victim, piece: p });
+    }
+    // 去重后逐个验证「对方必失其一」
+    const seen = new Set<string>();
+    const lost = candidates.filter(({ pos }) => {
+      const k = `${pos[0]},${pos[1]}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return unavoidablyLost(after, [pos], me);
+    });
+    if (lost.length) {
+      const best = lost.reduce((a, b) => (VALUE[b.piece.t] > VALUE[a.piece.t] ? b : a));
       hits.push({
         kind: 'check-fork',
         label: `将军抽${PIECE_CN[best.piece.t]}`,
         actors: [move.to],
-        threats: forked.map((f) => f.pos),
+        threats: lost.map((c) => c.pos),
       });
+    } else {
+      // 闪将：只将军、未同时捉大子——存在一个「非走动的子」的 checker 因让线而成将（checker 限车 / 炮）
+      const discovered = attackersOf(after, oppKing, me).some(
+        (c) => !samePos(c, move.to) && isLinePiece(after, c) && openedLine(c, oppKing, move.from),
+      );
+      if (discovered) hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
     }
-  }
+  } else {
+    // 串打：走动的车 / 炮沿同一条射线攻击两枚值得捉的敌子，且对方无法两全（必失其一）
+    if (moved.t === 'R' || moved.t === 'C') {
+      const ray = skewerRays(after, move.to, moved.t, opp).find(([front, back]) =>
+        mustLoseOne(after, move.to, [front, back], me),
+      );
+      if (ray) {
+        hits.push({ kind: 'skewer', label: '串打', actors: [move.to], threats: ray });
+      }
+    }
 
-  // 串打：走动的车 / 炮沿同一条射线攻击两枚值得捉的敌子，且对方无法两全（必失其一）
-  if (moved.t === 'R' || moved.t === 'C') {
-    const ray = skewerRays(after, move.to, moved.t, opp).find(([front, back]) =>
-      mustLoseOne(after, move.to, [front, back], me),
+    // 捉双：走动的子同时攻击两枚及以上「值得捉」的敌子（不含将），且对方无法两全（必失其一）
+    const valuable = piecesOf(after, opp).filter(
+      ({ pos, piece }) => isWorth(piece.t) && attacks(after, move.to, pos),
     );
-    if (ray) {
-      hits.push({ kind: 'skewer', label: '串打', actors: [move.to], threats: ray });
+    if (
+      valuable.length >= 2 &&
+      mustLoseOne(
+        after,
+        move.to,
+        valuable.map((f) => f.pos),
+        me,
+      )
+    ) {
+      hits.push({ kind: 'fork', label: '捉双', actors: [move.to], threats: valuable.map((f) => f.pos) });
     }
-  }
 
-  // 捉双：走动的子同时攻击两枚及以上「值得捉」的敌子（不含将），且对方无法两全（必失其一）
-  const valuable = piecesOf(after, opp).filter(
-    ({ pos, piece }) => isWorth(piece.t) && attacks(after, move.to, pos),
-  );
-  if (
-    valuable.length >= 2 &&
-    mustLoseOne(
-      after,
-      move.to,
-      valuable.map((f) => f.pos),
-      me,
-    )
-  ) {
-    hits.push({ kind: 'fork', label: '捉双', actors: [move.to], threats: valuable.map((f) => f.pos) });
-  }
-
-  // 闪击：让线后新威胁到的敌方子（非将），攻击者为非走动的直线子力
-  const threats: Pos[] = [];
-  const actors: Pos[] = [];
-  for (const { pos, piece } of piecesOf(after, opp)) {
-    if (piece.t === 'K') continue;
-    if (!attackersOf(after, pos, me).length) continue;
-    if (attackersOf(before, pos, me).length) continue; // 须为「新攻击」
-    const actor = attackersOf(after, pos, me).find(
-      (a) => !samePos(a, move.to) && isLinePiece(after, a) && openedLine(a, pos, move.from),
-    );
-    if (actor) {
-      threats.push(pos);
-      actors.push(actor);
+    // 闪击：让线后新威胁到的敌方子（非将），攻击者为非走动的直线子力
+    const threats: Pos[] = [];
+    const actors: Pos[] = [];
+    for (const { pos, piece } of piecesOf(after, opp)) {
+      if (piece.t === 'K') continue;
+      if (!attackersOf(after, pos, me).length) continue;
+      if (attackersOf(before, pos, me).length) continue; // 须为「新攻击」
+      const actor = attackersOf(after, pos, me).find(
+        (a) => !samePos(a, move.to) && isLinePiece(after, a) && openedLine(a, pos, move.from),
+      );
+      if (actor) {
+        threats.push(pos);
+        actors.push(actor);
+      }
     }
-  }
-  if (threats.length) {
-    hits.push({ kind: 'discovered-attack', label: '闪击', actors, threats });
+    if (threats.length) {
+      hits.push({ kind: 'discovered-attack', label: '闪击', actors, threats });
+    }
   }
 
   hits.sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind]);
