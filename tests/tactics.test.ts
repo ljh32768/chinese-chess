@@ -291,13 +291,20 @@ describe('串打（skewer）', () => {
     expect(run(b, [5, 1], [5, 4])).toHaveLength(0);
   });
 
-  it('前子有根（受后子保护）且非小换大 → 不成立（有根的棋不算「必失」）', () => {
+  it('前子有根（受后子保护）仍成立：对方无法一举化解两处威胁 → 串打（不按获利口径漏报）', () => {
     const b = emptyBoard();
     kings(b, [0, 5]);
     put(b, 5, 0, 'R', 'r');
-    put(b, 5, 5, 'N', 'b'); // 前子：马（被后车保护 → 有根，价值 4 < 红车 9）
-    put(b, 5, 6, 'R', 'b'); // 后子：车（黑可原地不动、弃马反吃红车而两全）
-    expect(run(b, [5, 0], [5, 4])).toHaveLength(0);
+    put(b, 5, 5, 'N', 'b'); // 前子：马（被后车保护 → 有根）
+    put(b, 5, 6, 'R', 'b'); // 后子：车
+    // 黑方移开前马 → 红车转打后车；不移开 → 前马仍被咬。两处威胁无法同时化解，故仍判串打
+    const hits = run(b, [5, 0], [5, 4]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].kind).toBe('skewer');
+    expect(hits[0].threats).toEqual([
+      [5, 5],
+      [5, 6],
+    ]);
   });
 });
 

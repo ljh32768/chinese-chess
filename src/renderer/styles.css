@@ -504,7 +504,7 @@ body::before {
 }
 #board { cursor: default; }
 
-/* ---------- 被吃掉的棋子：棋盘两侧的灰色缩略图（左 = 红方所吃，右 = 黑方所吃） ---------- */
+/* ---------- 被吃掉的棋子：棋盘两侧的缩略图（左 = 红方所吃，右 = 黑方所吃） ---------- */
 /* 三栏：左吃子条 + 棋盘 + 右吃子条，整体居中；条随棋盘高度拉伸并纵向居中排列 */
 .board-row { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .cap-strip {
@@ -515,15 +515,14 @@ body::before {
   flex-wrap: wrap;
   align-content: center;
   justify-content: center;
-  gap: 3px;
-  width: 30px;
+  gap: 4px;
+  width: 40px;
 }
-/* 被吃子一律置灰：去色 + 压暗，与盘上棋子的红黑配色区分 */
+/* 被吃子放大展示，并保留红 / 黑原色（不再置灰） */
 .cap-piece {
   display: block;
-  width: 26px;
+  width: 34px;
   height: auto;
-  filter: grayscale(1) opacity(0.55);
 }
 
 /* ---------- 棋盘正中提示：将军 / 绝杀（黑色大圆；绝杀带暗红斜线），显示 1.5s 渐入渐出 ---------- */

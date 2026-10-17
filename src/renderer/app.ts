@@ -44,7 +44,7 @@ import {
   removeCustomEndgame,
   upsertCustomEndgame,
 } from '../shared/endgame.js';
-import { capturedPieces, describeMove } from '../shared/notation.js';
+import { describeMove } from '../shared/notation.js';
 import { coveredCount } from '../shared/jieqi.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
@@ -857,15 +857,16 @@ function updatePanel(): void {
   renderCaptured();
 }
 
-/** 渲染被吃掉的棋子：棋盘两侧的灰色缩略图（标准对局由着法序列推导；揭棋按快照下发的吃子记录） */
+/** 渲染被吃掉的棋子：棋盘两侧的缩略图（吃子记录由权威状态机随快照 / 广播下发） */
 function renderCaptured(): void {
-  const cap = capturedPieces(S.history);
-  // 左条 = 红方所吃（黑方的子），右条 = 黑方所吃（红方的子）；揭棋用快照记录的吃子（含暗子真实身份）
-  fillCapStrip($('cap-red'), S.jieqi ? S.capRed : cap.byRed, 'b');
-  fillCapStrip($('cap-black'), S.jieqi ? S.capBlack : cap.byBlack, 'r');
+  // 左条 = 红方所吃（黑方的子），右条 = 黑方所吃（红方的子）。
+  // 直接采用 Game 跟踪的 capturedByRed / capturedByBlack（标准 / 揭棋 / 残局 / 人机一致），
+  // 不再按着法序列从标准开局推导——残局自定义开局会推出并不存在的「死子」。
+  fillCapStrip($('cap-red'), S.capRed, 'b');
+  fillCapStrip($('cap-black'), S.capBlack, 'r');
 }
 
-/** 把一组被吃棋子渲染为灰色素材缩略图；内容（皮肤 + 棋子序列）未变则跳过重建，避免闪烁 */
+/** 把一组被吃棋子渲染为素材缩略图（保留红 / 黑原色）；内容（皮肤 + 棋子序列）未变则跳过重建，避免闪烁 */
 function fillCapStrip(el: HTMLElement, types: PieceType[], side: Side): void {
   const sig = `${S.skin}:${types.join('')}`;
   if (el.dataset.sig === sig) return;
@@ -2018,7 +2019,7 @@ function showCustomProblems(name: string, problems: string[]): void {
   }
   showModal({
     title: `「${name}」自动核验未通过`,
-    sub: `共 ${problems.length} 处问题，改好后可再次保存（局面需双方有将、不重叠，且能在 4 步内强制将死对方）`,
+    sub: `共 ${problems.length} 处问题，改好后可再次保存（局面需双方有将、不重叠，且能在 50 步内强制将死对方）`,
     body,
     wide: true,
     buttons: [{ label: '知道了', primary: true }],

@@ -565,10 +565,11 @@ describe('v2.9 被吃掉的棋子显示：棋盘两侧灰色缩略图（取代�
     expect(decl('.cap-strip', 'justify-content')).toBe('center');
   });
 
-  it('被吃棋子一律置灰（去色 + 压暗）', () => {
-    const filter = decl('.cap-piece', 'filter');
-    expect(filter).toContain('grayscale(1)');
-    expect(px('.cap-piece', 'width')).toBeGreaterThan(0);
+  it('被吃棋子放大展示并保留红 / 黑原色（不再置灰）', () => {
+    // 不再有 grayscale 去色 / 压暗
+    expect(decl('.cap-piece', 'filter')).toBeUndefined();
+    expect(px('.cap-piece', 'width')).toBeGreaterThan(26);
+    expect(px('.cap-strip', 'width')).toBeGreaterThanOrEqual(px('.cap-piece', 'width'));
   });
 
   it('app.ts：用棋子素材渲染吃子条，不再输出文字', () => {

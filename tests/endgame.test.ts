@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  CUSTOM_CHECK_BUDGET_MS,
   CUSTOM_CHECK_MAX,
   CUSTOM_LEVEL,
   EndgameRecord,
@@ -38,6 +39,7 @@ import {
   recordFail,
   recordWin,
   removeCustomEndgame,
+  SolveTimeout,
   swapPieceSides,
   upsertCustomEndgame,
 } from '../src/shared/endgame.js';
@@ -51,6 +53,7 @@ const HTML = read('src/renderer/index.html');
 const CSS = read('src/renderer/styles.css');
 const APP = read('src/renderer/app.ts');
 const EDITOR = read('src/renderer/endgame-editor.ts');
+const WORKER = read('src/renderer/endgame-worker.ts');
 
 const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
 
@@ -283,18 +286,18 @@ describe('自建残局：保存前自动核验（checkCustomEndgame）', () => {
     expect(r2.goalMoves).toBe(2);
   });
 
-  it('核验上限默认 4 步：上限内没有强制杀法即不通过', () => {
-    // 双方各只有将/帅，外加一颗远处的红兵：红方无法在 4 步内强制将死
+  it('核验上限默认 50 步，且上限内没有强制杀法即不通过（报「无杀法」）', () => {
+    // 双方各只有将/帅，外加一颗远处的红兵：红方无法在 1 步内强制将死
     const pieces: Array<[number, number, PieceType, Side]> = [
       [9, 3, 'K', 'r'],
       [0, 4, 'K', 'b'],
       [5, 0, 'P', 'r'],
     ];
-    expect(CUSTOM_CHECK_MAX).toBe(4);
-    const r = checkCustomEndgame(pieces, 'r');
+    expect(CUSTOM_CHECK_MAX).toBe(50);
+    const r = checkCustomEndgame(pieces, 'r', 1);
     expect(r.ok).toBe(false);
     expect(r.goalMoves).toBe(0);
-    expect(r.problems).toContain('无法在 4 步内强制取胜');
+    expect(r.problems).toContain('无杀法：1 步内无法强制将死对方');
   });
 
   it('核验上限可调：两步杀在 1 步上限下不通过', () => {
@@ -302,7 +305,7 @@ describe('自建残局：保存前自动核验（checkCustomEndgame）', () => {
     const r = checkCustomEndgame(two.pieces, 'r', 1);
     expect(r.ok).toBe(false);
     expect(r.goalMoves).toBe(0);
-    expect(r.problems).toContain('无法在 1 步内强制取胜');
+    expect(r.problems).toContain('无杀法：1 步内无法强制将死对方');
   });
 
   it('局面不合法（缺将 / 重叠 / 越界）会被拦下，且不给步数', () => {
@@ -342,6 +345,21 @@ describe('自建残局：保存前自动核验（checkCustomEndgame）', () => {
     const before = JSON.stringify(p.pieces);
     checkCustomEndgame(p.pieces, p.side);
     expect(JSON.stringify(p.pieces)).toBe(before);
+  });
+
+  it('求解预算：预算耗尽时按「无杀法」返回（工作线程据此中止，不抛出）', () => {
+    const one = PUZZLES.find((p) => p.id === 'wocaoma')!;
+    const r = checkCustomEndgame(one.pieces, 'r', CUSTOM_CHECK_MAX, 0);
+    expect(r.ok).toBe(false);
+    expect(r.goalMoves).toBe(0);
+    expect(r.problems).toContain(`无杀法：${CUSTOM_CHECK_MAX} 步内无法强制将死对方`);
+  });
+
+  it('求解器超预算抛 SolveTimeout（默认预算不设限，不影响题库自检）', () => {
+    expect(CUSTOM_CHECK_BUDGET_MS).toBeGreaterThan(0);
+    // 传入已过期的 deadline → 求解一开始就中止
+    const board = buildPuzzleBoard(PUZZLES[0]);
+    expect(() => canForceMate(board, 'r', 3, Date.now() - 1)).toThrow(SolveTimeout);
   });
 });
 
@@ -645,16 +663,20 @@ describe('残局挑战：界面接线', () => {
     expect(APP).toContain("$('btn-eg-create').addEventListener('click', openEndgameEditor)");
     expect(APP).toContain('function openEndgameEditor()');
     expect(APP).toContain('editor?.open(null)');
-    // 保存：自动核验 → 通过才落盘（写本机存档），不通过逐条列出问题
+    // 保存：自动核验（工作线程求解，界面「核验中…」）→ 通过才落盘，不通过逐条列出问题
     expect(APP).toContain('function saveCustomEndgame(p: EndgamePuzzle)');
     expect(APP).toContain('upsertCustomEndgame(readCustomEndgames(), p)');
     expect(APP).toContain('function showCustomProblems(name: string, problems: string[])');
     expect(APP).toContain("row.className = 'eg-check-row bad'");
-    expect(EDITOR).toContain('checkCustomEndgame(pieces, state.first, CUSTOM_CHECK_MAX)');
+    // 核验改到 Web Worker 里跑（避免阻塞界面），Worker 出错时回退同步核验
+    expect(EDITOR).toContain("new Worker(new URL('./endgame-worker.js', import.meta.url)");
+    expect(EDITOR).toContain('checkCustomEndgame(pieces, side, CUSTOM_CHECK_MAX)');
     expect(EDITOR).toContain('deps.onInvalid(name, check.problems)');
     expect(EDITOR).toContain(
-      'deps.onSave(makeCustomEndgame(state.id, name, state.first, pieces, check.goalMoves))',
+      'deps.onSave(makeCustomEndgame(state.id, name, first, pieces, check.goalMoves))',
     );
+    // 工作线程调用同一套纯核验函数
+    expect(WORKER).toContain('checkCustomEndgame(pieces, side, limit)');
   });
 
   it('自建残局编辑器：棋盘摆子 + 局面面板 + 棋子栏 + 红先/黑先，并并入残局列表', () => {

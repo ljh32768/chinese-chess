@@ -6,13 +6,16 @@
  * - 右侧「局面」面板：初始局面（标准开局） / 清空 / 红黑互换（位置不变、阵营对调）。
  * - 右下角「红先 / 黑先」= 玩家（先手方）执哪一方；棋盘左右翻转固定为红方在下。
  * - 「保 存」时先**自动核验**：局面是否合法（双方有将、无重叠、先手方未被将军、双方均有子可走）
- *   且能在核验上限内强制将死对方；不通过则逐条列出问题并留在编辑器，通过则按求出的最优步数入库。
+ *   且能在核验上限（50 步）内强制将死对方；核验在 **Web Worker** 里求解（界面显示「核验中…」，
+ *   不阻塞界面），超预算或上限内无杀法即报「无杀法」；不通过则逐条列出问题并留在编辑器，
+ *   通过则按求出的最优步数入库。
  *
  * 本模块只管编辑器自身的 DOM 与状态：切屏、落盘、弹层由 app.ts 注入（避免模块间循环依赖）。
  */
 
 import {
   CUSTOM_CHECK_MAX,
+  CustomCheck,
   EndgamePuzzle,
   boardToPieces,
   checkCustomEndgame,
@@ -80,6 +83,7 @@ function swapBoardSides(board: Board): Board {
 export function initEndgameEditor(deps: EditorDeps): EndgameEditorController {
   const canvas = document.getElementById('eg-board') as HTMLCanvasElement;
   const nameEl = document.getElementById('eg-name') as HTMLInputElement;
+  const saveBtn = document.getElementById('eg-save') as HTMLButtonElement;
   const rows: Record<Side, HTMLElement> = {
     r: document.getElementById('eg-pal-red') as HTMLElement,
     b: document.getElementById('eg-pal-black') as HTMLElement,
@@ -163,22 +167,53 @@ export function initEndgameEditor(deps: EditorDeps): EndgameEditorController {
     }
   }
 
-  /** 保存：先自动核验（同步求解，先让「核验中」绘制出来） */
+  /** 核验中：按钮禁用并显示「核验中…」，避免连点 */
+  function setChecking(on: boolean): void {
+    state.checking = on;
+    saveBtn.disabled = on;
+    saveBtn.textContent = on ? '核验中…' : '保　存';
+  }
+
+  /** 在 Web Worker 里跑核验（不阻塞界面）；Worker 不可用 / 出错时回退同步核验 */
+  function runCheck(pieces: Array<[number, number, PieceType, Side]>, side: Side): Promise<CustomCheck> {
+    return new Promise((resolve) => {
+      let worker: Worker;
+      try {
+        worker = new Worker(new URL('./endgame-worker.js', import.meta.url), { type: 'module' });
+      } catch {
+        resolve(checkCustomEndgame(pieces, side, CUSTOM_CHECK_MAX));
+        return;
+      }
+      let settled = false;
+      const finish = (r: CustomCheck): void => {
+        if (settled) return;
+        settled = true;
+        worker.terminate();
+        resolve(r);
+      };
+      worker.onmessage = (e: MessageEvent<CustomCheck>) => finish(e.data);
+      // Worker 出错（如加载失败）回退同步核验，保证仍能给出结论
+      worker.onerror = () => finish(checkCustomEndgame(pieces, side, CUSTOM_CHECK_MAX));
+      worker.postMessage({ pieces, side, limit: CUSTOM_CHECK_MAX });
+    });
+  }
+
+  /** 保存：先自动核验（工作线程求解 50 步内是否有强制杀法，界面显示「核验中…」） */
   function save(): void {
     if (state.checking) return;
     const name = nameEl.value.trim() || state.defaultName;
     const pieces = boardToPieces(state.board);
-    state.checking = true;
-    deps.toast('保存前自动核验中…');
-    window.setTimeout(() => {
-      state.checking = false;
-      const check = checkCustomEndgame(pieces, state.first, CUSTOM_CHECK_MAX);
+    const first = state.first;
+    setChecking(true);
+    deps.toast('正在核验：50 步内是否有强制杀法…');
+    void runCheck(pieces, first).then((check) => {
+      setChecking(false);
       if (!check.ok) {
         deps.onInvalid(name, check.problems);
         return;
       }
-      deps.onSave(makeCustomEndgame(state.id, name, state.first, pieces, check.goalMoves));
-    }, 0);
+      deps.onSave(makeCustomEndgame(state.id, name, first, pieces, check.goalMoves));
+    });
   }
 
   function open(p?: EndgamePuzzle | null): void {
@@ -187,7 +222,7 @@ export function initEndgameEditor(deps: EditorDeps): EndgameEditorController {
     state.first = p?.side ?? 'r';
     state.defaultName = p?.name ?? deps.defaultName();
     state.id = p?.id ?? `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    state.checking = false;
+    setChecking(false);
     hover = null;
     nameEl.value = state.defaultName;
     renderTool();

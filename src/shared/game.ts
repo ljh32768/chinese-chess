@@ -106,10 +106,10 @@ export class Game {
     this.posKeys = [positionKey(this.board, this.turn)];
   }
 
-  /** 生成当前快照（揭棋下抹除暗子真实身份，并附带吃子记录） */
+  /** 生成当前快照（揭棋下抹除暗子真实身份；始终附带双方吃子记录） */
   snapshot(): GameSnapshot {
     const jieqi = this.variant === 'jieqi';
-    return {
+    const snap: GameSnapshot = {
       board: jieqi ? redactBoard(this.board) : this.board,
       turn: this.turn,
       moveSeq: this.moveSeq,
@@ -120,14 +120,13 @@ export class Game {
       check: this.check,
       history: this.history.map((m) => ({ from: [...m.from] as Pos, to: [...m.to] as Pos })),
       deadline: this.deadline,
-      ...(jieqi
-        ? {
-            variant: this.variant,
-            capturedByRed: [...this.capturedByRed],
-            capturedByBlack: [...this.capturedByBlack],
-          }
-        : {}),
+      // 吃子记录对标准 / 揭棋 / 残局 / 人机一律下发：渲染层据此展示棋盘两侧吃子条，
+      // 不再按着法序列从标准开局推导（残局自定义开局下会推出并不存在的「死子」）
+      capturedByRed: [...this.capturedByRed],
+      capturedByBlack: [...this.capturedByBlack],
     };
+    if (jieqi) snap.variant = this.variant;
+    return snap;
   }
 
   /**

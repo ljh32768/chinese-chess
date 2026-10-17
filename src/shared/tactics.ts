@@ -232,10 +232,11 @@ function repliesOf(board: Board, opp: Side): Board[] {
 
 /**
  * 「两者必然失去其一」：走子方在 `actor` 处的子，是否能在对方**任意**应着之后，
- * 仍然**获利**吃到 `targets` 中至少一枚（该目标须仍是对方的子）。
- * 获利口径与吃子提示一致：目标「无根」或「小换大」（目标价值 > 攻击子价值）。
- * 据此排除四类「可两全」的伪战术：被攻击子反吃攻击子、垫子挡住射线、移走炮架、
- * 以及**有根**的棋——对方可弃子反吃（等价或不划算）而两全。
+ * 仍然攻击到 `targets` 中至少一枚（该目标须仍是对方的子）。
+ * 用来排除三类「可两全」的伪战术：被攻击子反吃攻击子、垫子挡住射线、移走炮架。
+ * 按攻击关系（`pieceMoves`）判定，不额外要求「获利」——被威胁子是否有根只影响该子
+ * 交换是否划算，并不改变「对方必须同时应付两处威胁」的战术事实：即便前子有根，
+ * 只要它与后子同处一条射线且对方无法一举化解，仍属串打（此前按获利口径会漏报）。
  */
 function mustLoseOne(board: Board, actor: Pos, targets: Pos[], me: Side): boolean {
   const opp = other(me);
@@ -246,12 +247,9 @@ function mustLoseOne(board: Board, actor: Pos, targets: Pos[], me: Side): boolea
   for (const nb of replies) {
     const still = nb[actor[0]][actor[1]];
     if (!still || still.s !== me) return false; // 攻击子被吃 → 被攻击子全部保住
-    const actorValue = VALUE[still.t];
     const hit = targets.some((t) => {
       const tp = nb[t[0]][t[1]];
-      if (!tp || tp.s !== opp || !attacks(nb, actor, t)) return false;
-      // 有根（受对方保护）且不是「小换大」→ 对方可弃子后被反吃而两全，不计为必失
-      return !isDefended(nb, opp, t) || VALUE[tp.t] > actorValue;
+      return !!tp && tp.s === opp && attacks(nb, actor, t);
     });
     if (!hit) return false;
   }

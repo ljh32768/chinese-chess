@@ -251,13 +251,14 @@ describe('状态机（Game）的揭棋行为', () => {
     expect(g.board.flat().some((p) => !!p?.real)).toBe(true);
   });
 
-  it('标准象棋不受影响：快照不含揭棋字段、棋盘无暗子', () => {
+  it('标准象棋：快照不含揭棋变体字段、棋盘无暗子，但同样下发吃子记录', () => {
     const g = new Game();
     g.reset('playing');
     const snap = g.snapshot();
     expect(snap.variant).toBeUndefined();
-    expect(snap.capturedByRed).toBeUndefined();
-    expect(snap.capturedByBlack).toBeUndefined();
+    // 吃子记录对所有对局一律下发（渲染层两侧吃子条用）
+    expect(snap.capturedByRed).toEqual([]);
+    expect(snap.capturedByBlack).toEqual([]);
     expect(snap.board.flat().some((p) => !!p?.hidden)).toBe(false);
   });
 

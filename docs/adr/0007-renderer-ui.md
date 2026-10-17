@@ -226,22 +226,23 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 [tests/banner.test.ts](../../tests/banner.test.ts)（各杀法图案样式唯一且五种底纹齐备、未知杀法回退、**将军主标题「将军」/ 绝杀主标题「绝杀」且副标题保留杀法名**）、
 [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（`#banner-card` 圆盘结构 / 2.5s 渐入渐出 / `data-kind` 白红配色 / `#banner-slash` 仅绝杀显示 / `--b-accent` / 减弱动效仍可见 / `app.ts` 接线：点击抬起、取消落回、走子从抬起态平移）。
 
-### 3.5.6 v2.9 被吃掉的棋子展示（棋盘两侧灰色缩略图）
+### 3.5.6 v2.9 被吃掉的棋子展示（棋盘两侧缩略图；v3.3 放大并保留红黑原色）
 
-把「吃子」从侧栏的**文字列表**改为棋盘**两侧的灰色棋子缩略图**：删除侧栏文字面板，被吃掉的子以素材缩略图
-摆到棋盘左右两侧并统一置灰。
+把「吃子」从侧栏的**文字列表**改为棋盘**两侧的棋子缩略图**：删除侧栏文字面板，被吃掉的子以素材缩略图
+摆到棋盘左右两侧。v3.3 起缩略图**放大**（26px → 34px）并**保留红 / 黑原色**（去掉去色 / 压暗），
+数据改由权威状态机下发的 `capturedByRed/Black` 驱动。
 
 | 项 | 规格 |
 |---|---|
-| 数据 | 沿用 `shared/notation.ts` 的 `capturedPieces(history)`（红黑各自吃掉的对方棋子，按发生顺序）；侧栏原「红方吃子 / 黑方吃子」文字面板删除 |
+| 数据 | v3.3 起改用 [game.ts `snapshot()`](../../src/shared/game.ts) 下发的 `capturedByRed/Black`（[room.ts `applyAndBroadcast()`](../../src/server/room.ts) 走子广播同步携带）——标准 / 揭棋 / 残局 / 人机一律包含；渲染层直接采用，**不再**按着法序列从标准开局推导（`notation.ts capturedPieces(history)` 保留为通用工具，残局自定义开局下会推出并不存在的「死子」故不再使用）；侧栏原「红方吃子 / 黑方吃子」文字面板删除 |
 | 结构 | `index.html` 对局页 `.chess-box > .board-row`（三栏 flex 居中）：左 `.cap-strip#cap-red`（红方所吃 = 黑子）+ 中间 `.board-stage`（画布 + 提示条）+ 右 `.cap-strip#cap-black`（黑方所吃 = 红子） |
-| 渲染 | `app.ts renderCaptured()` → `fillCapStrip()`：按 `assetUrl(skin(), side + '_' + PIECE_IMG[t])` 生成 `<img class="cap-piece">`；以「皮肤 + 棋子序列」为签名，未变则跳过重建避免闪烁。素材映射 `PIECE_IMG` 由 `board.ts` 导出复用 |
-| 置灰 | `.cap-piece { filter: grayscale(1) opacity(0.55) }`：去色 + 压暗，与盘上棋子的红黑配色区分 |
-| 布局 | `.cap-strip { align-self: stretch; flex-direction: column; flex-wrap: wrap; justify-content: center }`：随棋盘高度拉伸并纵向居中；条宽 30px、缩略图 26px。空条仍占位（左右对称，棋盘保持居中） |
+| 渲染 | `app.ts renderCaptured()` → `fillCapStrip()`：按 `assetUrl(skin(), side + '_' + PIECE_IMG[t])` 生成 `<img class="cap-piece">`，保留红 / 黑原色；以「皮肤 + 棋子序列」为签名，未变则跳过重建避免闪烁；揭棋用快照记录的吃子（含暗子真实身份）。素材映射 `PIECE_IMG` 由 `board.ts` 导出复用 |
+| 放大与原色 | `.cap-piece { width: 34px }`（v3.3 由 26px 放大），**不再** `filter: grayscale(1) opacity(0.55)`——被吃掉的子按素材呈现红 / 黑原色 |
+| 布局 | `.cap-strip { align-self: stretch; flex-direction: column; flex-wrap: wrap; justify-content: center }`：随棋盘高度拉伸并纵向居中；条宽 40px、缩略图 34px。空条仍占位（左右对称，棋盘保持居中） |
 | 无障碍 | 吃子条 `aria-hidden="true"`、缩略图 `alt=""`：与盘面重复的纯装饰信息，不进入可访问性树 |
 
 验收（自动化）：[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（侧栏文字面板与其样式已删除、
-两侧吃子条结构顺序与三栏居中、缩略图置灰、`app.ts` 用素材渲染且不再有文字映射）。
+两侧吃子条结构顺序与三栏居中、缩略图放大且不再置灰、`app.ts` 用素材渲染且不再有文字映射）。
 
 ### 3.5.7 v2.10 战术闪电与开局提示（将军 / 绝杀圆环与将颤抖）
 
@@ -253,7 +254,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 项 | 规格 |
 |---|---|
 | 战术识别（`shared/tactics.ts`，纯函数） | `detectTactics(before: Board, move: Move, after: Board): TacticHit[]`，`TacticHit{ kind, label, actors: Pos[], threats: Pos[] }`；`kind` ∈ `discovered-check`（闪将）/ `discovered-attack`（闪击）/ `check-fork`（将军抽）/ `skewer`（串打）/ `fork`（捉双）。导出 `VALUE`（子力价值：车 9 > 炮 4.5 > 马 4 > 士/象 2 > 兵 1）。**不改动传入棋盘**；走子方由 `before[from]` 取 |
-| 判定口径（降噪） | ① 被威胁集一律要求「**after 有、before 无**」的新攻击；② **将军**用 `isAttacked(after, 敌方将位, 走子方)` 判定（`pieceMoves` 不含将帅照面），再用各子 `pieceMoves` 归属 checker；③ **闪将 / 闪击**要求「**让线**」——攻击者在 before 与目标之间的连线上含 `move.from`，且攻击者限**车 / 炮**（马 / 兵不可能「闪」）；④ **将军抽**要求**走动的子本身是将的发出者**，且它同时新攻击一个价值 ≥马 的敌子（不含将），label 取最高价值者（车 → 炮 → 马）；⑤ **串打** = 单一车 / 炮沿**同一条射线**攻击**前、后两枚都价值 ≥马** 的敌子；⑥ **捉双** = 单一子新攻击 ≥2 个价值 ≥马 的敌子且**不在同一射线**（与串打互斥，同线优先串打）；⑦ **两者必然失去其一**——凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都须通过 `mustLoseOne()`：逐个模拟对方的**每一种**合法应着，走动的子（actor）仍要**获利**吃到被威胁子中至少一枚（且自身未被反吃）；获利口径与吃子提示一致（目标**无根**或**小换大**），据此排除「被威胁子反吃攻击子」「垫子挡住射线」「移走炮架」「被威胁子**有根**且非小换大」等能两全的伪战术 |
+| 判定口径（降噪） | ① 被威胁集一律要求「**after 有、before 无**」的新攻击；② **将军**用 `isAttacked(after, 敌方将位, 走子方)` 判定（`pieceMoves` 不含将帅照面），再用各子 `pieceMoves` 归属 checker；③ **闪将 / 闪击**要求「**让线**」——攻击者在 before 与目标之间的连线上含 `move.from`，且攻击者限**车 / 炮**（马 / 兵不可能「闪」）；④ **将军抽**要求**走动的子本身是将的发出者**，且它同时新攻击一个价值 ≥马 的敌子（不含将），label 取最高价值者（车 → 炮 → 马）；⑤ **串打** = 单一车 / 炮沿**同一条射线**攻击**前、后两枚都价值 ≥马** 的敌子；⑥ **捉双** = 单一子新攻击 ≥2 个价值 ≥马 的敌子且**不在同一射线**（与串打互斥，同线优先串打）；⑦ **两者必然失去其一**——凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都须通过 `mustLoseOne()`：逐个模拟对方的**每一种**合法应着（复用 `repliesOf`），走动的子（actor）仍须**攻击到**被威胁子中至少一枚（且自身未被反吃）；据此排除「被威胁子反吃攻击子」「垫子挡住射线」「移走炮架」等能两全的伪战术。**v3.2 曾把口径收紧为「获利」**（目标须无根或小换大），v3.3 起**撤销该收紧**——被威胁子是否有根只影响交换是否划算，不改变「对方须同时应付两处威胁」的事实，按获利口径会把真串打（前子有根）漏报 |
 | 输出与优先级 | **只输出优先级最高的 1 条**：绝杀 > 闪将 > 将军抽 > 串打 > 捉双 > 闪击；仅 `status === 'playing'` 检测；`threats` 为该条被威胁的敌方棋子（供闪电） |
 | 接线与去重（app.ts） | 状态 `S.fx = { seq, hits } \| null` 与 `S.threats: Pos[]`；`applyMoveEffects(before, move, seq)` 组装；**取 `before`**：联机在 `S.board = msg.board` **之前** `cloneBoard(S.board)`、本地在 `applyMove` 前 `cloneBoard`，`game_over` 同 `seq` 由 `fx:${seq}` 去重**不重算**；`applySnapshot()` 重置 `fx / threats / fxOpening`（防悔棋 / 重连残留）。每步只算一次并存入 `S`，**不在 `paint()` 里重算** |
 | 棋盘上方提示条 | `.board-stage` 顶部绝对定位浮层 `#board-tactics`（`pointer-events: none`），显示战术 `label`（无战术时不显示）；渐入渐出约 2.5s 后隐藏；`prefers-reduced-motion` 下去动效保持可见 |

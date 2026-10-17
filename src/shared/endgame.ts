@@ -310,12 +310,28 @@ function positionKey(b: Board, side: Side, moves: number): string {
   return s;
 }
 
+/** 求解超时（超出核验预算时抛出；由调用方捕获后按「未找到杀法」处理） */
+export class SolveTimeout extends Error {
+  constructor() {
+    super('solve timeout');
+    this.name = 'SolveTimeout';
+  }
+}
+
 /**
  * 我方（side）能否在自己的 moves 步以内，不论对方如何应对都强制取胜。
  * 对方无着可走（将死或困毙）即判我方胜。
+ * `deadline` 为单调时钟时间戳，达到 / 超出即抛出 `SolveTimeout`（防止复杂局面无限枚举）。
  */
-function forceMate(b: Board, side: Side, moves: number, cache: Map<string, boolean>): boolean {
+function forceMate(
+  b: Board,
+  side: Side,
+  moves: number,
+  cache: Map<string, boolean>,
+  deadline: number,
+): boolean {
   if (moves <= 0) return false;
+  if (Date.now() >= deadline) throw new SolveTimeout();
   const key = positionKey(b, side, moves);
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
@@ -331,7 +347,7 @@ function forceMate(b: Board, side: Side, moves: number, cache: Map<string, boole
       let holds = true;
       for (const reply of genMoves(b, opp)) {
         const cap2 = play(b, reply);
-        const stillMate = forceMate(b, side, moves - 1, cache);
+        const stillMate = forceMate(b, side, moves - 1, cache, deadline);
         unplay(b, reply, cap2);
         if (!stillMate) {
           holds = false;
@@ -348,15 +364,15 @@ function forceMate(b: Board, side: Side, moves: number, cache: Map<string, boole
 }
 
 /** 该方能否在 moves 步内强制将死对方（moves 为自身着法数，1 表示一步杀） */
-export function canForceMate(board: Board, side: Side, moves: number): boolean {
-  return forceMate(cloneForSolve(board), side, Math.floor(moves), new Map<string, boolean>());
+export function canForceMate(board: Board, side: Side, moves: number, deadline = Infinity): boolean {
+  return forceMate(cloneForSolve(board), side, Math.floor(moves), new Map<string, boolean>(), deadline);
 }
 
 /**
  * 求解正解首着：返回可在 moves 步内强制将死的一步；无解返回 null。
  * 客户端「提示」按剩余步数调用，既能给出正解着法，也能判断玩家是否已走离杀棋。
  */
-export function findMateMove(board: Board, side: Side, moves: number): Move | null {
+export function findMateMove(board: Board, side: Side, moves: number, deadline = Infinity): Move | null {
   const b = cloneForSolve(board);
   const n = Math.floor(moves);
   if (n <= 0) return null;
@@ -371,7 +387,7 @@ export function findMateMove(board: Board, side: Side, moves: number): Move | nu
       ok = true;
       for (const reply of genMoves(b, opp)) {
         const cap2 = play(b, reply);
-        const stillMate = forceMate(b, side, n - 1, cache);
+        const stillMate = forceMate(b, side, n - 1, cache, deadline);
         unplay(b, reply, cap2);
         if (!stillMate) {
           ok = false;
@@ -396,10 +412,11 @@ function cloneForSolve(board: Board): Board {
  * 从当前局面出发，最少几步可强制取胜（返回步数；max 步以内无解返回 0）。
  * 残局不限步数，配合 `findMateMove()` 可在任意局面给出「仍能取胜」的最快着法
  * （`minMateDepth` 返回的步数即该着法所需步数，也是当前局面的最优步数）。
+ * `deadline` 为单调时钟时间戳，超出即抛出 `SolveTimeout`（自建残局核验放到工作线程里跑时用）。
  */
-export function minMateDepth(board: Board, side: Side, max: number): number {
+export function minMateDepth(board: Board, side: Side, max: number, deadline = Infinity): number {
   const cap = Math.floor(max);
-  for (let d = 1; d <= cap; d++) if (canForceMate(board, side, d)) return d;
+  for (let d = 1; d <= cap; d++) if (canForceMate(board, side, d, deadline)) return d;
   return 0;
 }
 
@@ -485,10 +502,13 @@ export function checkEndgameBank(): PuzzleCheck[] {
 export const CUSTOM_LEVEL: EndgameLevel = 'custom';
 
 /**
- * 保存前自动核验的求解上限（步）：核验会逐深度枚举强制杀，步数越大越慢，
- * 故自建残局限定「4 步以内可强制取胜」（足够覆盖常见的一 / 二 / 三步杀构图）。
+ * 保存前自动核验的求解上限（步）：核验会逐深度枚举强制杀，故这里放到 50 步，
+ * 允许「长杀」构图（不再限定 4 步以内）。求解在工作线程里跑，避免阻塞界面。
  */
-export const CUSTOM_CHECK_MAX = 4;
+export const CUSTOM_CHECK_MAX = 50;
+
+/** 自建残局核验的求解预算（毫秒）：超出即按「未找到杀法」处理，防止复杂局面无限枚举 */
+export const CUSTOM_CHECK_BUDGET_MS = 30_000;
 
 /** 自建残局保存前的自动核验结果 */
 export interface CustomCheck {
@@ -503,21 +523,31 @@ export interface CustomCheck {
 /**
  * 自建残局保存前的自动核验：局面合法性 + 由求解器求出最优步数。
  * 与题库自检同一套判定，只是步数不预设——在 `limit` 步以内能强制取胜即通过。
+ * `budgetMs` 为求解预算，超出即按「未找到杀法」处理（调用方通常在 Web Worker 里跑）。
  * 纯函数，不修改传入数据。
  */
 export function checkCustomEndgame(
   pieces: Array<[number, number, PieceType, Side]>,
   side: Side,
   limit = CUSTOM_CHECK_MAX,
+  budgetMs = CUSTOM_CHECK_BUDGET_MS,
 ): CustomCheck {
   const cap = Math.max(1, Math.floor(limit));
+  const notFound = `无杀法：${cap} 步内无法强制将死对方`;
   const problems = positionProblems(pieces, side);
   if (problems.length > 0) return { ok: false, goalMoves: 0, problems };
   const board = piecesToBoard(pieces);
-  const goalMoves = minMateDepth(board, side, cap);
-  if (goalMoves === 0) return { ok: false, goalMoves: 0, problems: [`无法在 ${cap} 步内强制取胜`] };
-  if (!findMateMove(board, side, goalMoves)) problems.push('求解器给不出正解首着');
-  return { ok: problems.length === 0, goalMoves, problems };
+  const deadline = Date.now() + Math.max(0, budgetMs);
+  try {
+    const goalMoves = minMateDepth(board, side, cap, deadline);
+    if (goalMoves === 0) return { ok: false, goalMoves: 0, problems: [notFound] };
+    if (!findMateMove(board, side, goalMoves, deadline)) problems.push('求解器给不出正解首着');
+    return { ok: problems.length === 0, goalMoves, problems };
+  } catch (e) {
+    // 求解超预算：按「未找到杀法」处理（复杂局面可能确实无杀，或超出核验能力）
+    if (e instanceof SolveTimeout) return { ok: false, goalMoves: 0, problems: [notFound] };
+    throw e;
+  }
 }
 
 /** 由编辑器状态生成一道自建残局（`level` 固定为「自建」，id 由调用方给出） */

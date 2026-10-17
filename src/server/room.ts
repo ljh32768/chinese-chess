@@ -626,14 +626,11 @@ export class Room {
       lastMove: s.lastMove,
       history: s.history,
       deadline: s.deadline,
-      // 揭棋：随广播下发变体标记与吃子记录（棋盘已在 snapshot 中抹除暗子真实身份）
-      ...(s.variant
-        ? {
-            variant: s.variant,
-            capturedByRed: s.capturedByRed,
-            capturedByBlack: s.capturedByBlack,
-          }
-        : {}),
+      // 吃子记录一律随广播下发（渲染层两侧吃子条用；揭棋含被吃暗子翻开后的真实身份）
+      capturedByRed: s.capturedByRed,
+      capturedByBlack: s.capturedByBlack,
+      // 揭棋：附带变体标记（棋盘已在 snapshot 中抹除暗子真实身份）
+      ...(s.variant ? { variant: s.variant } : {}),
     };
     this.broadcast(applied);
     logInfo(

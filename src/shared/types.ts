@@ -65,9 +65,9 @@ export interface GameSnapshot {
   deadline: number | null;
   /** 对局变体（标准对局省略；揭棋为 `jieqi`，客户端据此渲染暗子） */
   variant?: GameVariant;
-  /** 揭棋：红方 / 黑方已吃掉的子（含被吃暗子翻开后的真实身份） */
-  capturedByRed?: PieceType[];
-  capturedByBlack?: PieceType[];
+  /** 红方 / 黑方已吃掉的子（含揭棋被吃暗子翻开后的真实身份；标准 / 残局 / 人机一律下发） */
+  capturedByRed: PieceType[];
+  capturedByBlack: PieceType[];
 }
 
 /** 棋盘尺寸常量 */
