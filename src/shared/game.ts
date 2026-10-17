@@ -3,7 +3,8 @@
  * 唯一真实棋盘状态在这里维护，所有走子都必须经过 applyMove 校验。
  *
  * 走子后除了判定将军 / 将死 / 困毙，还会记录局面历史并在同一局面第 3 次出现时做重复局面裁决
- * （长将 / 长捉 / 长打判负，或不变作和），见 [repetition.ts](./repetition.ts)。
+ * （长将 / 长捉 / 长打判负；双方都长打或都长闲时不判和，改为置 `repetitionHint` 提示「请变招」），
+ * 见 [repetition.ts](./repetition.ts)。
  */
 
 import { Board, GameSnapshot, GameStatus, GameVariant, Move, PieceType, Pos, Side } from './types.js';
@@ -25,6 +26,12 @@ export class Game {
   reason = '';
   lastMove: Move | null = null;
   check = false;
+
+  /**
+   * 重复局面提示：本手构成三次重复但无人长打时置位（不判和，改为提示「请变招」）。
+   * 每手走子重新计算（未构成重复则清零），悔棋 / 重开同步清除；随快照下发。
+   */
+  repetitionHint = false;
 
   /** 对局变体：标准象棋 / 揭棋（暗棋）。揭棋下发快照时抹除暗子真实身份 */
   variant: GameVariant = 'xiangqi';
@@ -71,6 +78,7 @@ export class Game {
     this.reason = '';
     this.lastMove = null;
     this.check = false;
+    this.repetitionHint = false;
     this.pendingDraw = null;
     this.pendingRestart = null;
     this.pendingUndo = null;
@@ -126,6 +134,7 @@ export class Game {
       capturedByBlack: [...this.capturedByBlack],
     };
     if (jieqi) snap.variant = this.variant;
+    if (this.repetitionHint) snap.repetitionHint = true;
     return snap;
   }
 
@@ -177,10 +186,12 @@ export class Game {
       return { ok: true };
     }
 
-    // 重复局面裁决：同一局面第 3 次出现 —— 长将 / 长捉 / 长打判负，或不变作和
+    // 重复局面裁决：同一局面第 3 次出现 —— 一方长打则判负；双方都长打或都不长打则**不判和**，
+    // 改为置位 repetitionHint（随快照下发，渲染层提示「请变招」），对局继续
     const ruling = judgeRepetition({ keys: this.posKeys, natures: this.moveNatures });
-    if (ruling) {
-      this.endGame(ruling.outcome === 'draw' ? null : ruling.loser === 'r' ? 'b' : 'r', ruling.reason);
+    this.repetitionHint = ruling?.outcome === 'hint';
+    if (ruling?.outcome === 'lose') {
+      this.endGame(ruling.loser === 'r' ? 'b' : 'r', ruling.reason);
     }
     return { ok: true };
   }
@@ -218,6 +229,7 @@ export class Game {
     this.check = prev.check;
     this.capturedByRed = prev.capRed;
     this.capturedByBlack = prev.capBlack;
+    this.repetitionHint = false;
     this.pendingDraw = null;
     this.pendingUndo = null;
     this.deadline = null;

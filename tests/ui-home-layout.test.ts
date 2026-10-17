@@ -716,6 +716,24 @@ describe('人机对弈「我执红 / 我执黑」选择契约', () => {
   });
 });
 
+describe('v3.5 重复局面「请变招」提示契约', () => {
+  it('状态框显示「重复局面 · 请变招」（将军警示优先），并配一次轻提示 + 按手去重', () => {
+    expect(APP).toContain("statusText = '重复局面 · 请变招'");
+    expect(APP).toContain('S.repetitionHint');
+    expect(APP).toContain('function maybeVaryHint(');
+    expect(APP).toContain("toast('重复局面，请变招')");
+    // 同一手只提示一次（联机连收 move_applied / state 时去重）
+    expect(APP).toContain('if (!hint || seq === lastVarySeq) return;');
+  });
+
+  it('快照 / move_applied 均下发 repetitionHint（本地人机与联机一致）', () => {
+    expect(APP).toContain('S.repetitionHint = !!s.repetitionHint;');
+    expect(APP).toContain('S.repetitionHint = !!msg.repetitionHint;');
+    expect(read('src/server/room.ts')).toContain('...(s.repetitionHint ? { repetitionHint: true } : {}),');
+    expect(read('src/shared/game.ts')).toContain("this.repetitionHint = ruling?.outcome === 'hint';");
+  });
+});
+
 describe('v3.0 揭棋（暗棋）入口与接线契约', () => {
   const BOARD = readFileSync(path.join(ROOT, 'src', 'renderer', 'board.ts'), 'utf8');
 

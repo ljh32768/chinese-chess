@@ -12,10 +12,12 @@
  * 3. **裁决**（`judgeRepetition`，只看重复循环内各方的每步性质）：
  *    - 一方每步都是「打」（将 / 捉）而另一方不是 → 该方判负
  *      （全为将 = `长将判负`，全为捉 = `长捉判负`，将捉混合 = `长打判负`）；
- *    - 双方都是「打」，或双方都不是 → 不变作和（`重复局面判和`）。
+ *    - 双方都是「打」，或双方都不是 → **不判和**，返回提示 `请变招`（对局继续）：
+ *      双方并无一方长打，本项目取舍是不直接判和，而是提示双方自行变招（见 ADR-0002 §3.7）。
  *
  * 简化说明（与官方规则的差异，均为本项目的可测试取舍）：不实现自然限着；
- * 「捉」只按「一手得子威胁」判定，不细分官方规则中的兑 / 献 / 拦 / 跟等例外。
+ * 「捉」只按「一手得子威胁」判定，不细分官方规则中的兑 / 献 / 拦 / 跟等例外；
+ * 三次重复在「无人长打」时也不作和，改为「请变招」提示。
  */
 
 import { Board, Side } from './types.js';
@@ -30,8 +32,9 @@ export type MoveNature = 'check' | 'chase' | 'idle';
 
 /** 重复局面裁决结果；`null` 表示尚未构成重复，对局继续 */
 export type RepetitionRuling =
-  | { outcome: 'draw'; reason: '重复局面判和' }
-  | { outcome: 'lose'; loser: Side; reason: '长将判负' | '长捉判负' | '长打判负' };
+  | { outcome: 'lose'; loser: Side; reason: '长将判负' | '长捉判负' | '长打判负' }
+  /** 双方都「打」或都不「打」：无人长打，不判和，改为提示「请变招」（对局继续） */
+  | { outcome: 'hint'; reason: '请变招' };
 
 /** 重复循环的历史：局面键 + 每手性质 */
 export interface RepetitionHistory {
@@ -81,10 +84,10 @@ function perpetuallyAttacks(natures: MoveNature[]): boolean {
 
 /**
  * 重复局面裁决。
- * 当前局面（`keys` 末尾）第 `REPETITION_TIMES` 次出现时给出判负 / 判和结论，否则返回 `null`。
+ * 当前局面（`keys` 末尾）第 `REPETITION_TIMES` 次出现时给出结论，否则返回 `null`。
  *
  * 裁决只看最后一次重复循环（自该局面第 `REPETITION_TIMES-1` 次出现起）内各方的每步性质：
- * 恰好一方「长打」→ 该方判负；双方都「长打」或都不是 → 判和。
+ * 恰好一方「长打」→ 该方判负；双方都「长打」或都不是 → **不判和**，返回「请变招」提示（对局继续）。
  */
 export function judgeRepetition(h: RepetitionHistory): RepetitionRuling | null {
   const now = h.keys.length - 1; // 当前局面下标
@@ -103,7 +106,7 @@ export function judgeRepetition(h: RepetitionHistory): RepetitionRuling | null {
     r: perpetuallyAttacks(bySide.r),
     b: perpetuallyAttacks(bySide.b),
   };
-  if (attacking.r === attacking.b) return { outcome: 'draw', reason: '重复局面判和' };
+  if (attacking.r === attacking.b) return { outcome: 'hint', reason: '请变招' };
 
   const loser: Side = attacking.r ? 'r' : 'b';
   const natures = bySide[loser];
