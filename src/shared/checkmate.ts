@@ -93,7 +93,7 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     id: 'jiachepao',
     name: '夹车炮',
     label: '夹车炮杀',
-    definition: '一车双炮集于一侧，在底线、二路或三路等横线上多线交错将军成杀；与「重炮」的区别是必含车。',
+    definition: '双炮一车集于一侧：双炮重叠为架，车配合将军成杀。',
   },
   {
     id: 'haidilaoyue',
@@ -460,23 +460,26 @@ const MATCHERS: Match[] = [
       );
     },
   },
-  // 夹车炮：一车双炮集于一侧，在底线 / 二路 / 三路等横线上多线交错将军（与「重炮」的区别是必含车）
+  // 夹车炮：双炮一车集于一侧，双炮重叠作架且参与攻杀
   {
     pattern: PATTERN.jiachepao,
     match: (ctx) => {
-      const rooks = piecesOf(ctx.board, ctx.an.winner, 'R');
       const cannons = piecesOf(ctx.board, ctx.an.winner, 'C');
-      if (rooks.length < 1 || cannons.length < 2) return false;
-      const part = [...rooks, ...cannons].filter(({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos));
-      if (part.length < 2) return false;
-      if (!part.some(({ pos }) => isChecker(ctx, pos))) return false; // 须有将军者
-      const rows = new Set(part.map(({ pos }) => pos[0]));
-      if (rows.size < 2) return false; // 多横线交错
-      if (!part.some(({ piece }) => piece.t === 'R')) return false;
-      if (!part.some(({ piece }) => piece.t === 'C')) return false;
-      // 集于一侧：半侧判据（中线列 4 可归任一侧）
-      const cols = part.map(({ pos }) => pos[1]);
-      return cols.every((c) => c <= 4) || cols.every((c) => c >= 4);
+      if (cannons.length < 2) return false;
+      const cannonBusy = cannons.some(({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos));
+      if (!cannonBusy) return false;
+      const stackedPair = cannons.some((a, i) =>
+        cannons.some(
+          (b, j) =>
+            i !== j &&
+            (a.pos[0] === b.pos[0] || a.pos[1] === b.pos[1]) &&
+            between(ctx.board, a.pos, b.pos).length === 0,
+        ),
+      );
+      if (!stackedPair) return false;
+      return piecesOf(ctx.board, ctx.an.winner, 'R').some(
+        ({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos),
+      );
     },
   },
   // 海底捞月（残局专用）：车炮对单车，炮借将架沉底、车贴帅成杀
