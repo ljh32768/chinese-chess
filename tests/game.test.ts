@@ -54,6 +54,30 @@ describe('Game 状态机', () => {
     expect(g.moveSeq).toBe(1);
   });
 
+  it('标准对局吃子记录 capturedByRed/Black 并随快照下发、悔棋回退', () => {
+    const g = new Game();
+    g.reset('playing');
+    // 红车从 (5,0) 沿纵线吃掉 (3,0) 的黑卒
+    g.board[5][0] = { t: 'R', s: 'r' };
+    expect(g.applyMove([5, 0], [3, 0], 'r').ok).toBe(true);
+    expect(g.capturedByRed).toEqual(['P']);
+    expect(g.capturedByBlack).toEqual([]);
+    const snap = g.snapshot();
+    expect(snap.capturedByRed).toEqual(['P']);
+    expect(snap.capturedByBlack).toEqual([]);
+
+    // 黑车从 (0,0) 沿同一列吃掉停在 (3,0) 的红车
+    expect(g.applyMove([0, 0], [3, 0], 'b').ok).toBe(true);
+    expect(g.capturedByBlack).toEqual(['R']);
+    expect(g.snapshot().capturedByBlack).toEqual(['R']);
+
+    // 悔棋同步回退吃子记录
+    expect(g.undo()).toBe(true);
+    expect(g.capturedByBlack).toEqual([]);
+    expect(g.undo()).toBe(true);
+    expect(g.capturedByRed).toEqual([]);
+  });
+
   it('认输立即结束对局', () => {
     const g = new Game();
     g.reset('playing');

@@ -153,13 +153,13 @@ export class Game {
     });
     const before = this.past[this.past.length - 1].board;
     makeMove(this.board, from, to);
-    if (this.variant === 'jieqi') {
-      // 揭棋：记录被吃子身份（暗子取真实身份），并把落点的暗子翻开
-      if (target) {
-        (side === 'r' ? this.capturedByRed : this.capturedByBlack).push(target.real ?? target.t);
-      }
-      revealAt(this.board, to);
+    // 记录被吃子（标准 / 揭棋 / 残局 / 人机一致）：揭棋暗子取真实身份，其余取当前兵种。
+    // 渲染层两侧吃子条直接采用 capturedByRed/Black，故必须对所有变体都记录。
+    if (target) {
+      (side === 'r' ? this.capturedByRed : this.capturedByBlack).push(target.real ?? target.t);
     }
+    // 揭棋：落点的暗子翻开
+    if (this.variant === 'jieqi') revealAt(this.board, to);
     this.history.push({ from: [...from] as Pos, to: [...to] as Pos });
     // 记录本手性质（将 / 捉 / 闲）与走子后的局面键，供重复局面裁决
     this.moveNatures.push({ side, nature: classifyMove(before, this.board, side) });
