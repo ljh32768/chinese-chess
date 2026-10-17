@@ -691,6 +691,31 @@ describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', 
   });
 });
 
+describe('人机对弈「我执红 / 我执黑」选择契约', () => {
+  it('人机对弈面板提供「我执红（先行）/ 我执黑（后行）」单选，默认执红', () => {
+    expect(HTML).toContain('name="ai-side"');
+    expect(HTML).toContain('value="r" checked> 我执红（先行）');
+    expect(HTML).toContain('value="b"> 我执黑（后行）');
+    expect(HTML).toContain('「我执黑」由 AI（红方）先走');
+  });
+
+  it('app.ts：按所选方设 S.side，AI 执对方，并保证我执黑时由 AI 先行', () => {
+    expect(APP).toContain('function aiSideChoice(');
+    expect(APP).toContain("el?.value === 'b' ? 'b' : 'r'");
+    expect(APP).toContain('S.side = aiSideChoice();');
+    // AI 执玩家的对方（我执红 → AI 黑；我执黑 → AI 红）
+    expect(APP).toContain("S.side === 'r' ? 'b' : 'r'");
+    // 开局后立即调度 AI：我执黑时 AI（红方）先行
+    const create = APP.slice(APP.indexOf('function createAiRoom()'), APP.indexOf('/** 本地走子'));
+    expect(create).toContain('scheduleLocalAi();');
+    expect(create).toContain('sideName(S.side)');
+    // 侧栏角色提示随所选方变化
+    expect(APP).toContain('人机对战（本地）· 你执');
+    // 悔棋回到本方回合（不再写死红方）
+    expect(APP).toContain('if (game.turn !== S.side && game.history.length > 0) game.undo();');
+  });
+});
+
 describe('v3.0 揭棋（暗棋）入口与接线契约', () => {
   const BOARD = readFileSync(path.join(ROOT, 'src', 'renderer', 'board.ts'), 'utf8');
 

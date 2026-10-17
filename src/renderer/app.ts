@@ -685,7 +685,9 @@ function updateRoleHint(): void {
     return;
   }
   if (S.offline) {
-    $('role-hint').textContent = `人机对战（本地）· 你执红 · AI 执黑${jieqiTag()}`;
+    $('role-hint').textContent = `人机对战（本地）· 你执${S.side === 'r' ? '红' : '黑'} · AI 执${
+      S.side === 'r' ? '黑' : '红'
+    }${jieqiTag()}`;
     return;
   }
   if (S.aiMode) {
@@ -1721,7 +1723,13 @@ function aiVariant(): 'xiangqi' | 'jieqi' {
   return el?.value === 'jieqi' ? 'jieqi' : 'xiangqi';
 }
 
-/** 人机对弈（本地）：不依赖服务器，AI 执黑，规则与搜索都在本机运行 */
+/** 读取本地人机对弈「我执哪一方」：红（先行）/ 黑（后行），默认执红 */
+function aiSideChoice(): Side {
+  const el = document.querySelector<HTMLInputElement>('input[name="ai-side"]:checked');
+  return el?.value === 'b' ? 'b' : 'r';
+}
+
+/** 人机对弈（本地）：不依赖服务器，规则与搜索都在本机运行；玩家可选执红（先行）或执黑（后行） */
 function createAiRoom(): void {
   net?.close();
   net = null;
@@ -1736,7 +1744,7 @@ function createAiRoom(): void {
   S.isOwner = false;
   S.locked = false;
   S.firstMode = 'r';
-  S.side = 'r';
+  S.side = aiSideChoice(); // 我执红 / 我执黑（AI 执另一方）
   S.oppName = 'AI';
   const jieqi = aiVariant() === 'jieqi';
   localGame = new Game();
@@ -1746,8 +1754,9 @@ function createAiRoom(): void {
   applySnapshot(localGame.snapshot());
   backToIndex();
   enterGame();
-  toast(jieqi ? '开始揭棋人机对弈（本地，无需服务器）' : '开始人机对弈（本地，无需服务器）');
-  scheduleLocalAi();
+  const kind = jieqi ? '揭棋人机对弈' : '人机对弈';
+  toast(`开始${kind}（本地，无需服务器）· 你执${sideName(S.side)}`);
+  scheduleLocalAi(); // 我执黑时由 AI（红方）先行
 }
 
 /** 本地走子（offline / 残局模式）：直接走本地状态机，AI 随后应答 */
@@ -1774,12 +1783,12 @@ function localMove(from: Pos, to: Pos, opts: { startLifted?: boolean } = {}): vo
   scheduleLocalAi();
 }
 
-/** AI 执子方：人机对弈固定黑方；残局挑战执玩家的对方 */
+/** AI 执子方：人机对弈执玩家的对方（我执红 → AI 黑，我执黑 → AI 红）；残局挑战执玩家的对方 */
 function localAiSide(): Side {
-  return S.endgame ? (S.endgame.puzzle.side === 'r' ? 'b' : 'r') : 'b';
+  return S.endgame ? (S.endgame.puzzle.side === 'r' ? 'b' : 'r') : S.side === 'r' ? 'b' : 'r';
 }
 
-/** 本地 AI 自动应答（人机对弈黑方 / 残局挑战的防守方） */
+/** 本地 AI 自动应答（人机对弈 AI 一方 / 残局挑战的防守方） */
 function scheduleLocalAi(): void {
   window.clearTimeout(localAiTimer);
   localAiTimer = 0;
@@ -2632,8 +2641,10 @@ function offerUndo(): void {
     if (!game) return;
     if (game.history.length === 0) return toast('当前没有可悔的棋');
     game.undo();
-    if (game.turn !== 'r' && game.history.length > 0) game.undo();
+    // 回到本方回合（我执红 → 回到红方回合，我执黑 → 回到黑方回合）
+    if (game.turn !== S.side && game.history.length > 0) game.undo();
     applySnapshot(game.snapshot());
+    scheduleLocalAi(); // 回退后若轮到 AI（例如我执黑只走了一步就悔棋）则让 AI 续走
     toast('已悔棋');
     return;
   }

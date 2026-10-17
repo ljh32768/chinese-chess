@@ -90,10 +90,11 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 
 | 项 | 规格 |
 |---|---|
-| 入口 | `POST /api/host/start-ai`（可选 `?depth=1..4`）+ 首页「人机对弈」子菜单（选难度后点「开始对弈」） |
+| 入口 | `POST /api/host/start-ai`（可选 `?depth=1..4`）+ 首页「人机对弈」子菜单（选棋种 / 我执哪一方 / 难度后点「开始对弈」） |
 | 难度 | 外部契约 `depth 1..5`：1 入门 / 2 菜鸟 / 3 中级（默认选中）/ 4 高手 / 5 棋圣（皮卡鱼）；缺省或非法值沿用当前 `aiDepth`；响应回显生效的 `depth`。**v3.0+：1–4 档为纯 TS negamax，仅 5「棋圣」走皮卡鱼（映射 `Skill Level` + `go movetime`）；引擎缺失时「棋圣」回退纯 TS（见 [ADR-0011](./0011-pikafish-engine.md)）** |
+| 我执哪一方（本地人机，v3.5） | 首页「人机对弈」面板在棋种与难度之间新增「**我执红（先行）/ 我执黑（后行）**」单选（默认执红）；`createAiRoom()` 以 `aiSideChoice()` 设 `S.side`，`localAiSide()` 取玩家的对方（我执红 → AI 黑，我执黑 → AI 红），开局后立即 `scheduleLocalAi()`，故**我执黑时由 AI（红方）先行**；棋盘随 `S.side` 翻转（`flip = S.side === 'b'`）、侧栏角色提示显示「你执红 / 黑 · AI 执黑 / 红」、本地悔棋回到**本方**回合。**服务端 AI 房间（协议保留）仍为人类执红** |
 | 席位 | AI 占虚拟黑方（无连接）；`guest` 加入被拒（`人机对局，无法加入`）；观战者可加入 |
-| 行为 | 人类执红先行；AI 在 `aiDelayMs`（默认 400ms）后自动应招；`draw_request` → AI 拒绝；`undo_request` → 自动同意；`restart_request` → 自动同意并开新局 |
+| 行为 | 人类执红先行（服务端 AI 房间）；AI 在 `aiDelayMs`（默认 400ms）后自动应招；`draw_request` → AI 拒绝；`undo_request` → 自动同意；`restart_request` → 自动同意并开新局 |
 | 与宽限 | AI 模式无客方连接，不触发断线宽限 |
 | 对局回顾 | **人机对局不计入对局回顾（v2.2）**：终局时 `saveRecord()` 在 `currentRecord.ai === true` 时直接跳过落库；客户端本地人机对弈只在本机状态机内结束，同样不产生记录 |
 
