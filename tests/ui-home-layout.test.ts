@@ -507,6 +507,13 @@ describe('v2.10 提示特效（黑色大圆、将颤抖、战术闪电与开局�
     expect(CSS).toContain('@keyframes tactic-cycle');
   });
 
+  it('战术元素已放大：上方提示条字号 / 内边距加大，闪电基准半径加大', () => {
+    expect(decl('.board-tactics', 'font-size')).toBe('21px');
+    expect(decl('.board-tactics', 'letter-spacing')).toBe('5px');
+    expect(decl('.board-tactics', 'padding')).toBe('10px 26px');
+    expect(read('src/renderer/board.ts')).toContain('radius: skin.disc / 2 + 12');
+  });
+
   it('app.ts：战术识别 / 开局提示 / 将颤抖 / 闪电 / 上方提示条均已接线', () => {
     expect(APP).toContain(
       "import { CaptureHints, TacticHit, captureHints, detectTactics } from '../shared/tactics.js'",

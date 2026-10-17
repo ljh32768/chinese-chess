@@ -8,7 +8,9 @@
  *
  *    判定只做「一手」的静态估值（本项目提示性功能，非权威判定）：
  *    1. 己方有棋子能**合法**走到目标点（`legalMoves` 已过滤送将 / 照面）；
- *    2. 目标点是否被对方保护用 `isAttacked` 判断（含将帅照面，按伪合法走法，不考虑牵制）；
+ *    2. 目标点是否被对方保护（「有根」）——把目标点换成**我方真正用来吃子的那枚子**后，
+ *       看对方能否回头反吃：将/帅以外的子按伪合法走法（不考虑牵制）判一次；
+ *       **将/帅须能「合法」吃回**——吃回后自身不被将军 / 不照面，否则不算根（将守护的子若将不能安全吃回，按无根处理）；
  *    3. 帅 / 将不参与提示（将帅照面由规则的将军判定负责）。
  *
  * 2) 战术识别（闪击 / 闪将 / 将军抽 / 串打 / 捉双）：走子后给出「战术提示」的标签与被威胁的棋子。
@@ -49,28 +51,57 @@ const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
 const key = ([r, c]: Pos): string => `${r},${c}`;
 
 /**
- * 判断 `side` 在 `at` 处的棋子是否「有根」（被己方棋子保护）。
- * 做法：把该点临时换成一枚对方占位子，再看己方是否有子能吃掉它（即能否回头反吃）。
- * 必须用「对方占位子」而不是空格——空格会让炮被误判为有根（炮吃子需炮架），
- * 而用己方棋子占位（原盘面）则会被 `pieceMoves` 当成己方子直接跳过（误判为无根）。
+ * 判断 `enemy` 在 `at` 处的棋子是否「有根」（被己方棋子保护）。
+ *
+ * 做法：把 `at` 上的敌子换成**我方真正会用来吃它的那枚子**（`byPos`，即最便宜的合法攻击者），
+ * 并把该进攻子的原格清空（模拟「它已经吃过去」），再看 `enemy` 能否回头反吃：
+ * - 将/帅以外的子：按**伪合法**走法判一次即可（沿用旧口径，不考虑牵制）；
+ * - 将/帅：须能**合法**吃回——吃回后自身不能处于被将军状态（送将非法，含照面）。
+ *   若将/帅是唯一保护者且吃回会被将军，则该子实为无根。
+ *
+ * 用「进攻子占位」而不是空格 / 原盘面：空格会让炮被误判为有根（炮吃子需炮架），
+ * 原盘面上的己方子会被 `pieceMoves` 当成己方子跳过（误判为无根）；
+ * 而把进攻子真正搬到 `at`（而非留在原地），可避免它在「将吃回后是否被将军」的判定里被重复计入。
  */
-function isDefended(board: Board, side: Side, at: Pos): boolean {
+function isDefended(board: Board, enemy: Side, at: Pos, byPos: Pos): boolean {
   const probe = cloneBoard(board);
-  probe[at[0]][at[1]] = { t: 'P', s: other(side) };
-  return isAttacked(probe, at[0], at[1], side);
+  const attacker = probe[byPos[0]][byPos[1]];
+  if (!attacker) return false;
+  probe[at[0]][at[1]] = attacker; // 进攻子吃掉 at 上的敌子并落于 at
+  probe[byPos[0]][byPos[1]] = null; // 进攻子原格清空
+  const us = other(enemy);
+
+  // 1) 将/帅以外的子：伪合法能吃到 at 即算「有根」
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const p = probe[r][c];
+      if (!p || p.s !== enemy || p.t === 'K') continue;
+      if (pieceMoves(probe, r, c).some(([rr, cc]) => rr === at[0] && cc === at[1])) return true;
+    }
+  }
+
+  // 2) 将/帅：须能合法吃回（吃回后自身不被将军 / 不照面），否则不算「根」
+  const king = findKing(probe, enemy);
+  if (king && pieceMoves(probe, king[0], king[1]).some(([rr, cc]) => rr === at[0] && cc === at[1])) {
+    const nb = cloneBoard(probe);
+    nb[at[0]][at[1]] = nb[king[0]][king[1]];
+    nb[king[0]][king[1]] = null;
+    if (!isAttacked(nb, at[0], at[1], us)) return true;
+  }
+  return false;
 }
 
 /**
  * 从 `side` 视角列出「可获利吃掉」的对方棋子位置。
  * 对每个对方棋子（不含将帅）所在点 S：
- * - 己方有子能合法吃到 S（取其中最便宜的一枚），否则跳过；
+ * - 己方有子能合法吃到 S（取其中最便宜的一枚，并记下它的位置），否则跳过；
  * - S 未被对方保护（无根）→ 白吃，计入；
  * - S 有保护但该子价值 > 最便宜攻击者的价值 → 小换大，计入。
  */
 export function profitableTargets(board: Board, side: Side): Pos[] {
   const enemy = other(side);
-  // 一次性算好该方所有合法着法，记下每个落点最便宜的攻击者价值（避免逐目标重复搜索）
-  const cheapest = new Map<string, number>();
+  // 一次性算好该方所有合法着法，记下每个落点「最便宜的攻击者」的价值与位置（避免逐目标重复搜索）
+  const cheapest = new Map<string, { value: number; pos: Pos }>();
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const p = board[r][c];
@@ -79,7 +110,7 @@ export function profitableTargets(board: Board, side: Side): Pos[] {
       for (const to of legalMoves(board, r, c)) {
         const k = key(to);
         const cur = cheapest.get(k);
-        if (cur === undefined || value < cur) cheapest.set(k, value);
+        if (cur === undefined || value < cur.value) cheapest.set(k, { value, pos: [r, c] });
       }
     }
   }
@@ -89,10 +120,11 @@ export function profitableTargets(board: Board, side: Side): Pos[] {
     for (let c = 0; c < COLS; c++) {
       const target = board[r][c];
       if (!target || target.s !== enemy || target.t === 'K') continue;
-      const minAttacker = cheapest.get(key([r, c]));
-      if (minAttacker === undefined) continue;
-      const defended = isDefended(board, enemy, [r, c]);
-      if (!defended || PIECE_VALUE[target.t] > minAttacker) out.push([r, c]);
+      const best = cheapest.get(key([r, c]));
+      if (!best) continue;
+      // 有根判定须带上「我方会用来吃它的那枚子」，才能正确判断将/帅吃回是否会被将军
+      const defended = isDefended(board, enemy, [r, c], best.pos);
+      if (!defended || PIECE_VALUE[target.t] > best.value) out.push([r, c]);
     }
   }
   return out;

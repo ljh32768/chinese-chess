@@ -520,7 +520,7 @@ export function computeDrawList(v: BoardView, skin: Skin): RenderOp[] {
       bolt: true,
       cx: x,
       cy: y,
-      radius: skin.disc / 2 + 6,
+      radius: skin.disc / 2 + 12,
       color: '#ffe066',
       alpha: 0.9,
       seed: pos[0] * 9 + pos[1],
@@ -776,10 +776,10 @@ export function renderBoard(
       ctx.save();
       ctx.globalAlpha = boltAlpha(op, time);
       ctx.strokeStyle = op.color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.lineJoin = 'round';
       ctx.shadowColor = op.color;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 12;
       for (const pts of boltPoints(op.seed)) {
         ctx.beginPath();
         pts.forEach(([ux, uy], i) => {

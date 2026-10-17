@@ -537,10 +537,10 @@ body::before {
   z-index: 4;
   max-width: 88%;
   overflow: hidden;
-  padding: 5px 16px;
-  font-size: 15px;
+  padding: 10px 26px;
+  font-size: 21px;
   font-weight: 700;
-  letter-spacing: 3px;
+  letter-spacing: 5px;
   color: var(--text);
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -1249,7 +1249,7 @@ body::before {
   .banner-card[data-kind='mate'] .orb-slash { left: 50%; }
   .banner-name { font-size: 32px; letter-spacing: 5px; }
   .banner-sub { letter-spacing: 2px; }
-  .board-tactics { padding: 4px 12px; font-size: 13px; letter-spacing: 2px; }
+  .board-tactics { padding: 6px 16px; font-size: 17px; letter-spacing: 3px; }
 }
 
 /* 跟随系统「减少动态效果」：关闭切屏 / 弹层 / 转圈等所有装饰动画与过渡 */

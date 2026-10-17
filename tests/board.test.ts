@@ -526,6 +526,11 @@ describe('战术闪电与将颤抖（v2.10）', () => {
     expect(firstBolt).toBeGreaterThan(lastImg);
   });
 
+  it('闪电已放大：基准半径 = 棋子直径 / 2 + 12（围绕棋子向外伸出）', () => {
+    const ops = computeDrawList(view({ threats: [[0, 0]] }), skin2);
+    expect(bolts(ops)[0].radius).toBe(skin2.disc / 2 + 12);
+  });
+
   it('闪电以棋子视觉中心为圆心；翻转视角下 seed 不变、圆心随之翻转', () => {
     const flat = bolts(computeDrawList(view({ threats: [[0, 2]] }), skin2));
     const flipped = bolts(computeDrawList(view({ threats: [[0, 2]], flip: true }), skin2));
