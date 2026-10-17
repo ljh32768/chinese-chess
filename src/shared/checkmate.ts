@@ -5,17 +5,22 @@
  * 返回杀法名、展示名与一句话定义。纯函数、无环境依赖，
  * 服务端（对局记录落库）与渲染层（对局页 / 复盘页）共用同一份实现，结果一致。
  *
- * 杀法定义参考公开资料：
- * - 维基教科书《中国象棋/基本杀法列表》
- * - 知乎专栏《24 种常见的象棋基本杀法》
- * - 维基百科「铁门闩」「双车错」「卧槽马」「钓鱼马」「挂角马（八角马）」词条
- * - 百度百科「绝杀（象棋术语）」「闷杀」「大刀剜心」词条
+ * 判定依据《象棋杀法与局面状态严格判定》，顺序遵循「具体结构优先于泛指结构」，并参考
+ * 严格要求建议：先看是否正在被将军（本模块只在「将死」时调用，故恒为被将军）；再看将军
+ * 来源数量与子力组合（区分双将、重炮、马后炮等）；最后看关键位置条件（士角、卧槽、
+ * 三八线、中路、肋道、底线等）；残局子力背景用于「海底捞月」（限车炮对单车）。
+ *
+ * 顺序要点：马后炮 / 重炮 / 闷宫等炮架结构最具体；铁门栓 → 天地炮 → 夹车炮为车炮体系
+ * 由专到泛；「海底捞月」需先于「对面笑」（其封口正是照面）；「列马车」需先于钓鱼马 /
+ * 卧槽马（其马常落在三·八位）；双车错 / 闷杀 / 双将 / 对面笑属泛指结构靠后；清单外的
+ * 「大刀剜心 / 双马饮泉 / 挂角马」作为附加条目压在其后，避免抢占主杀法。
+ * 「困毙（欠行）」未被将军，不属本模块（只在「将死」时调用）。
  *
  * 棋盘坐标：10 行 9 列，黑方在上（九宫 0~2 行）、红方在下（九宫 7~9 行）。
  * 红方视角的「对方三、七路」= 列 2 / 6；黑方视角同理。
  */
 
-import { boardAfterMove, findKing, inPalace, initBoard, makeMove, pieceMoves } from './rules.js';
+import { boardAfterMove, cloneBoard, findKing, inPalace, initBoard, makeMove, pieceMoves } from './rules.js';
 import { Board, Move, Piece, PieceType, Pos, Side } from './types.js';
 
 /** 单条杀法条目 */
@@ -51,32 +56,20 @@ const GENERIC: CheckmatePattern = {
 /**
  * 杀法库（按识别优先级排列，前者优先）。
  * 同一局面可能同时成立多种杀法，`alsoMatched` 会给出其余成立的杀法名。
- * 顺序原则：具体结构（炮架/封门/士角等）优先于泛指结构（闷杀、将死）。
+ * 末三条为「清单外附加条目」，排在主判定顺序之后，避免抢占主杀法。
  */
 export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
   {
     id: 'mahoupao',
     name: '马后炮',
     label: '马后炮杀',
-    definition: '马在前控将、炮在马后借马为炮架将军成杀，即「马前炮后」。',
+    definition: '马在前控将、炮在马后借马为炮架将军成杀；马是炮架兼控子，即「马前炮后」。',
   },
   {
     id: 'chongpao',
     name: '重炮',
     label: '重炮杀',
-    definition: '双炮同线重叠：前炮作炮架、后炮将军，将（帅）无从躲避。',
-  },
-  {
-    id: 'daodao-wanxin',
-    name: '大刀剜心',
-    label: '大刀剜心',
-    definition: '车强行吃去对方宫心士（仕）破防成杀，也叫「大胆穿心」「大胆偷心」。',
-  },
-  {
-    id: 'tiemenshuan',
-    name: '铁门栓',
-    label: '铁门栓杀',
-    definition: '中炮镇住中路，车或兵（卒）封住将门、借己方子力（含帅力）保护成杀，也称「铁门闩」。',
+    definition: '双炮同线叠架：前炮与将（帅）之间恰隔一子作炮架，后炮将军，将（帅）无从躲避。',
   },
   {
     id: 'mengong',
@@ -85,82 +78,102 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     definition: '单炮借对方士为炮架将军，将（帅）被自家士堵死而无路可走。',
   },
   {
+    id: 'tiemenshuan',
+    name: '铁门栓',
+    label: '铁门栓杀',
+    definition: '炮镇中路控住将门纵线，车或兵（卒）从肋道或底线切入、贴帅攻击成杀，也称「铁门闩」。',
+  },
+  {
     id: 'tiandipao',
     name: '天地炮',
     label: '天地炮杀',
-    definition: '一炮镇中路、一炮沉底，配合车、马、兵等子力一举将死。',
+    definition: '一炮镇中路为「地」、一炮沉底线为「天」，另有车 / 马 / 兵（卒）封锁逃路成杀。',
   },
   {
     id: 'jiachepao',
     name: '夹车炮',
     label: '夹车炮杀',
-    definition: '双炮一车集于一侧：双炮重叠为架，车配合将军成杀。',
-  },
-  {
-    id: 'shuangjiang',
-    name: '双将',
-    label: '双将杀',
-    definition: '两子同时将军，将（帅）顾此失彼；车马同线时即「列马车」双将。',
-  },
-  {
-    id: 'bailianjiang',
-    name: '白脸将',
-    label: '白脸将杀',
-    definition: '利用将帅不能在同一路照面的规则，借帅（将）力封住对方将（帅）的出路，也叫「对面笑」。',
-  },
-  {
-    id: 'shuangma-yinquan',
-    name: '双马饮泉',
-    label: '双马饮泉',
-    definition: '双马连环配合：一马（多在卧槽位）控将，另一马跳入将军成杀。',
-  },
-  {
-    id: 'wocaoma',
-    name: '卧槽马',
-    label: '卧槽马杀',
-    definition: '马跳到对方二路横线与三、七路纵线交叉点（底象前一格）将军，配合车、炮等成杀。',
-  },
-  {
-    id: 'guajiaoma',
-    name: '挂角马',
-    label: '挂角马杀',
-    definition: '马跳至对方九宫士角将军，使将（帅）不安于位，再配合其它子力成杀（亦作「八角马」）。',
-  },
-  {
-    id: 'diaoyuma',
-    name: '钓鱼马',
-    label: '钓鱼马杀',
-    definition: '马占对方三·八或七·八位，同时控制九宫两处要点、封锁将门，与车等配合成杀。',
-  },
-  {
-    id: 'cemianhu',
-    name: '侧面虎',
-    label: '侧面虎杀',
-    definition: '马占对方三、七路卒（兵）位控将，由同侧车等子力将军成杀；又称「高钓马」。',
-  },
-  {
-    id: 'bajiaoma',
-    name: '八角马',
-    label: '八角马杀',
-    definition: '马在九宫附近封住将（帅）的多处出路（定将），由车等其它子力将军成杀。',
-  },
-  {
-    id: 'shuangchecuo',
-    name: '双车错',
-    label: '双车错杀',
-    definition: '双车分占两线，前后或左右交错将军，将（帅）无法兼顾；也称「长短车」。',
+    definition: '一车双炮集于一侧，在底线、二路或三路等横线上多线交错将军成杀；与「重炮」的区别是必含车。',
   },
   {
     id: 'haidilaoyue',
     name: '海底捞月',
     label: '海底捞月',
-    definition: '车（炮）沉至对方底线、在将（帅）背后发起攻击，车炮分列两侧、己方帅（将）占中成杀。',
+    definition: '车炮对单车的残局取胜法：炮借将（帅）为架沉底攻击对方单车，车贴帅成杀。',
+  },
+  {
+    id: 'liemache',
+    name: '列马车',
+    label: '列马车杀',
+    definition: '车马配合：马控将（帅）逃路、车紧贴将（帅）一侧照将，且车在马口保护下（将不敢吃车）。',
+  },
+  {
+    id: 'wocaoma',
+    name: '卧槽马',
+    label: '卧槽马杀',
+    definition: '马占对方下二路象前「卧槽」位（三、七路底线附近），直接控将门一侧，配合它子成杀。',
+  },
+  {
+    id: 'diaoyuma',
+    name: '钓鱼马',
+    label: '钓鱼马杀',
+    definition: '马占对方三·八或七·八位（卒林线附近）封锁将门，再由车等子力将杀；马是控位子。',
+  },
+  {
+    id: 'cemianhu',
+    name: '侧面虎',
+    label: '侧面虎杀',
+    definition: '马占对方三、七路卒（兵）位从侧控制将门，由同侧车等子力将死；又称「高钓马」。',
+  },
+  {
+    id: 'bajiaoma',
+    name: '八角马',
+    label: '八角马杀',
+    definition: '马在对方九宫士角上、与将（帅）对角定将、限制其活动，再由其它子力将死；又叫「定将马」。',
+  },
+  {
+    id: 'shuangchecuo',
+    name: '双车错',
+    label: '双车错杀',
+    definition: '双车分占两条不同的横线或纵线，交错将军，将（帅）无法同时躲避；也称「长短车」。',
   },
   {
     id: 'mengsha',
     name: '闷杀',
     label: '闷杀',
-    definition: '借对方自己的子力堵死将（帅）的出路（自阻），再用一子将军成杀。',
+    definition:
+      '借对方自己的子力堵死将（帅）的逃路（自阻），再用一子将军成杀（不限炮架，范围比「闷宫」广）。',
+  },
+  {
+    id: 'shuangjiang',
+    name: '双将',
+    label: '双将杀',
+    definition: '两子同时将军，将（帅）顾此失彼；双将是将军形式，常作为杀法组合的组成部分。',
+  },
+  {
+    id: 'bailianjiang',
+    name: '对面笑',
+    label: '对面笑杀',
+    definition:
+      '利用将帅不得在同一路照面的规则：使帅（将）与对方将（帅）直接照面、或仅隔一个可被吃掉的棋子，封死出路；也叫「白脸将」「千里照面」。',
+  },
+  {
+    id: 'daodao-wanxin',
+    name: '大刀剜心',
+    label: '大刀剜心',
+    definition: '车强行吃去对方宫心士（仕）破防成杀，也叫「大胆穿心」「大胆偷心」。（附加条目）',
+  },
+  {
+    id: 'shuangma-yinquan',
+    name: '双马饮泉',
+    label: '双马饮泉',
+    definition: '双马连环配合：一马控将（帅），另一马跳入将军成杀。（附加条目）',
+  },
+  {
+    id: 'guajiaoma',
+    name: '挂角马',
+    label: '挂角马杀',
+    definition: '马跳至对方九宫宫顶角（靠近河界的两个角）直接将军，迫使将（帅）不安于位。（附加条目）',
   },
   GENERIC,
 ];
@@ -215,6 +228,16 @@ function cannonScreen(board: Board, cannon: Pos, target: Pos): { pos: Pos; piece
   return mid.length === 1 ? mid[0] : null;
 }
 
+/**
+ * pos 处子力能否「吃到」target 格（用于「车在马口」等判定）。
+ * 先把 target 格清空再取该子走法——直接对含己方占位子的棋盘取 `pieceMoves` 会跳过该格。
+ */
+function guardsSquare(board: Board, pos: Pos, target: Pos): boolean {
+  const nb = cloneBoard(board);
+  nb[target[0]][target[1]] = null;
+  return pieceMoves(nb, pos[0], pos[1]).some(([rr, cc]) => rr === target[0] && cc === target[1]);
+}
+
 /** 目标格是否被 by 方的棋子攻击（不含将帅照面规则，照面另由 kingsFace 判断） */
 function attackedByPiece(board: Board, r: number, c: number, by: Side): boolean {
   return piecesOf(board, by).some(({ pos }) =>
@@ -249,6 +272,12 @@ function isShijiaoSquare(pos: Pos, mated: Side): boolean {
   const [r, c] = pos;
   if (mated === 'b') return (r === 0 || r === 2) && (c === 3 || c === 5);
   return (r === 7 || r === 9) && (c === 3 || c === 5);
+}
+
+/** 宫顶角位：对方九宫靠近河界的两个角（黑方第 2 行、红方第 7 行的三 / 五列） */
+function isFrontCorner(pos: Pos, mated: Side): boolean {
+  const row = mated === 'b' ? 2 : 7;
+  return pos[0] === row && (pos[1] === 3 || pos[1] === 5);
 }
 
 /** 钓鱼马位：对方三·八 / 七·八位（红方视角为第 2 行三、七路） */
@@ -369,17 +398,17 @@ interface Match {
 
 /** 识别顺序 = 数组顺序（前者优先） */
 const MATCHERS: Match[] = [
-  // 马后炮：单炮将军，炮架为己方马
+  // 马后炮：单炮将军，炮架为己方马（马兼作炮架与控子）
   {
     pattern: PATTERN.mahoupao,
     match: (ctx) => {
       const c = singleChecker(ctx, 'C');
       if (!c) return false;
       const screen = cannonScreen(ctx.board, c.pos, ctx.an.king);
-      return screen?.piece.s === ctx.an.winner && screen.piece.t === 'N';
+      return screen?.piece.s === ctx.an.winner && screen.piece.t === 'N' && coversEscape(ctx, screen.pos);
     },
   },
-  // 重炮：单炮将军，炮架为己方另一门炮
+  // 重炮：单炮将军，炮架为己方另一门炮（双炮同线叠架）
   {
     pattern: PATTERN.chongpao,
     match: (ctx) => {
@@ -389,33 +418,7 @@ const MATCHERS: Match[] = [
       return screen?.piece.s === ctx.an.winner && screen.piece.t === 'C';
     },
   },
-  // 大刀剜心：最后一步为己方车吃去对方宫心士
-  {
-    pattern: PATTERN['daodao-wanxin'],
-    match: (ctx) => {
-      const mv = ctx.lastMove;
-      if (!mv || ctx.captured !== 'A') return false;
-      const mover = ctx.board[mv.to[0]]?.[mv.to[1]];
-      return (
-        !!mover && mover.s === ctx.an.winner && mover.t === 'R' && samePos(mv.to, palaceCenter(ctx.an.mated))
-      );
-    },
-  },
-  // 铁门栓：己方炮镇中路（与将同线），车 / 兵封住将门并将军
-  {
-    pattern: PATTERN.tiemenshuan,
-    match: (ctx) => {
-      const gate = gatePos(ctx.an.king, ctx.an.mated);
-      if (!gate) return false;
-      const gateChecked = ctx.an.checkers.some(
-        (c) => samePos(c.pos, gate) && (c.piece.t === 'R' || c.piece.t === 'P'),
-      );
-      if (!gateChecked) return false;
-      const midCannon = piecesOf(ctx.board, ctx.an.winner, 'C').some(({ pos }) => pos[1] === ctx.an.king[1]);
-      return midCannon;
-    },
-  },
-  // 闷宫：单炮借对方士为炮架将军，将的自家堵子全是士
+  // 闷宫：单炮借对方士为炮架将军，将（帅）的自家堵子全是士
   {
     pattern: PATTERN.mengong,
     match: (ctx) => {
@@ -427,72 +430,103 @@ const MATCHERS: Match[] = [
       return own.length >= 1 && own.every((e) => e.piece?.t === 'A');
     },
   },
-  // 天地炮：将（帅）在中路，一炮镇中路、一炮沉底
+  // 铁门栓：己方炮镇住将（帅）所在纵线（中路控门），车 / 兵（卒）贴帅攻击
+  {
+    pattern: PATTERN.tiemenshuan,
+    match: (ctx) => {
+      const k = ctx.an.king;
+      const midCannon = piecesOf(ctx.board, ctx.an.winner, 'C').some(({ pos }) => pos[1] === k[1]);
+      if (!midCannon) return false;
+      const gate = gatePos(k, ctx.an.mated);
+      return ctx.an.checkers.some(
+        (c) =>
+          (c.piece.t === 'R' || c.piece.t === 'P') && (c.pos[1] === k[1] || (!!gate && samePos(c.pos, gate))),
+      );
+    },
+  },
+  // 天地炮：一炮镇中路（列 4）为「地」，另一炮沉对方底线为「天」，另有 R/N/P 子力参与封锁 / 将军
   {
     pattern: PATTERN.tiandipao,
     match: (ctx) => {
-      if (ctx.an.king[1] !== 4) return false;
       const cannons = piecesOf(ctx.board, ctx.an.winner, 'C');
       if (cannons.length < 2) return false;
       const mid = cannons.filter(({ pos }) => pos[1] === 4);
       const deep = cannons.filter(({ pos }) => pos[0] === baseRow(ctx.an.mated));
-      return mid.length >= 1 && deep.some((d) => !mid.some((m) => samePos(m.pos, d.pos)));
+      if (!mid.some((m) => deep.some((d) => !samePos(m.pos, d.pos)))) return false;
+      return piecesOf(ctx.board, ctx.an.winner).some(
+        ({ pos, piece }) =>
+          (piece.t === 'R' || piece.t === 'N' || piece.t === 'P') &&
+          (isChecker(ctx, pos) || coversEscape(ctx, pos)),
+      );
     },
   },
-  // 夹车炮：双炮一车集于一侧，双炮重叠作架且参与攻杀
+  // 夹车炮：一车双炮集于一侧，在底线 / 二路 / 三路等横线上多线交错将军（与「重炮」的区别是必含车）
   {
     pattern: PATTERN.jiachepao,
     match: (ctx) => {
+      const rooks = piecesOf(ctx.board, ctx.an.winner, 'R');
       const cannons = piecesOf(ctx.board, ctx.an.winner, 'C');
-      if (cannons.length < 2) return false;
-      const cannonBusy = cannons.some(({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos));
-      if (!cannonBusy) return false;
-      const stackedPair = cannons.some((a, i) =>
-        cannons.some(
-          (b, j) =>
-            i !== j &&
-            (a.pos[0] === b.pos[0] || a.pos[1] === b.pos[1]) &&
-            between(ctx.board, a.pos, b.pos).length === 0,
-        ),
-      );
-      if (!stackedPair) return false;
-      return piecesOf(ctx.board, ctx.an.winner, 'R').some(
-        ({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos),
-      );
+      if (rooks.length < 1 || cannons.length < 2) return false;
+      const part = [...rooks, ...cannons].filter(({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos));
+      if (part.length < 2) return false;
+      if (!part.some(({ pos }) => isChecker(ctx, pos))) return false; // 须有将军者
+      const rows = new Set(part.map(({ pos }) => pos[0]));
+      if (rows.size < 2) return false; // 多横线交错
+      if (!part.some(({ piece }) => piece.t === 'R')) return false;
+      if (!part.some(({ piece }) => piece.t === 'C')) return false;
+      // 集于一侧：半侧判据（中线列 4 可归任一侧）
+      const cols = part.map(({ pos }) => pos[1]);
+      return cols.every((c) => c <= 4) || cols.every((c) => c >= 4);
     },
   },
-  // 双将：两子以上同时将军
+  // 海底捞月（残局专用）：车炮对单车，炮借将架沉底、车贴帅成杀
   {
-    pattern: PATTERN.shuangjiang,
-    match: (ctx) => ctx.an.checkers.length >= 2,
-  },
-  // 白脸将（对面笑）：将（帅）的出路受「将帅照面」规则限制
-  {
-    pattern: PATTERN.bailianjiang,
-    match: (ctx) => ctx.an.escapes.some((e) => e.blocked === 'face'),
-  },
-  // 双马饮泉：双马配合，一马将军、另一马控将
-  {
-    pattern: PATTERN['shuangma-yinquan'],
+    pattern: PATTERN.haidilaoyue,
     match: (ctx) => {
-      const horses = piecesOf(ctx.board, ctx.an.winner, 'N');
-      if (horses.length < 2) return false;
-      return (
-        horses.some(({ pos }) => isChecker(ctx, pos)) && horses.some(({ pos }) => coversEscape(ctx, pos))
+      const winNonKing = piecesOf(ctx.board, ctx.an.winner).filter(({ piece }) => piece.t !== 'K');
+      const matedNonKing = piecesOf(ctx.board, ctx.an.mated).filter(({ piece }) => piece.t !== 'K');
+      if (winNonKing.length !== 2) return false;
+      if (
+        winNonKing
+          .map(({ piece }) => piece.t)
+          .sort()
+          .join('') !== 'CR'
+      )
+        return false; // 车 + 炮
+      if (matedNonKing.length !== 1 || matedNonKing[0].piece.t !== 'R') return false; // 单车
+      const myKing = findKing(ctx.board, ctx.an.winner);
+      if (!myKing || myKing[1] !== 4) return false; // 己方帅（将）占中
+      return piecesOf(ctx.board, ctx.an.winner, 'C').some(
+        ({ pos }) => pos[0] === baseRow(ctx.an.mated) && (isChecker(ctx, pos) || coversEscape(ctx, pos)),
       );
     },
   },
-  // 卧槽马：马在对方二路横线三 / 七路交叉点将军
+  // 列马车（立马车 / 勒马车）：马控将、车贴帅照将，车在马口保护下（将不敢吃车）
+  {
+    pattern: PATTERN.liemache,
+    match: (ctx) => {
+      const rooks = piecesOf(ctx.board, ctx.an.winner, 'R');
+      const horses = piecesOf(ctx.board, ctx.an.winner, 'N');
+      for (const r of rooks) {
+        if (!isChecker(ctx, r.pos)) continue;
+        const d = Math.abs(r.pos[0] - ctx.an.king[0]) + Math.abs(r.pos[1] - ctx.an.king[1]);
+        if (d !== 1) continue; // 车紧贴将（帅）一侧照将
+        for (const n of horses) {
+          if (guardsSquare(ctx.board, n.pos, r.pos) && coversEscape(ctx, n.pos)) return true;
+        }
+      }
+      return false;
+    },
+  },
+  // 卧槽马：马在对方下二路象前的「卧槽」位（三 / 七路底线附近），控将门一侧
   {
     pattern: PATTERN.wocaoma,
-    match: (ctx) => ctx.an.checkers.some((c) => c.piece.t === 'N' && isWocaomaSquare(c.pos, ctx.an.mated)),
+    match: (ctx) =>
+      piecesOf(ctx.board, ctx.an.winner, 'N').some(
+        ({ pos }) => isWocaomaSquare(pos, ctx.an.mated) && (isChecker(ctx, pos) || coversEscape(ctx, pos)),
+      ),
   },
-  // 挂角马：马在对方士角将军
-  {
-    pattern: PATTERN.guajiaoma,
-    match: (ctx) => ctx.an.checkers.some((c) => c.piece.t === 'N' && isShijiaoSquare(c.pos, ctx.an.mated)),
-  },
-  // 钓鱼马：马占三·八 / 七·八位封锁将门，由其它子力将军
+  // 钓鱼马：马占三·八 / 七·八位封锁将门，由其它子力将杀（马是控位子，不直接将军）
   {
     pattern: PATTERN.diaoyuma,
     match: (ctx) =>
@@ -500,7 +534,7 @@ const MATCHERS: Match[] = [
         ({ pos }) => isDiaoyumaSquare(pos, ctx.an.mated) && !isChecker(ctx, pos) && coversEscape(ctx, pos),
       ),
   },
-  // 侧面虎（高钓马）：马占对方三、七路卒位控将，同侧车等成杀
+  // 侧面虎（高钓马）：马在卒林线三 / 七路侧控将门，由同侧车等子力将死
   {
     pattern: PATTERN.cemianhu,
     match: (ctx) => {
@@ -513,49 +547,34 @@ const MATCHERS: Match[] = [
       );
     },
   },
-  // 八角马：马在九宫附近封住将（帅）两处以上出路（定将），由其它子力将军
+  // 八角马（定将马）：马在对方九宫士角且与将（帅）对角定将，再由其它子力将死
   {
     pattern: PATTERN.bajiaoma,
     match: (ctx) =>
       piecesOf(ctx.board, ctx.an.winner, 'N').some(({ pos }) => {
-        if (isChecker(ctx, pos)) return false;
-        const [r, c] = pos;
-        const near = c >= 2 && c <= 6 && (ctx.an.mated === 'b' ? r <= 4 : r >= 5);
-        if (!near) return false;
-        const moves = pieceMoves(ctx.board, r, c);
-        const covered = ctx.an.escapes.filter((e) =>
-          moves.some(([rr, cc]) => rr === e.pos[0] && cc === e.pos[1]),
-        );
-        return covered.length >= 2;
+        if (!isShijiaoSquare(pos, ctx.an.mated)) return false;
+        if (Math.abs(pos[0] - ctx.an.king[0]) !== 1 || Math.abs(pos[1] - ctx.an.king[1]) !== 1) return false; // 与将（帅）对角
+        return !isChecker(ctx, pos) && coversEscape(ctx, pos);
       }),
   },
-  // 双车错：双车分占两线，一车将军、另一车封路
+  // 双车错：双车分占两条不同的横线 / 纵线，交错将军
   {
     pattern: PATTERN.shuangchecuo,
     match: (ctx) => {
       const rooks = piecesOf(ctx.board, ctx.an.winner, 'R');
       if (rooks.length < 2) return false;
-      const checker = rooks.find(({ pos }) => isChecker(ctx, pos));
-      if (!checker) return false;
-      return rooks.some(({ pos }) => !samePos(pos, checker.pos) && coversEscape(ctx, pos));
+      for (const a of rooks) {
+        if (!isChecker(ctx, a.pos)) continue;
+        for (const b of rooks) {
+          if (samePos(a.pos, b.pos)) continue;
+          if (a.pos[0] === b.pos[0] || a.pos[1] === b.pos[1]) continue; // 须两条不同的线
+          if (isChecker(ctx, b.pos) || coversEscape(ctx, b.pos)) return true;
+        }
+      }
+      return false;
     },
   },
-  // 海底捞月：车（炮）沉底在对方底线发起攻击，己方帅（将）占中
-  {
-    pattern: PATTERN.haidilaoyue,
-    match: (ctx) => {
-      if (ctx.an.king[1] !== 4) return false;
-      const myKing = findKing(ctx.board, ctx.an.winner);
-      if (!myKing || myKing[1] !== 4) return false;
-      return piecesOf(ctx.board, ctx.an.winner).some(
-        ({ pos, piece }) =>
-          (piece.t === 'R' || piece.t === 'C') &&
-          pos[0] === baseRow(ctx.an.mated) &&
-          (isChecker(ctx, pos) || coversEscape(ctx, pos)),
-      );
-    },
-  },
-  // 闷杀：将（帅）的出路被自家子力（非全为士）堵死
+  // 闷杀：将（帅）的逃路全被自家子力堵死（范围比「闷宫」广，不限炮架）
   {
     pattern: PATTERN.mengsha,
     match: (ctx) => {
@@ -563,6 +582,44 @@ const MATCHERS: Match[] = [
       if (own.length === 0 || own.length !== ctx.an.escapes.length) return false;
       return own.some((e) => e.piece?.t !== 'A');
     },
+  },
+  // 双将：两子以上同时将军
+  {
+    pattern: PATTERN.shuangjiang,
+    match: (ctx) => ctx.an.checkers.length >= 2,
+  },
+  // 对面笑（白脸将 / 千里照面）：将（帅）的出路受「将帅照面」规则限制
+  {
+    pattern: PATTERN.bailianjiang,
+    match: (ctx) => ctx.an.escapes.some((e) => e.blocked === 'face'),
+  },
+  // 附加：大刀剜心（车强行吃去对方宫心士破防成杀）
+  {
+    pattern: PATTERN['daodao-wanxin'],
+    match: (ctx) => {
+      const mv = ctx.lastMove;
+      if (!mv || ctx.captured !== 'A') return false;
+      const mover = ctx.board[mv.to[0]]?.[mv.to[1]];
+      return (
+        !!mover && mover.s === ctx.an.winner && mover.t === 'R' && samePos(mv.to, palaceCenter(ctx.an.mated))
+      );
+    },
+  },
+  // 附加：双马饮泉（双马连环配合，一马控将、另一马将军）
+  {
+    pattern: PATTERN['shuangma-yinquan'],
+    match: (ctx) => {
+      const horses = piecesOf(ctx.board, ctx.an.winner, 'N');
+      if (horses.length < 2) return false;
+      return (
+        horses.some(({ pos }) => isChecker(ctx, pos)) && horses.some(({ pos }) => coversEscape(ctx, pos))
+      );
+    },
+  },
+  // 附加：挂角马（马在对方宫顶角直接将军）
+  {
+    pattern: PATTERN.guajiaoma,
+    match: (ctx) => ctx.an.checkers.some((c) => c.piece.t === 'N' && isFrontCorner(c.pos, ctx.an.mated)),
   },
   // 兜底：将死（未匹配到经典杀法）
   { pattern: GENERIC, match: () => true },
