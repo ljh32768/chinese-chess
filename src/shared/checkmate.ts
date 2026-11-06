@@ -10,8 +10,8 @@
  * 来源数量与子力组合（区分双将、重炮、马后炮等）；最后看关键位置条件（士角、卧槽、
  * 三八线、中路、肋道、底线等）；残局子力背景用于「海底捞月」（限车炮对单车）。
  *
- * 顺序要点：马后炮 / 重炮 / 闷宫等炮架结构最具体；铁门栓 → 天地炮 → 夹车炮为车炮体系
- * 由专到泛；「海底捞月」需先于「对面笑」（其封口正是照面）；「列马车」需先于钓鱼马 /
+ * 顺序要点：马后炮 / 重炮 / 天地炮 / 闷宫等炮架结构最具体（天地炮排在闷宫之前——真天地炮常同时符合
+ * 闷宫的单炮士架条件，但它还要求第二门炮镇中路参与牵制），铁门栓 → 夹车炮为车炮体系由专到泛；「海底捞月」需先于「对面笑」（其封口正是照面）；「列马车」需先于钓鱼马 /
  * 卧槽马（其马常落在三·八位）；双车错 / 闷杀 / 双将 / 对面笑属泛指结构靠后；清单外的
  * 「大刀剜心 / 双马饮泉 / 挂角马」作为附加条目压在其后，避免抢占主杀法。
  * 「困毙（欠行）」未被将军，不参与杀法匹配；仅导出 `KUNBI_PATTERN` 供终局展示（绝杀字样 / 杀法框）。
@@ -84,6 +84,13 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     definition: '双炮同线叠架：前炮与将（帅）之间恰隔一子作炮架，后炮将军，将（帅）无从躲避。',
   },
   {
+    id: 'tiandipao',
+    name: '天地炮',
+    label: '天地炮',
+    definition:
+      '一炮镇中路（天炮）牵制对方中士中象，一炮沉对方底线（地炮）牵制底士底象，双炮配合使将（帅）被自家士象堵死；常再由车 / 兵（卒）照将成杀。',
+  },
+  {
     id: 'mengong',
     name: '闷宫',
     label: '闷宫',
@@ -94,12 +101,6 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     name: '铁门栓',
     label: '铁门栓',
     definition: '炮镇中路控住将门纵线，车或兵（卒）从肋道或底线切入、贴帅攻击成杀，也称「铁门闩」。',
-  },
-  {
-    id: 'tiandipao',
-    name: '天地炮',
-    label: '天地炮',
-    definition: '一炮镇中路为「地」、一炮沉底线为「天」，另有车 / 马 / 兵（卒）封锁逃路成杀。',
   },
   {
     id: 'jiachepao',
@@ -404,6 +405,15 @@ function coversEscape(ctx: Ctx, pos: Pos): boolean {
   });
 }
 
+/**
+ * 天地炮的核心「牵制」：炮与将（帅）同线且中间**恰有两枚棋子**——
+ * 这两枚子任一移开，另一枚就会成为炮架、让这门炮照将，故二者都被钉死（多为对方的士、象）。
+ */
+function pinsKingLine(ctx: Ctx, pos: Pos): boolean {
+  if (pos[0] !== ctx.an.king[0] && pos[1] !== ctx.an.king[1]) return false;
+  return between(ctx.board, pos, ctx.an.king).length === 2;
+}
+
 interface Match {
   pattern: CheckmatePattern;
   match: (ctx: Ctx) => boolean;
@@ -431,6 +441,22 @@ const MATCHERS: Match[] = [
       return screen?.piece.s === ctx.an.winner && screen.piece.t === 'C';
     },
   },
+  // 天地炮：双炮配合——一炮镇中路（第 5 路 / 列 4，牵制中士中象）、一炮沉对方底线（牵制底士底象），
+  // 两门炮都须真正参与（照将 / 封住逃路 / 以「炮—两子—将」牵制同线上的防守子），将（帅）被自家子力堵死，
+  // 常再由车 / 兵（卒）照将成杀。与「闷宫」（只有一门炮、仅靠自家士自阻）的区别是第二门炮也参与牵制；
+  // 故排在闷宫之前——真天地炮常同时符合闷宫的单炮士架条件。
+  {
+    pattern: PATTERN.tiandipao,
+    match: (ctx) => {
+      const cannons = piecesOf(ctx.board, ctx.an.winner, 'C');
+      if (cannons.length < 2) return false;
+      const mid = cannons.filter(({ pos }) => pos[1] === 4); // 镇中路
+      const deep = cannons.filter(({ pos }) => pos[0] === baseRow(ctx.an.mated)); // 沉对方底线
+      const active = ({ pos }: { pos: Pos }): boolean =>
+        isChecker(ctx, pos) || coversEscape(ctx, pos) || pinsKingLine(ctx, pos);
+      return mid.some((m) => deep.some((d) => !samePos(m.pos, d.pos) && active(m) && active(d)));
+    },
+  },
   // 闷宫：单炮借对方士为炮架将军，将（帅）的自家堵子全是士
   {
     pattern: PATTERN.mengong,
@@ -454,22 +480,6 @@ const MATCHERS: Match[] = [
       return ctx.an.checkers.some(
         (c) =>
           (c.piece.t === 'R' || c.piece.t === 'P') && (c.pos[1] === k[1] || (!!gate && samePos(c.pos, gate))),
-      );
-    },
-  },
-  // 天地炮：一炮镇中路（列 4）为「地」，另一炮沉对方底线为「天」，另有 R/N/P 子力参与封锁 / 将军
-  {
-    pattern: PATTERN.tiandipao,
-    match: (ctx) => {
-      const cannons = piecesOf(ctx.board, ctx.an.winner, 'C');
-      if (cannons.length < 2) return false;
-      const mid = cannons.filter(({ pos }) => pos[1] === 4);
-      const deep = cannons.filter(({ pos }) => pos[0] === baseRow(ctx.an.mated));
-      if (!mid.some((m) => deep.some((d) => !samePos(m.pos, d.pos)))) return false;
-      return piecesOf(ctx.board, ctx.an.winner).some(
-        ({ pos, piece }) =>
-          (piece.t === 'R' || piece.t === 'N' || piece.t === 'P') &&
-          (isChecker(ctx, pos) || coversEscape(ctx, pos)),
       );
     },
   },

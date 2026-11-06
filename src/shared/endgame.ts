@@ -218,7 +218,8 @@ export const PUZZLES: EndgamePuzzle[] = [
     level: 'easy',
     side: 'r',
     goalMoves: 1,
-    intro: '一炮镇中路为「地」、一炮沉底线为「天」，红车再沉底照将；黑将被自家士挡住，退路全封。',
+    intro:
+      '一炮镇中路（天炮）牵制中士中象、一炮沉底线（地炮）牵制底士底象，红车再沉底照将；黑将被自家士象挡住，退路全封。',
     pieces: [
       [0, 4, 'K', 'b'],
       [0, 2, 'N', 'b'],
