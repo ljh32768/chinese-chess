@@ -30,6 +30,8 @@
  *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
  *    ② **移开的这枚子自身也带威胁**（走子后捉到、且走子前我方并未攻击的大子）。两条件缺一不可——
  *    只让线、移开的子自身不捉子（如躲子 / 闲走）不判闪击。
+ *    「闪将 / 闪击」的让线须**真的离开该线**：走动的子走子后仍停在这条连线上（继续充当炮架 / 挡子，
+ *    如炮架向前吃子后炮改打后面的子）不算让线，不算闪将 / 闪击（`restsOnLine()`）。
  */
 
 import { cloneBoard, findKing, isAttacked, legalMoves, pieceMoves, sideHasAnyMove } from './rules.js';
@@ -249,9 +251,21 @@ function betweenCells(a: Pos, b: Pos): Pos[] {
   return res;
 }
 
-/** 「让线」：让开的子（`moveFrom`）位于 `actor` 与 `target` 的连线上 */
+/** 「让线」：让开的子（`moveFrom`）原来位于 `actor` 与 `target` 的连线上 */
 function openedLine(actor: Pos, target: Pos, moveFrom: Pos): boolean {
   return betweenCells(actor, target).some((p) => samePos(p, moveFrom));
+}
+
+/**
+ * 走子后该子是否**仍停在这条连线上**（`moveTo` 位于 `actor` 与 `target` 之间）。
+ *
+ * 只满足 `openedLine()`（原来在线上）并不够——「让线」要求走动的子**真的离开了这条线**。
+ * 典型伪例：炮的炮架（己方车 / 炮 / 兵）向前吃掉炮原本正打着的子，落点仍在炮与该线后方
+ * 目标的连线上——炮只是**换了炮架与打击对象**（前面的子并没有闪开），却被当成「闪将 / 闪击」。
+ * 这类情形下走动的子仍充当炮架，去掉它（落点清空）后直线子就够不到目标了。
+ */
+function restsOnLine(actor: Pos, target: Pos, moveTo: Pos): boolean {
+  return betweenCells(actor, target).some((p) => samePos(p, moveTo));
 }
 
 /** 该子是否车 / 炮（只有直线子力存在「让线」） */
@@ -453,9 +467,14 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
         threats: lost.map((c) => c.pos),
       });
     } else {
-      // 闪将：只将军、未同时捉大子——存在一个「非走动的子」的 checker 因让线而成将（checker 限车 / 炮）
+      // 闪将：只将军、未同时捉大子——存在一个「非走动的子」的 checker 因让线而成将（checker 限车 / 炮）；
+      // 走动的子须**真的离开该线**（走子后仍停在线上当炮架只是「换架抽子」，不算闪将）
       const discovered = attackersOf(after, oppKing, me).some(
-        (c) => !samePos(c, move.to) && isLinePiece(after, c) && openedLine(c, oppKing, move.from),
+        (c) =>
+          !samePos(c, move.to) &&
+          isLinePiece(after, c) &&
+          openedLine(c, oppKing, move.from) &&
+          !restsOnLine(c, oppKing, move.to),
       );
       if (discovered) hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
     }
@@ -494,7 +513,11 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       if (!attackersOf(after, pos, me).length) continue;
       if (attackersOf(before, pos, me).length) continue; // 须为「新攻击」
       const actor = attackersOf(after, pos, me).find(
-        (a) => !samePos(a, move.to) && isLinePiece(after, a) && openedLine(a, pos, move.from),
+        (a) =>
+          !samePos(a, move.to) &&
+          isLinePiece(after, a) &&
+          openedLine(a, pos, move.from) &&
+          !restsOnLine(a, pos, move.to),
       );
       if (actor) {
         threats.push(pos);
