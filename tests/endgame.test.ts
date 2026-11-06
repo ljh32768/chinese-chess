@@ -43,7 +43,8 @@ import {
   swapPieceSides,
   upsertCustomEndgame,
 } from '../src/shared/endgame.js';
-import { isInCheck, legalMoves, makeMove, sideHasAnyMove } from '../src/shared/rules.js';
+import { initBoard, isInCheck, legalMoves, makeMove, sideHasAnyMove } from '../src/shared/rules.js';
+import { PIECE_LIMIT, remainingCount } from '../src/renderer/endgame-editor.js';
 import { Board, Cell, Move, PieceType, Side } from '../src/shared/types.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -698,14 +699,21 @@ describe('残局挑战：界面接线', () => {
       expect(HTML).toContain(`id="${id}"`);
     }
     for (const text of ['初始局面', '清空', '红黑互换', '红先', '黑先']) expect(HTML).toContain(text);
-    // 棋子栏两排（红黑各 7 种棋子）、局面按钮走共享层纯函数
+    // 棋子栏两排（红黑各 7 种棋子）、与棋盘同款素材 + 右上角剩余枚数角标
     expect(EDITOR).toContain('btn.className = `eg-piece ${s}`');
+    expect(EDITOR).toContain('assetUrl(sk, `${s}_${PIECE_IMG[item.t]}`)');
+    expect(EDITOR).toContain("count.className = 'eg-count'");
+    expect(EDITOR).toContain('remainingCount(state.board, t, s)');
+    expect(EDITOR).toContain("btn.classList.toggle('depleted', left <= 0)");
+    // 棋子栏拖入 / 盘内调位 / 拖出拿走：指针拖拽
+    expect(EDITOR).toContain("canvas.addEventListener('pointerdown'");
+    expect(EDITOR).toContain("window.addEventListener('pointermove', onDragMove)");
+    expect(EDITOR).toContain('state.board[pos[0]][pos[1]] = moved ?? { t: d.t, s: d.s }');
+    expect(EDITOR).toContain('state.board[d.from[0]][d.from[1]] = null');
+    expect(EDITOR).toContain("canvas.addEventListener('contextmenu'");
     expect(EDITOR).toContain('piecesToBoard(swapPieceSides(boardToPieces(board)))');
     expect(EDITOR).toContain('state.board = initBoard()');
     expect(EDITOR).toContain('state.board = emptyBoard()');
-    // 落子 / 右键拿走 / 悬停落点提示 / 切屏
-    expect(EDITOR).toContain("canvas.addEventListener('click'");
-    expect(EDITOR).toContain("canvas.addEventListener('contextmenu'");
     expect(EDITOR).toContain("deps.show('screen-endgame-editor')");
     // app.ts 接线：装配编辑器、自建条目可再次编辑 / 删除、并入列表
     expect(APP).toContain('editor = initEndgameEditor({');
@@ -714,11 +722,30 @@ describe('残局挑战：界面接线', () => {
     expect(APP).toContain('for (const p of readCustomEndgames())');
     expect(APP).toContain('function endgameRow(');
     expect(APP).toContain('function backToEndgamePanel()');
-    // 样式契约
+    // 样式契约：素材棋子 + 剩余枚数角标 + 0 枚置灰 + 拖拽随指图像
     expect(CSS).toContain('.editor-layout');
     expect(CSS).toContain('.eg-piece');
+    expect(CSS).toContain('.eg-count');
+    expect(CSS).toContain('.eg-piece.depleted img');
+    expect(CSS).toContain('.eg-drag-ghost');
     expect(CSS).toContain('.editor-act');
     expect(CSS).toContain('.eg-item .eg-mini');
+  });
+
+  it('棋子栏「剩余个数」= 标准枚数上限 − 棋盘上已有的该方该种棋子', () => {
+    const board = initBoard();
+    // 初始局面：红黑双方两车都在盘上 → 剩余 0；把一枚红车拿走 → 剩余 1
+    expect(remainingCount(board, 'R', 'r')).toBe(0);
+    expect(remainingCount(board, 'P', 'r')).toBe(0);
+    expect(remainingCount(board, 'K', 'b')).toBe(0);
+    board[9][0] = null;
+    expect(remainingCount(board, 'R', 'r')).toBe(1);
+    board[9][0] = { t: 'R', s: 'r' };
+    // 空盘：全部棋子回到满额
+    const empty = Array.from({ length: 10 }, () => Array<Cell>(9).fill(null));
+    expect(remainingCount(empty, 'R', 'r')).toBe(PIECE_LIMIT.r.R);
+    expect(remainingCount(empty, 'P', 'b')).toBe(PIECE_LIMIT.b.P);
+    expect(remainingCount(empty, 'K', 'r')).toBe(1);
   });
 
   it('渲染层接线：题库局面载入本机状态机、提示用求解器、AI 执玩家的对方、胜负记入本地', () => {

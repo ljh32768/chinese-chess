@@ -409,18 +409,15 @@ describe('v2.4 终局杀法展示', () => {
   });
 });
 
-describe('v2.8 走子动画与棋盘正中提示（v2.10：改为黑色大圆）', () => {
+describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字）', () => {
   it('画布包在 .board-stage 里，上方提示条与正中提示压在棋盘之上且不接收事件', () => {
     expect(HTML).toContain('class="board-stage"');
-    for (const id of [
-      'board-banner',
-      'banner-card',
-      'banner-slash',
-      'banner-name',
-      'banner-sub',
-      'board-tactics',
-    ]) {
+    for (const id of ['board-banner', 'banner-name', 'board-tactics']) {
       expect(HTML).toContain(`id="${id}"`);
+    }
+    // v3.7：黑底大圆、暗红斜线与下方小字一并删除，只剩大字
+    for (const gone of ['banner-card', 'banner-slash', 'banner-sub', 'orb-slash']) {
+      expect(HTML).not.toContain(gone);
     }
     // 结构顺序：board-stage → canvas → 上方提示条 → 正中提示
     const stage = HTML.indexOf('class="board-stage"');
@@ -449,19 +446,29 @@ describe('v2.8 走子动画与棋盘正中提示（v2.10：改为黑色大圆）
     expect(kf).toContain('100% { opacity: 0');
   });
 
-  it('正中提示为黑色大圆：将军白字 / 绝杀红字，仅绝杀有暗红斜线，强调色取 --b-accent', () => {
-    expect(decl('.banner-card', 'border')).toContain('--b-accent');
-    expect(decl('.banner-card', 'border-radius')).toBe('50%');
-    expect(decl('.banner-card', 'background')).toContain('radial-gradient');
-    expect(decl(".banner-card[data-kind='check'] .banner-name", 'color')).toBe('#fff');
-    expect(decl(".banner-card[data-kind='mate'] .banner-name", 'color')).toBe('#ff3b30');
-    // 暗红斜线：默认隐藏，仅绝杀显示
-    expect(decl('.orb-slash', 'display')).toBe('none');
-    expect(decl(".banner-card[data-kind='mate'] .orb-slash", 'display')).toBe('block');
-    expect(decl(".banner-card[data-kind='mate'] .orb-slash", 'background')).toContain('gradient');
+  it('正中大字无黑底 / 无圆框，楷体加粗；将军白字、绝杀红字（绝杀字号略小以便放下杀法名）', () => {
+    // 无背景、无边框、无圆角
+    expect(decl('.banner-name', 'background')).toBeUndefined();
+    expect(decl('.banner-name', 'border')).toBeUndefined();
+    expect(decl('.banner-name', 'border-radius')).toBeUndefined();
+    // 象棋字体（楷体优先）与加粗
+    expect(CSS).toContain('--font-chess');
+    expect(CSS).toContain('"KaiTi"');
+    expect(decl('.banner-name', 'font-family')).toBe('var(--font-chess)');
+    expect(decl('.banner-name', 'font-weight')).toBe('900');
+    expect(decl(".banner-name[data-kind='check']", 'color')).toBe('#fff3d6');
+    expect(decl(".banner-name[data-kind='mate']", 'color')).toBe('#ff3b30');
+    expect(decl(".banner-name[data-kind='mate']", 'font-size')).toBe('46px');
   });
 
-  it('「减少动态效果」下提示仍可见（正中圆环与上方提示条只去掉缩放 / 淡入动效）', () => {
+  it('战术提示改为黑色方框，字体与正中大字同款楷体加粗', () => {
+    expect(decl('.board-tactics', 'background')).toBe('#000');
+    expect(decl('.board-tactics', 'border-radius')).toBe('0');
+    expect(decl('.board-tactics', 'font-family')).toBe('var(--font-chess)');
+    expect(decl('.board-tactics', 'font-weight')).toBe('900');
+  });
+
+  it('「减少动态效果」下提示仍可见（正中大字与上方提示条只去掉缩放 / 淡入动效）', () => {
     for (const sel of ['.board-banner.show', '.board-tactics.show']) {
       const rule = RULES.find((r) => r.selectors.includes(sel) && r.decls.includes('animation: none'));
       expect(rule, sel).toBeTruthy();
@@ -469,7 +476,7 @@ describe('v2.8 走子动画与棋盘正中提示（v2.10：改为黑色大圆）
     }
   });
 
-  it('app.ts：走子动画按 rAF 推进、提示按局面触发并在 2.5s 后隐藏', () => {
+  it('app.ts：走子动画按 rAF 推进、提示按局面触发并在 2.5s 后隐藏；绝杀大字取杀法名', () => {
     expect(APP).toContain('const MOVE_ANIM_MS');
     expect(APP).toContain('function animateMove(');
     expect(APP).toContain('requestAnimationFrame');
@@ -477,7 +484,9 @@ describe('v2.8 走子动画与棋盘正中提示（v2.10：改为黑色大圆）
     expect(APP).toContain('function maybeBanner(');
     expect(APP).toContain('function showBanner(');
     expect(APP).toContain("bannerContent('check'");
-    expect(APP).toContain("bannerContent('mate'");
+    expect(APP).toContain("bannerContent('mate', { label })");
+    expect(APP).toContain('const label = mate ? mate.pattern.label');
+    expect(APP).toContain('name.dataset.kind = c.kind');
     // 联机走子（move_applied / game_over）与本地走子都接上动画与提示
     expect(APP).toContain('animateMove(msg.from, msg.to, hasLiftAt(msg.from))');
     expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
@@ -523,7 +532,7 @@ describe('v2.10 提示特效（黑色大圆、将颤抖、战术闪电与开局�
     expect(APP).toContain('detectTactics(before, move, S.board)');
     expect(APP).toContain('detectOpening(S.history)');
     expect(APP).toContain('function showTactics(');
-    expect(APP).toContain('card.dataset.kind = c.kind');
+    expect(APP).toContain('name.dataset.kind = c.kind');
     expect(APP).toContain('threats: S.fx ? S.threats : null');
     expect(APP).toContain('kingShake:');
     // 取「走子前」局面（联机在提交新盘面之前 / 本地在 applyMove 之前）

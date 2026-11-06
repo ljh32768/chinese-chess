@@ -46,6 +46,9 @@
   --shadow-pop: 0 18px 44px rgba(0, 0, 0, 0.65);
   --focus-ring: 0 0 0 3px rgba(255, 207, 122, 0.38);
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* 象棋风格字体（楷体优先）：棋盘正中提示与战术提示共用 */
+  --font-chess: "STKaiti", "KaiTi", "楷体", "Kaiti SC", "LiSu", "隶书", "SimSun", serif;
 }
 
 /* 只固定 html 高度：body 用 min-height，内容高于视口时随内容撑开，避免 flex 垂直居中裁剪 */
@@ -525,11 +528,11 @@ body::before {
   height: auto;
 }
 
-/* ---------- 棋盘正中提示：将军 / 绝杀（黑色大圆；绝杀带暗红斜线），显示 1.5s 渐入渐出 ---------- */
+/* ---------- 棋盘正中提示：将军 / 绝杀（纯文字大字，无黑底无圆框；楷体加粗），显示 2.5s 渐入渐出 ---------- */
 /* 画布外层容器：把正中提示精确压在棋盘正中（而非连同棋盘下方按钮一起居中） */
 .board-stage { position: relative; display: flex; justify-content: center; }
 
-/* 棋盘上方提示条：战术（闪击 / 闪将 / 将军抽 / 串打 / 捉双）与开局招法提示（不居中） */
+/* 棋盘上方提示条：战术（闪击 / 闪将 / 将军抽 / 串打 / 捉双）与开局招法提示（黑色方框） */
 .board-tactics {
   position: absolute;
   top: 6px;
@@ -538,16 +541,16 @@ body::before {
   max-width: 88%;
   overflow: hidden;
   padding: 10px 26px;
+  font-family: var(--font-chess);
   font-size: 21px;
-  font-weight: 700;
+  font-weight: 900;
   letter-spacing: 5px;
   color: var(--text);
   white-space: nowrap;
   text-overflow: ellipsis;
   pointer-events: none;
-  background: rgba(20, 13, 8, 0.82);
-  border: 1px solid rgba(255, 207, 122, 0.5);
-  border-radius: 999px;
+  background: #000;
+  border-radius: 0;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
   transform: translateX(-50%);
   opacity: 0;
@@ -573,66 +576,36 @@ body::before {
   transform-origin: 50% 50%;
 }
 .board-banner.show { animation: banner-cycle 2.5s var(--ease) both; }
-/* 渐入（0 → 14%）→ 保持（→ 80%）→ 渐出（→ 100%），总计 2.5s（较 v2.10 的 1.5s 延长） */
+/* 渐入（0 → 14%）→ 保持（→ 80%）→ 渐出（→ 100%），总计 2.5s */
 @keyframes banner-cycle {
   0% { opacity: 0; transform: scale(0.86); }
   14% { opacity: 1; transform: scale(1); }
   80% { opacity: 1; transform: scale(1); }
   100% { opacity: 0; transform: scale(1.08); }
 }
-/* 黑色大圆：将军白字 / 绝杀红字；绝杀另有一条暗红斜线自右上方穿过圆到右下方 */
-.banner-card {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 168px;
-  height: 168px;
-  overflow: hidden;
-  border: 3px solid var(--b-accent, var(--gold));
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 40%, #2c2c2c 0%, #101010 62%, #000 100%);
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.5), 0 18px 44px rgba(0, 0, 0, 0.75),
-    inset 0 0 30px rgba(255, 255, 255, 0.05);
-}
-/* 暗红斜线：仅绝杀显示（将军隐藏）；自圆左上角穿过黑圈中心到右下角（「\」对角） */
-.orb-slash { display: none; }
-.banner-card[data-kind='mate'] .orb-slash {
-  display: block;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 7px;
-  height: 180%;
-  background: linear-gradient(180deg, #3d0810, #8f1420 46%, #3d0810);
-  border-radius: 4px;
-  box-shadow: 0 0 12px rgba(143, 20, 32, 0.75);
-  transform: translate(-50%, -50%) rotate(-45deg);
-}
-.banner-text { position: relative; z-index: 1; text-align: center; }
+/* 正中大字：无底色 / 无边框，楷体加粗 + 深色描边保证压在木纹棋盘上也清晰 */
 .banner-name {
   display: block;
-  font-size: 44px;
-  font-weight: 700;
-  line-height: 1;
+  padding: 0 12px;
+  font-family: var(--font-chess);
+  font-size: 58px;
+  font-weight: 900;
+  line-height: 1.05;
   letter-spacing: 8px;
+  text-align: center;
+  white-space: nowrap;
+  -webkit-text-stroke: 1px rgba(28, 15, 6, 0.9);
 }
-.banner-card[data-kind='check'] .banner-name {
-  color: #fff;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95);
+.banner-name[data-kind='check'] {
+  color: #fff3d6;
+  text-shadow: 0 0 2px #1c0f06, 0 4px 14px rgba(0, 0, 0, 0.8);
 }
-.banner-card[data-kind='mate'] .banner-name {
+/* 绝杀：大字直接是具体杀法名（如「马后炮杀」「大刀剜心杀」），红字略收字号保证完整显示 */
+.banner-name[data-kind='mate'] {
+  font-size: 46px;
   color: #ff3b30;
-  text-shadow: 0 0 20px rgba(255, 59, 48, 0.85), 0 2px 10px rgba(0, 0, 0, 0.9);
+  text-shadow: 0 0 18px rgba(255, 59, 48, 0.8), 0 3px 12px rgba(0, 0, 0, 0.85);
 }
-.banner-sub {
-  display: block;
-  margin-top: 8px;
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: var(--b-accent, var(--gold));
-}
-.banner-sub:empty { display: none; }
 
 .bn_box { margin-top: 8px; }
 .bn_box input {
@@ -1103,34 +1076,59 @@ body::before {
   border-radius: 6px;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
   background: #e9cb8d;
-  touch-action: manipulation;
+  touch-action: none;
   cursor: default;
 }
 .editor-bottom { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; }
 .eg-palette { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .eg-pal-row { display: flex; flex-wrap: wrap; gap: 6px; }
-/* 棋子栏按钮：圆形棋子盘（红/黑两套用字与配色） */
+/* 棋子栏：与棋盘同款棋子素材（皮肤一致），右上角标「剩余可摆枚数」，0 枚时整枚置灰且不可拖动 */
 .eg-piece {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 44px;
   padding: 0;
-  font: 700 22px/1 inherit;
-  color: #8c1d12;
-  background: radial-gradient(circle at 34% 28%, #fff8e6, #e8d3a6 62%, #c9ad78);
-  border: 2px solid #b98f4e;
-  border-radius: 50%;
-  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.4);
-  cursor: pointer;
-  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  background: none;
+  border: none;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 0.15s var(--ease), filter 0.15s var(--ease);
 }
-.eg-piece.b { color: #14161a; }
+.eg-piece img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 .eg-piece:hover { transform: translateY(-2px); }
-.eg-piece.on {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(255, 207, 122, 0.38), 0 6px 14px rgba(0, 0, 0, 0.5);
-  transform: translateY(-3px);
+.eg-piece.depleted { cursor: not-allowed; }
+.eg-piece.depleted img { filter: grayscale(1) opacity(0.4); }
+.eg-count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  font: 700 10px/16px "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: #fff3d6;
+  text-align: center;
+  background: rgba(20, 13, 8, 0.92);
+  border: 1px solid rgba(255, 207, 122, 0.55);
+  border-radius: 8px;
+}
+.eg-piece.depleted .eg-count { color: #9a9a9a; border-color: rgba(160, 160, 160, 0.45); }
+/* 拖拽时跟随指针的棋子（与棋盘上的棋子同尺寸） */
+.eg-drag-ghost {
+  position: fixed;
+  z-index: 99;
+  height: auto;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.55));
 }
 /* 先手方：红先 / 黑先（棋盘点色块 + 文字） */
 .eg-first { flex: none; display: flex; flex-direction: column; gap: 6px; }
@@ -1243,12 +1241,10 @@ body::before {
   .review_box { padding: 14px 14px 16px; }
   .home-corner { top: 8px; right: 8px; }
   /* 小屏棋子栏收一档，两排棋子不至于换行溢出 */
-  .eg-piece { width: 36px; height: 36px; font-size: 19px; }
-  /* 小屏棋盘也小：正中大圆与上方提示条整体收一档，避免盖住整个盘面 */
-  .banner-card { width: 132px; height: 132px; }
-  .banner-card[data-kind='mate'] .orb-slash { left: 50%; }
-  .banner-name { font-size: 32px; letter-spacing: 5px; }
-  .banner-sub { letter-spacing: 2px; }
+  .eg-piece { width: 36px; height: 36px; }
+  /* 小屏棋盘也小：正中大字与上方提示条整体收一档，避免盖住整个盘面 */
+  .banner-name { font-size: 42px; letter-spacing: 5px; }
+  .banner-name[data-kind='mate'] { font-size: 34px; }
   .board-tactics { padding: 6px 16px; font-size: 17px; letter-spacing: 3px; }
 }
 

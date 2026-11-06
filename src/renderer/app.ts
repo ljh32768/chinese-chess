@@ -267,15 +267,12 @@ let bannerTimer = 0;
 let lastBannerKey = '';
 let lastBannerAt = 0;
 
-/** 在棋盘正中显示将军 / 绝杀黑色大圆（绝杀另带暗红斜线），1.5s 后渐出消失 */
+/** 在棋盘正中显示将军 / 绝杀大字（纯文字、无底色无圆框），2.5s 后渐出消失 */
 function showBanner(c: BannerContent): void {
   const el = $('board-banner');
-  const card = $('banner-card');
-  card.dataset.kind = c.kind;
-  card.dataset.pattern = c.style.pattern;
-  card.style.setProperty('--b-accent', c.style.accent);
-  $('banner-name').textContent = c.name;
-  $('banner-sub').textContent = c.sub;
+  const name = $('banner-name');
+  name.dataset.kind = c.kind;
+  name.textContent = c.name;
   el.classList.remove('show');
   void el.offsetWidth; // 强制回流，让连续触发的动画能重新播放
   el.hidden = false;
@@ -297,7 +294,7 @@ function showBannerOnce(key: string, run: () => void): void {
 }
 
 /**
- * 按当前局面决定是否弹提示条：「将死」→ 绝杀（杀法名 + 该杀法图案样式）；「将军」→ 将军警示。
+ * 按当前局面决定是否弹提示：「将死」→ 绝杀（大字直接显示杀法名）；「将军」→ 将军。
  * 在每次走子后调用（联机 move_applied / game_over、本地人机与残局）。
  */
 function maybeBanner(): void {
@@ -306,19 +303,10 @@ function maybeBanner(): void {
   if (S.status === 'over' && winner && S.reason === '将死') {
     const mate = mateInfo();
     const id = mate?.pattern.id ?? 'generic';
-    showBannerOnce(`mate:${id}:${S.moveSeq}`, () =>
-      showBanner(
-        bannerContent('mate', {
-          label: mate ? mate.pattern.label : '将死',
-          patternId: id,
-          sub: `${mate ? mate.pattern.label : '将死'} · ${sideName(winner)}绝杀`,
-        }),
-      ),
-    );
+    const label = mate ? mate.pattern.label : '将死';
+    showBannerOnce(`mate:${id}:${S.moveSeq}`, () => showBanner(bannerContent('mate', { label })));
   } else if (S.status === 'playing' && S.check) {
-    showBannerOnce(`check:${S.turn}:${S.moveSeq}`, () =>
-      showBanner(bannerContent('check', { sub: `${sideName(S.turn)}被将军` })),
-    );
+    showBannerOnce(`check:${S.turn}:${S.moveSeq}`, () => showBanner(bannerContent('check')));
   }
 }
 
