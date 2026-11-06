@@ -465,6 +465,13 @@ const MATCHERS: Match[] = [
       if (!c) return false;
       const screen = cannonScreen(ctx.board, c.pos, ctx.an.king);
       if (screen?.piece.s !== ctx.an.mated || screen.piece.t !== 'A') return false;
+      // 「单炮」口径：另一门炮若也参与（照将 / 牵制同线防守子 / 封住逃路），
+      // 就属于双炮的天地炮等杀法（如中炮牵制黑象使其不能吃底线炮），不再算闷宫
+      const otherCannonBusy = piecesOf(ctx.board, ctx.an.winner, 'C').some(
+        ({ pos }) =>
+          !samePos(pos, c.pos) && (isChecker(ctx, pos) || coversEscape(ctx, pos) || pinsKingLine(ctx, pos)),
+      );
+      if (otherCannonBusy) return false;
       const own = ctx.an.escapes.filter((e) => e.blocked === 'own');
       return own.length >= 1 && own.every((e) => e.piece?.t === 'A');
     },
