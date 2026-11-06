@@ -506,6 +506,8 @@ body::before {
   cursor: default;
 }
 #board { cursor: default; }
+/* 对局页在棋盘上方多出一条提示行（64px + 间距），画布高度上限相应收一档 */
+#screen-game .chess-box canvas { max-height: calc(100vh - 268px); }
 
 /* ---------- 被吃掉的棋子：棋盘两侧的缩略图（左 = 红方所吃，右 = 黑方所吃） ---------- */
 /* 三栏：左吃子条 + 棋盘 + 右吃子条，整体居中；条随棋盘高度拉伸并纵向居中排列 */
@@ -532,19 +534,24 @@ body::before {
 /* 画布外层容器：把正中提示精确压在棋盘正中（而非连同棋盘下方按钮一起居中） */
 .board-stage { position: relative; display: flex; justify-content: center; }
 
-/* 棋盘上方提示条：战术（闪击 / 闪将 / 将军抽 / 串打 / 捉双）与开局招法提示（黑色方框） */
+/* 棋盘上方提示条：战术（闪击 / 闪将 / 将军抽 / 串打 / 捉双）与开局招法提示（黑色方框），
+   v3.9 起放在画布之外、棋盘上方独占一行（预留固定高度，出现 / 消失不会推动棋盘），并放大字号 */
+.board-tactics-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  margin-bottom: 4px;
+}
 .board-tactics {
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  z-index: 4;
-  max-width: 88%;
+  max-width: 100%;
   overflow: hidden;
-  padding: 10px 26px;
+  padding: 10px 36px;
   font-family: var(--font-chess);
-  font-size: 21px;
+  font-size: 30px;
   font-weight: 900;
-  letter-spacing: 5px;
+  letter-spacing: 6px;
+  line-height: 1.2;
   color: var(--text);
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -552,16 +559,15 @@ body::before {
   background: #000;
   border-radius: 0;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-  transform: translateX(-50%);
   opacity: 0;
 }
 .board-tactics.show { animation: tactic-cycle 2.5s var(--ease) both; }
 /* 渐入（0 → 14%）→ 保持（→ 78%）→ 渐出（→ 100%），总计 2.5s */
 @keyframes tactic-cycle {
-  0% { opacity: 0; transform: translate(-50%, -6px); }
-  14% { opacity: 1; transform: translate(-50%, 0); }
-  78% { opacity: 1; transform: translate(-50%, 0); }
-  100% { opacity: 0; transform: translate(-50%, -6px); }
+  0% { opacity: 0; transform: translateY(-6px); }
+  14% { opacity: 1; transform: translateY(0); }
+  78% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-6px); }
 }
 
 .board-banner {
@@ -1245,7 +1251,8 @@ body::before {
   /* 小屏棋盘也小：正中大字与上方提示条整体收一档，避免盖住整个盘面 */
   .banner-name { font-size: 42px; letter-spacing: 5px; }
   .banner-name[data-kind='mate'] { font-size: 34px; }
-  .board-tactics { padding: 6px 16px; font-size: 17px; letter-spacing: 3px; }
+  .board-tactics-slot { min-height: 46px; }
+  .board-tactics { padding: 6px 20px; font-size: 22px; letter-spacing: 4px; }
 }
 
 /* 跟随系统「减少动态效果」：关闭切屏 / 弹层 / 转圈等所有装饰动画与过渡 */
@@ -1259,6 +1266,5 @@ body::before {
   }
   /* 提示是「必须看到」的信息：去掉缩放 / 淡入动效但保持可见，到时由脚本隐藏 */
   .board-banner.show { animation: none !important; opacity: 1; }
-  /* 上方提示条用 transform 居中：去动效后仍须保留居中位移 */
-  .board-tactics.show { animation: none !important; opacity: 1; transform: translateX(-50%); }
+  .board-tactics.show { animation: none !important; opacity: 1; }
 }

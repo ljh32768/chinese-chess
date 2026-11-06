@@ -142,7 +142,7 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     name: '八脚马',
     label: '八脚马',
     definition:
-      '马在对方九宫士角上、与将（帅）对角定将、限制其活动，再由其它子力将死；也叫「八角马」「定将马」。',
+      '马占对方九宫的一个士角，将（帅）在斜对的另一个宫角；马控住将（帅）的两条退路，再由其它子力将死；也叫「八角马」「定将马」。',
   },
   {
     id: 'shuangchecuo',
@@ -563,13 +563,14 @@ const MATCHERS: Match[] = [
       );
     },
   },
-  // 八角马（定将马）：马在对方九宫士角且与将（帅）对角定将，再由其它子力将死
+  // 八脚马（八角马 / 定将马）：马占对方九宫士角，将（帅）在斜对的另一个宫角（隔宫心相望），
+  // 马正好控住将（帅）的两条退路，再由其它子力将死（如红马在 (0,3)、黑将在 (2,5)、红车沿二路照将）
   {
     pattern: PATTERN.bajiaoma,
     match: (ctx) =>
       piecesOf(ctx.board, ctx.an.winner, 'N').some(({ pos }) => {
         if (!isShijiaoSquare(pos, ctx.an.mated)) return false;
-        if (Math.abs(pos[0] - ctx.an.king[0]) !== 1 || Math.abs(pos[1] - ctx.an.king[1]) !== 1) return false; // 与将（帅）对角
+        if (Math.abs(pos[0] - ctx.an.king[0]) !== 2 || Math.abs(pos[1] - ctx.an.king[1]) !== 2) return false; // 斜对宫角
         return !isChecker(ctx, pos) && coversEscape(ctx, pos);
       }),
   },

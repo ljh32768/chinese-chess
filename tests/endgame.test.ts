@@ -51,6 +51,7 @@ import {
   makeMove,
   sideHasAnyMove,
 } from '../src/shared/rules.js';
+import { classifyCheckmate } from '../src/shared/checkmate.js';
 import { PIECE_LIMIT, remainingCount } from '../src/renderer/endgame-editor.js';
 import { Board, Cell, Move, PieceType, Side } from '../src/shared/types.js';
 
@@ -244,6 +245,15 @@ describe('残局题库：自检（checkPuzzle / checkEndgameBank）', () => {
     const board = buildPuzzleBoard(k);
     makeMove(board, [2, 5], [1, 5]);
     expect(judgeAfterMove(board, 'b')).toEqual({ winner: 'r', reason: '困毙' });
+
+    // 八脚马示例：马在宫角、将在斜对宫角，车平到二路照将后识别为「八脚马」
+    const bajiaoma = PUZZLES.find((x) => x.id === 'bajiaoma')!;
+    const b2 = buildPuzzleBoard(bajiaoma);
+    expect(b2[0][3]).toEqual({ t: 'N', s: 'r' });
+    expect(b2[2][5]).toEqual({ t: 'K', s: 'b' });
+    makeMove(b2, [5, 0], [2, 0]);
+    expect(judgeAfterMove(b2, 'b')?.reason).toBe('将死');
+    expect(classifyCheckmate(b2, 'b').pattern.name).toBe('八脚马');
   });
 
   it('自检能抓出「缺少将/帅」与「棋子越界 / 重叠」', () => {

@@ -165,13 +165,15 @@
   <section id="screen-game" class="screen">
     <div class="game-layout">
       <div class="chess-box">
+        <!-- 棋盘上方（画布之外）独占一行：战术（闪击 / 闪将 / 将军抽 / 串打 / 捉双）与开局招法提示 -->
+        <div class="board-tactics-slot">
+          <div class="board-tactics" id="board-tactics" hidden></div>
+        </div>
         <div class="board-row">
           <!-- 被吃掉的棋子：棋盘两侧的缩略图（左 = 红方所吃，右 = 黑方所吃，保留红黑原色），纯装饰 -->
           <div class="cap-strip" id="cap-red" aria-hidden="true"></div>
           <div class="board-stage">
             <canvas id="board" width="523" height="580"></canvas>
-            <!-- 棋盘上方提示条：战术（闪击 / 闪将 / 将军抽 / 串打 / 捉双）与开局招法提示 -->
-            <div class="board-tactics" id="board-tactics" hidden></div>
             <!-- 棋盘正中提示：将军 / 绝杀（纯文字大字，无底色无圆框；绝杀直接显示杀法名） -->
             <div class="board-banner" id="board-banner" role="status" aria-live="assertive" hidden>
               <div class="banner-name" id="banner-name" data-kind="check"></div>

@@ -410,7 +410,7 @@ describe('v2.4 终局杀法展示', () => {
 });
 
 describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字）', () => {
-  it('画布包在 .board-stage 里，上方提示条与正中提示压在棋盘之上且不接收事件', () => {
+  it('画布包在 .board-stage 里；战术 / 开局提示独占棋盘上方一行，正中提示压在棋盘之上', () => {
     expect(HTML).toContain('class="board-stage"');
     for (const id of ['board-banner', 'banner-name', 'board-tactics']) {
       expect(HTML).toContain(`id="${id}"`);
@@ -419,20 +419,26 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     for (const gone of ['banner-card', 'banner-slash', 'banner-sub', 'orb-slash']) {
       expect(HTML).not.toContain(gone);
     }
-    // 结构顺序：board-stage → canvas → 上方提示条 → 正中提示
-    const stage = HTML.indexOf('class="board-stage"');
+    // v3.9 结构顺序：提示槽（board-tactics）在 board-row 之前 → 左吃子条 → board-stage（canvas → banner）
+    const slot = HTML.indexOf('class="board-tactics-slot"');
+    const tactics = HTML.indexOf('id="board-tactics"');
+    const row = HTML.indexOf('class="board-row"', slot);
+    const stage = HTML.indexOf('class="board-stage"', row);
     const canvas = HTML.indexOf('id="board"', stage);
-    const tactics = HTML.indexOf('id="board-tactics"', stage);
     const banner = HTML.indexOf('id="board-banner"', stage);
+    expect(tactics).toBeGreaterThan(slot);
+    expect(row).toBeGreaterThan(tactics);
     expect(canvas).toBeGreaterThan(stage);
-    expect(tactics).toBeGreaterThan(canvas);
-    expect(banner).toBeGreaterThan(tactics);
-    // 定位：相对画布容器铺满、居中、不可点击
+    expect(banner).toBeGreaterThan(canvas);
+    // 定位：正中提示仍在画布容器内铺满、不可点击；上方提示条在画布之外（不压在棋盘上）
     expect(decl('.board-stage', 'position')).toBe('relative');
     expect(decl('.board-banner', 'position')).toBe('absolute');
     expect(decl('.board-banner', 'inset')).toBe('0');
     expect(decl('.board-banner', 'pointer-events')).toBe('none');
-    expect(decl('.board-tactics', 'position')).toBe('absolute');
+    expect(decl('.board-tactics-slot', 'display')).toBe('flex');
+    expect(decl('.board-tactics-slot', 'min-height')).toBe('64px');
+    expect(decl('.board-tactics', 'position')).toBeUndefined();
+    expect(decl('.board-tactics', 'top')).toBeUndefined();
     expect(decl('.board-tactics', 'pointer-events')).toBe('none');
   });
 
@@ -510,16 +516,22 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
 });
 
 describe('v2.10 提示特效（黑色大圆、将颤抖、战术闪电与开局提示）', () => {
-  it('上方提示条浮于棋盘中上部、不接收事件，2.5s 渐入渐出', () => {
-    expect(decl('.board-tactics', 'top')).toBeTruthy();
+  it('上方提示条放在棋盘上方、不接收事件，2.5s 渐入渐出', () => {
+    expect(decl('.board-tactics-slot', 'min-height')).toBe('64px');
+    expect(decl('.board-tactics', 'position')).toBeUndefined();
     expect(decl('.board-tactics.show', 'animation')).toContain('tactic-cycle 2.5s');
     expect(CSS).toContain('@keyframes tactic-cycle');
+    // 动画只做上下轻移，不再用 translateX 居中（居中交给 flex 槽）
+    const kfStart = CSS.indexOf('@keyframes tactic-cycle');
+    const kf = CSS.slice(kfStart, CSS.indexOf('\n}', kfStart));
+    expect(kf).toContain('translateY(-6px)');
+    expect(kf).not.toContain('translate(');
   });
 
   it('战术元素已放大：上方提示条字号 / 内边距加大，闪电基准半径加大', () => {
-    expect(decl('.board-tactics', 'font-size')).toBe('21px');
-    expect(decl('.board-tactics', 'letter-spacing')).toBe('5px');
-    expect(decl('.board-tactics', 'padding')).toBe('10px 26px');
+    expect(decl('.board-tactics', 'font-size')).toBe('30px');
+    expect(decl('.board-tactics', 'letter-spacing')).toBe('6px');
+    expect(decl('.board-tactics', 'padding')).toBe('10px 36px');
     expect(read('src/renderer/board.ts')).toContain('radius: skin.disc / 2 + 12');
   });
 
