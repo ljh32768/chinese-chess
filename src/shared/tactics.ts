@@ -3,7 +3,8 @@
  *
  * 1) 吃子提示分析：站在某一方（`side`）的视角给出两类位置：
  *    - `targets`（绿色）：**可以吃掉的对方棋子**——该子「无根」（不被对方自己的子保护，吃掉后不会被反吃），
- *      或「小换大」（用价值更小的己方子去吃它，即使它有根，一换一后仍净赚）。
+ *      或「小换大」（用价值更小的己方子去吃它，即使它有根，一换一后仍**至少净赚 1 分**——
+ *      马 4 换炮 4.5 这类几乎等值的交换不算，否则「马吃有根炮」会被误标为可吃）。
  *    - `threats`（红色）：**会被对方吃掉的己方棋子**——与上面完全对称（把视角换成对方即可）。
  *
  *    判定只做「一手」的静态估值（本项目提示性功能，非权威判定）：
@@ -23,7 +24,7 @@
  *    **被抽子须是这一步新造的威胁**——走子前我方就已能获利吃到的子与这步将军无关，不算「抽」。
  *    凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都要求**两者必然失去其一**，且**必须真能获利吃到**：
  *    对方无论怎样应着，都至少有一枚被攻击的子仍会被吃到，而这个「吃到」按**获利口径**
- *    （无根白吃 / 小换大，与吃子提示 `profitableTargets` 一致）成立——
+ *    （无根白吃 / 明显小换大——净赚 ≥1 分，与吃子提示 `profitableTargets` 一致）成立——
  *    据此排除「被攻击子反吃攻击子」「垫子挡线」「移走炮架」以及**有根且不划算**等可两全的伪战术
  *    （对方弃子反吃即可两全，我方并未得子）。「获利口径」对将军抽 / 串打 / 捉双一视同仁。
  *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
@@ -49,6 +50,13 @@ export const PIECE_VALUE: Record<PieceType, number> = {
   A: 2,
   P: 1,
 };
+
+/**
+ * 「小换大」的最小获利差（分）：有根的目标须比最便宜的攻击者至少贵这么多，才算「净赚」。
+ * 马（4）与炮（4.5）只差 0.5——一换一后几乎等价（对方反吃即可两全），不计为可获利吃子；
+ * 否则「马吃有根炮」会被误标为绿环 / 误报「将军抽炮」（v3.10 截图回归）。
+ */
+const MIN_PROFIT = 1;
 
 /** 吃子提示结果：targets 画绿环（可吃对方），threats 画红环（己方有险） */
 export interface CaptureHints {
@@ -107,7 +115,7 @@ function isDefended(board: Board, enemy: Side, at: Pos, byPos: Pos): boolean {
  * 对每个对方棋子（不含将帅）所在点 S：
  * - 己方有子能合法吃到 S（取其中最便宜的一枚，并记下它的位置），否则跳过；
  * - S 未被对方保护（无根）→ 白吃，计入；
- * - S 有保护但该子价值 > 最便宜攻击者的价值 → 小换大，计入。
+ * - S 有保护但该子价值比最便宜攻击者**至少高 `MIN_PROFIT`（1 分）** → 明显小换大，计入。
  */
 export function profitableTargets(board: Board, side: Side): Pos[] {
   const enemy = other(side);
@@ -135,7 +143,7 @@ export function profitableTargets(board: Board, side: Side): Pos[] {
       if (!best) continue;
       // 有根判定须带上「我方会用来吃它的那枚子」，才能正确判断将/帅吃回是否会被将军
       const defended = isDefended(board, enemy, [r, c], best.pos);
-      if (!defended || PIECE_VALUE[target.t] > best.value) out.push([r, c]);
+      if (!defended || PIECE_VALUE[target.t] - best.value >= MIN_PROFIT) out.push([r, c]);
     }
   }
   return out;
@@ -299,8 +307,8 @@ function mustLoseOne(replies: Board[], actor: Pos, targets: Pos[], me: Side): bo
     const hit = targets.some((t) => {
       const tp = nb[t[0]][t[1]];
       if (!tp || tp.s !== opp || !attacks(nb, actor, t)) return false;
-      // 有根（受对方保护）且不是「小换大」→ 对方弃子反吃即可两全，不计为必失
-      return !isDefended(nb, opp, t, actor) || VALUE[tp.t] > actorValue;
+      // 有根（受对方保护）且不是「明显小换大」（净赚不足 `MIN_PROFIT`）→ 对方弃子反吃即可两全，不计为必失
+      return !isDefended(nb, opp, t, actor) || VALUE[tp.t] - actorValue >= MIN_PROFIT;
     });
     if (!hit) return false;
   }
