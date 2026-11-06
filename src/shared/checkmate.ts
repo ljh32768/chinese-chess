@@ -14,7 +14,8 @@
  * 由专到泛；「海底捞月」需先于「对面笑」（其封口正是照面）；「列马车」需先于钓鱼马 /
  * 卧槽马（其马常落在三·八位）；双车错 / 闷杀 / 双将 / 对面笑属泛指结构靠后；清单外的
  * 「大刀剜心 / 双马饮泉 / 挂角马」作为附加条目压在其后，避免抢占主杀法。
- * 「困毙（欠行）」未被将军，不属本模块（只在「将死」时调用）。
+ * 「困毙（欠行）」未被将军，不参与杀法匹配；仅导出 `KUNBI_PATTERN` 供终局展示（绝杀字样 / 杀法框）。
+ * v3.8 起展示名（`label`）与杀法名一致，不再追加「杀」字（如「马后炮」而非「马后炮杀」）。
  *
  * 棋盘坐标：10 行 9 列，黑方在上（九宫 0~2 行）、红方在下（九宫 7~9 行）。
  * 红方视角的「对方三、七路」= 列 2 / 6；黑方视角同理。
@@ -29,7 +30,7 @@ export interface CheckmatePattern {
   id: string;
   /** 杀法名（简短，如「马后炮」） */
   name: string;
-  /** 终局展示名（如「马后炮杀」，闷杀 / 大刀剜心等本身已含杀意的不再加「杀」） */
+  /** 终局展示名（v3.8 起与 `name` 一致，只给杀法名本身，不再追加「杀」字） */
   label: string;
   /** 一句话定义（界面提示用） */
   definition: string;
@@ -54,6 +55,17 @@ const GENERIC: CheckmatePattern = {
 };
 
 /**
+ * 困毙（欠行）：将（帅）未被将军，但已无任何合法着法可走。
+ * 不参与「将死」的杀法匹配，只作为终局原因（绝杀字样 / 杀法框）的展示条目导出。
+ */
+export const KUNBI_PATTERN: CheckmatePattern = {
+  id: 'kunbi',
+  name: '困毙',
+  label: '困毙',
+  definition: '将（帅）虽未被将军，但已无任何合法着法可走（欠行），按规则判负。',
+};
+
+/**
  * 杀法库（按识别优先级排列，前者优先）。
  * 同一局面可能同时成立多种杀法，`alsoMatched` 会给出其余成立的杀法名。
  * 末三条为「清单外附加条目」，排在主判定顺序之后，避免抢占主杀法。
@@ -62,37 +74,37 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
   {
     id: 'mahoupao',
     name: '马后炮',
-    label: '马后炮杀',
+    label: '马后炮',
     definition: '马在前控将、炮在马后借马为炮架将军成杀；马是炮架兼控子，即「马前炮后」。',
   },
   {
     id: 'chongpao',
     name: '重炮',
-    label: '重炮杀',
+    label: '重炮',
     definition: '双炮同线叠架：前炮与将（帅）之间恰隔一子作炮架，后炮将军，将（帅）无从躲避。',
   },
   {
     id: 'mengong',
     name: '闷宫',
-    label: '闷宫杀',
+    label: '闷宫',
     definition: '单炮借对方士为炮架将军，将（帅）被自家士堵死而无路可走。',
   },
   {
     id: 'tiemenshuan',
     name: '铁门栓',
-    label: '铁门栓杀',
+    label: '铁门栓',
     definition: '炮镇中路控住将门纵线，车或兵（卒）从肋道或底线切入、贴帅攻击成杀，也称「铁门闩」。',
   },
   {
     id: 'tiandipao',
     name: '天地炮',
-    label: '天地炮杀',
+    label: '天地炮',
     definition: '一炮镇中路为「地」、一炮沉底线为「天」，另有车 / 马 / 兵（卒）封锁逃路成杀。',
   },
   {
     id: 'jiachepao',
     name: '夹车炮',
-    label: '夹车炮杀',
+    label: '夹车炮',
     definition: '双炮一车集于一侧：双炮重叠为架，车配合将军成杀。',
   },
   {
@@ -104,37 +116,38 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
   {
     id: 'liemache',
     name: '列马车',
-    label: '列马车杀',
+    label: '列马车',
     definition: '车马配合：马控将（帅）逃路、车紧贴将（帅）一侧照将，且车在马口保护下（将不敢吃车）。',
   },
   {
     id: 'wocaoma',
     name: '卧槽马',
-    label: '卧槽马杀',
+    label: '卧槽马',
     definition: '马占对方下二路象前「卧槽」位（三、七路底线附近），直接控将门一侧，配合它子成杀。',
   },
   {
     id: 'diaoyuma',
     name: '钓鱼马',
-    label: '钓鱼马杀',
+    label: '钓鱼马',
     definition: '马占对方三·八或七·八位（卒林线附近）封锁将门，再由车等子力将杀；马是控位子。',
   },
   {
     id: 'cemianhu',
     name: '侧面虎',
-    label: '侧面虎杀',
+    label: '侧面虎',
     definition: '马占对方三、七路卒（兵）位从侧控制将门，由同侧车等子力将死；又称「高钓马」。',
   },
   {
     id: 'bajiaoma',
-    name: '八角马',
-    label: '八角马杀',
-    definition: '马在对方九宫士角上、与将（帅）对角定将、限制其活动，再由其它子力将死；又叫「定将马」。',
+    name: '八脚马',
+    label: '八脚马',
+    definition:
+      '马在对方九宫士角上、与将（帅）对角定将、限制其活动，再由其它子力将死；也叫「八角马」「定将马」。',
   },
   {
     id: 'shuangchecuo',
     name: '双车错',
-    label: '双车错杀',
+    label: '双车错',
     definition: '双车分占两条不同的横线或纵线，交错将军，将（帅）无法同时躲避；也称「长短车」。',
   },
   {
@@ -147,13 +160,13 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
   {
     id: 'shuangjiang',
     name: '双将',
-    label: '双将杀',
+    label: '双将',
     definition: '两子同时将军，将（帅）顾此失彼；双将是将军形式，常作为杀法组合的组成部分。',
   },
   {
     id: 'bailianjiang',
     name: '对面笑',
-    label: '对面笑杀',
+    label: '对面笑',
     definition:
       '利用将帅不得在同一路照面的规则：使帅（将）与对方将（帅）直接照面、或仅隔一个可被吃掉的棋子，封死出路；也叫「白脸将」「千里照面」。',
   },
@@ -172,7 +185,7 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
   {
     id: 'guajiaoma',
     name: '挂角马',
-    label: '挂角马杀',
+    label: '挂角马',
     definition: '马跳至对方九宫宫顶角（靠近河界的两个角）直接将军，迫使将（帅）不安于位。（附加条目）',
   },
   GENERIC,

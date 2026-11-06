@@ -7,7 +7,7 @@
  */
 
 import { describeMove } from '../shared/notation.js';
-import { CheckmateInfo, classifyCheckmateFromHistory } from '../shared/checkmate.js';
+import { CheckmateInfo, KUNBI_PATTERN, classifyCheckmateFromHistory } from '../shared/checkmate.js';
 import {
   cloneBoard,
   findKing,
@@ -80,6 +80,10 @@ export function resultText(rec: { winner: Side | null; reason: string; killMetho
  * 与对局页 / 服务端落库共用同一实现，因此新老记录都能给出具体杀法。
  */
 export function mateOf(rec: GameRecord): CheckmateInfo | null {
+  // 困毙（欠行）：无具体杀法，直接以终局原因作为展示名
+  if (rec.reason === '困毙' && rec.winner) {
+    return { pattern: KUNBI_PATTERN, alsoMatched: [], recognized: true };
+  }
   if (rec.reason !== '将死') return null;
   const board = replayBoard(rec.moves, rec.moves.length);
   const info = classifyCheckmateFromHistory(board, rec.moves, rec.winner);

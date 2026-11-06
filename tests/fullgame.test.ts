@@ -130,7 +130,7 @@ describe('完整对局回放', () => {
     };
     expect(list.games).toHaveLength(1);
     expect(list.games[0].reason).toBe('将死');
-    expect(list.games[0].killMethod).toBe('夹车炮杀');
+    expect(list.games[0].killMethod).toBe('夹车炮');
 
     // 终局后走子会被拒绝，程序不崩溃
     guest.send({ type: 'move', from: [9, 4], to: [8, 4] });

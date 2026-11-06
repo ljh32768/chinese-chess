@@ -23,7 +23,12 @@ import {
 import { Game } from '../shared/game.js';
 import { pickMove } from '../shared/ai.js';
 import { boardToFen } from '../shared/uci.js';
-import { CheckmateInfo, classifyCheckmate, classifyCheckmateFromHistory } from '../shared/checkmate.js';
+import {
+  CheckmateInfo,
+  KUNBI_PATTERN,
+  classifyCheckmate,
+  classifyCheckmateFromHistory,
+} from '../shared/checkmate.js';
 import { CaptureHints, TacticHit, captureHints, detectTactics } from '../shared/tactics.js';
 import {
   CUSTOM_LEVEL,
@@ -214,11 +219,14 @@ const sideName = (s: Side) => (s === 'r' ? '红方' : '黑方');
 const resultText = () => (S.winner === 'r' ? '红方胜' : S.winner === 'b' ? '黑方胜' : '和棋');
 
 /**
- * 终局杀法（仅「将死」且识别到具体杀法时返回）。
+ * 终局杀法（将死识别到具体杀法时返回；困毙直接返回「困毙」条目）。
  * 识别依据终局局面与完整着法，在本地完成——联机、人机、残局、观战结果一致。
  */
 function mateInfo(): CheckmateInfo | null {
-  if (S.reason !== '将死' || !S.winner) return null;
+  if (!S.winner) return null;
+  // 困毙（欠行）：未被将军但无子可走，直接以终局原因为展示名
+  if (S.reason === '困毙') return { pattern: KUNBI_PATTERN, alsoMatched: [], recognized: true };
+  if (S.reason !== '将死') return null;
   // 揭棋局面含暗子，无「经典杀法」可言：不做杀法识别，终局只显示将死
   if (S.jieqi) return null;
   // 残局从自定义局面开始，无法从标准开局回放着法（「被吃的棋子」需按终局盘面推导）
@@ -300,10 +308,10 @@ function showBannerOnce(key: string, run: () => void): void {
 function maybeBanner(): void {
   if (!$('screen-game').classList.contains('active')) return;
   const winner = S.winner;
-  if (S.status === 'over' && winner && S.reason === '将死') {
+  if (S.status === 'over' && winner && (S.reason === '将死' || S.reason === '困毙')) {
     const mate = mateInfo();
     const id = mate?.pattern.id ?? 'generic';
-    const label = mate ? mate.pattern.label : '将死';
+    const label = mate ? mate.pattern.label : S.reason === '困毙' ? '困毙' : '将死';
     showBannerOnce(`mate:${id}:${S.moveSeq}`, () => showBanner(bannerContent('mate', { label })));
   } else if (S.status === 'playing' && S.check) {
     showBannerOnce(`check:${S.turn}:${S.moveSeq}`, () => showBanner(bannerContent('check')));
@@ -353,7 +361,7 @@ function applyMoveEffects(before: Board, move: Move, seq: number): void {
   // 开局招法提示：仅标准开局，且恰为红方首着那一步
   if (!S.endgame) {
     const opening = detectOpening(S.history);
-    if (opening && opening.index === S.history.length - 1) text = `开局：${opening.name}`;
+    if (opening && opening.index === S.history.length - 1) text = opening.name;
   }
   if (hits.length) {
     S.fx = { seq, hits };

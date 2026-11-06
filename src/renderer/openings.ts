@@ -12,7 +12,7 @@ import { Move } from '../shared/types.js';
 
 /** 开局提示 */
 export interface OpeningHint {
-  /** 开局名（如「当头炮（中炮）」） */
+  /** 开局名（如「当头炮」；v3.8 起只给名称，不带别名与「开局：」前缀） */
   name: string;
   /** 建立该开局的着法下标（红方首着 = 0） */
   index: number;
@@ -24,10 +24,10 @@ export interface OpeningHint {
  * 故 (7,7) 的炮是「炮二」、(7,1) 的炮是「炮八」。
  */
 const RED_FIRST_OPENINGS: Record<string, string> = {
-  炮二平五: '当头炮（中炮）',
-  炮八平五: '当头炮（中炮）',
-  马二进三: '起马局（骑马局）',
-  马八进七: '起马局（骑马局）',
+  炮二平五: '当头炮',
+  炮八平五: '当头炮',
+  马二进三: '起马局',
+  马八进七: '起马局',
   相三进五: '飞相局',
   相七进五: '飞相局',
   兵七进一: '仙人指路',

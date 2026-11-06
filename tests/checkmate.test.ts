@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHECKMATE_PATTERNS,
+  KUNBI_PATTERN,
   capturedPieceAt,
   classifyCheckmate,
   classifyCheckmateFromHistory,
@@ -215,7 +216,7 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
-  it('八角马：马在士角与将对角定将，由车将军成杀', () => {
+  it('八脚马（八角马）：马在士角与将对角定将，由车将军成杀', () => {
     expectMate(
       [
         [1, 4, 'bK'],
@@ -362,6 +363,37 @@ describe('杀法识别：每种杀法一个终局局面', () => {
 });
 
 describe('杀法库与辅助函数', () => {
+  it('展示名统一为纯杀法名（v3.8：不再追加「杀」字），并含困毙条目', () => {
+    const labels = CHECKMATE_PATTERNS.map((p) => p.label);
+    for (const name of [
+      '钓鱼马',
+      '列马车',
+      '卧槽马',
+      '八脚马',
+      '侧面虎',
+      '马后炮',
+      '天地炮',
+      '夹车炮',
+      '重炮',
+      '对面笑',
+      '闷宫',
+      '闷杀',
+      '双车错',
+      '海底捞月',
+      '铁门栓',
+      '双将',
+    ]) {
+      expect(labels, `缺少杀法名：${name}`).toContain(name);
+    }
+    // 旧展示名（带「杀」字的同义写法）已不再出现
+    expect(labels).not.toContain('马后炮杀');
+    expect(labels).not.toContain('夹车炮杀');
+    expect(labels).not.toContain('八角马');
+    // 困毙：单独导出，不参与将死匹配
+    expect(KUNBI_PATTERN).toMatchObject({ id: 'kunbi', name: '困毙', label: '困毙' });
+    expect(CHECKMATE_PATTERNS.map((p) => p.id)).not.toContain('kunbi');
+  });
+
   it('杀法库条目 id / 名称唯一，且包含兜底条目与新增「列马车」', () => {
     const ids = CHECKMATE_PATTERNS.map((p) => p.id);
     const names = CHECKMATE_PATTERNS.map((p) => p.name);

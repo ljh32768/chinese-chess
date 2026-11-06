@@ -13,10 +13,10 @@ const mv = (from: Pos, to: Pos): Move => ({ from, to });
 
 describe('开局招法识别 detectOpening', () => {
   const cases: Array<[string, Pos, Pos]> = [
-    ['当头炮（中炮）', [7, 7], [7, 4]], // 炮二平五
-    ['当头炮（中炮）', [7, 1], [7, 4]], // 炮八平五
-    ['起马局（骑马局）', [9, 7], [7, 6]], // 马二进三
-    ['起马局（骑马局）', [9, 1], [7, 2]], // 马八进七
+    ['当头炮', [7, 7], [7, 4]], // 炮二平五
+    ['当头炮', [7, 1], [7, 4]], // 炮八平五
+    ['起马局', [9, 7], [7, 6]], // 马二进三
+    ['起马局', [9, 1], [7, 2]], // 马八进七
     ['飞相局', [9, 6], [7, 4]], // 相三进五
     ['飞相局', [9, 2], [7, 4]], // 相七进五
     ['仙人指路', [6, 2], [5, 2]], // 兵七进一
@@ -47,7 +47,16 @@ describe('开局招法识别 detectOpening', () => {
 
   it('只取红方首着：其后手不影响识别（index 仍为 0）', () => {
     const history = [mv([7, 7], [7, 4]), mv([0, 7], [2, 6])]; // 炮二平五 + 黑 马8进7
-    expect(detectOpening(history)).toEqual({ name: '当头炮（中炮）', index: 0 });
+    expect(detectOpening(history)).toEqual({ name: '当头炮', index: 0 });
+  });
+
+  it('开局名只给名称：不带别名括号（v3.8）', () => {
+    for (const [, from, to] of cases) {
+      const name = detectOpening([mv(from, to)])!.name;
+      expect(name).not.toContain('（');
+      expect(name).not.toContain('(');
+      expect(name).not.toContain('开局：');
+    }
   });
 
   it('纯函数：不改动传入的着法序列', () => {

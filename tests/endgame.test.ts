@@ -43,7 +43,14 @@ import {
   swapPieceSides,
   upsertCustomEndgame,
 } from '../src/shared/endgame.js';
-import { initBoard, isInCheck, legalMoves, makeMove, sideHasAnyMove } from '../src/shared/rules.js';
+import {
+  initBoard,
+  isInCheck,
+  judgeAfterMove,
+  legalMoves,
+  makeMove,
+  sideHasAnyMove,
+} from '../src/shared/rules.js';
 import { PIECE_LIMIT, remainingCount } from '../src/renderer/endgame-editor.js';
 import { Board, Cell, Move, PieceType, Side } from '../src/shared/types.js';
 
@@ -204,6 +211,39 @@ describe('残局题库：自检（checkPuzzle / checkEndgameBank）', () => {
       expect(r.minimal).toBe(true);
       expect(r.problems).toEqual([]);
     }
+  });
+
+  it('杀法示例：绝杀字样清单中的各杀法都有一道一步杀示例', () => {
+    const examples: Array<[string, string]> = [
+      ['diaoyuma', '钓鱼马'],
+      ['liemache', '列马车'],
+      ['wocaoma', '卧槽马'],
+      ['bajiaoma', '八脚马'],
+      ['cemianhu', '侧面虎'],
+      ['mahoupao', '马后炮'],
+      ['tiandipao', '天地炮'],
+      ['jiachepao', '夹车炮'],
+      ['chongpao', '重炮'],
+      ['bailianjiang', '对面笑'],
+      ['kunbi', '困毙'],
+      ['mengong', '闷宫'],
+      ['mengsha', '闷杀'],
+      ['shuangchecuo', '双车错'],
+      ['tiemenshuan', '铁门栓'],
+      ['shuangjiang', '双将'],
+    ];
+    for (const [id, name] of examples) {
+      const p = PUZZLES.find((x) => x.id === id);
+      expect(p, `缺少示例：${id}`).toBeTruthy();
+      expect(p!.name).toBe(name);
+      expect(p!.goalMoves).toBe(1);
+      expect(checkPuzzle(p!).ok, `${id}：${checkPuzzle(p!).problems.join('、')}`).toBe(true);
+    }
+    // 新增的困毙示例：一步走成欠行（未被将军但对方无子可走）
+    const k = PUZZLES.find((x) => x.id === 'kunbi')!;
+    const board = buildPuzzleBoard(k);
+    makeMove(board, [2, 5], [1, 5]);
+    expect(judgeAfterMove(board, 'b')).toEqual({ winner: 'r', reason: '困毙' });
   });
 
   it('自检能抓出「缺少将/帅」与「棋子越界 / 重叠」', () => {

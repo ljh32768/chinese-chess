@@ -208,7 +208,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 
 在 v1.4 的 Canvas + 素材渲染之上，给「选子 / 落子」与「将军 / 将死」补上动效反馈：
 **点击棋子即抬起**，走子时在抬起状态上平移、落点再放下；将军 / 绝杀在棋盘**正中**弹**纯文字大字**
-（v3.7 起去掉黑色圆底 / 圆框 / 暗红斜线与下方小字，改为楷体加粗大字；将军显示「将军」，绝杀直接显示具体杀法名），
+（v3.7 起去掉黑色圆底 / 圆框 / 暗红斜线与下方小字，改为楷体加粗大字；将军显示「将军」，绝杀直接显示具体杀法名——v3.8 起为纯杀法名，困毙显示「困毙」），
 显示 2.5s 后渐出消失；被将军的将（帅）同时**颤抖**（闪电 / 颤抖与战术 / 开局提示见 §3.5.7）。
 原则同 v2.4：克制、可被 `prefers-reduced-motion` 关闭（信息仍保留）。
 
@@ -217,7 +217,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 点击抬起 / 落下（v2.9） | `board.ts` 的 `BoardView.lifts = [{ pos, t }]`（`t` 为 0..1 抬起进度）驱动；纯函数 `liftFrame()` 只在原交叉点升降（升高 `0.42×格距`、放大到 1.14、出现落影）。`app.ts` 点击己方棋子 → `liftPiece()`（同一时刻只抬起一枚，先前拾起的先落下），取消选中 / 点到空位 / 右键 / ESC → `lowerAllLifts()` 落回；单帧时长 `LIFT_MS = 200ms`，由 `requestAnimationFrame` 推进 |
 | 走子动画（抬起 → 移动 → 放下） | `BoardView.anim = { from, to, piece, t, startLifted }` 驱动；`moveAnimFrame()` 给出该帧的贴图坐标 / 缩放 / 抬起量 / 落影。三段式：**抬起**（0→0.28）→ **移动**（→0.72：保持抬起平移，缓动 `easeInOut`）→ **放下**（→1）。`startLifted` 为真（点击选中时已抬起）时**省去起身段**，直接从平移开始；对手 / AI 走子仍是完整三段。动画期间该棋子起点 / 终点格不再静态贴图，抬起的棋子与走子帧（`DrawOp.scale` 以圆盘中心为锚点缩放）连同椭圆落影（`ShadowOp`）画在最上层，先落影后棋子 |
 | 动画接线与时长 | `app.ts` 在联机 `move_applied`、本地人机 / 残局的走子后调用 `animateMove(from, to, startLifted)`，用 `requestAnimationFrame` 在 `MOVE_ANIM_MS = 460ms` 内推进（抬起与走子共用一条帧循环，只有「正在动」时才持续重绘，保持抬起时停帧）。`prefers-reduced-motion: reduce` 时不做抬起 / 走子动画（选中仍以压暗 `alpha 0.75` + 落点框表达）。终局紧随 `move_applied` 到达的 `game_over` 用 `applySnapshot(state, { keepAnim: true })` 保留在跑的动画；悔棋 / 重开 / `state` 全量同步清空动画与抬起状态 |
-| 提示内容（banner.ts） | `renderer/banner.ts`（纯数据、无 DOM）：`bannerContent(kind, opts)` 只组装大字——将军固定「将军」；**绝杀直接显示具体杀法名**（`opts.label`，如「马后炮杀」；缺省退回「绝杀」）。v3.7 起不再有副标题（下方小字已删除），也不再按杀法维护图案样式表 |
+| 提示内容（banner.ts） | `renderer/banner.ts`（纯数据、无 DOM）：`bannerContent(kind, opts)` 只组装大字——将军固定「将军」；**绝杀直接显示具体杀法名**（`opts.label`，**v3.8 起为纯名称**，如「马后炮」「八脚马」；困毙终局同样显示「困毙」；缺省退回「绝杀」）。v3.7 起不再有副标题（下方小字已删除），也不再按杀法维护图案样式表 |
 | 显示与动效 | 结构：`.chess-box > .board-stage`（相对定位，仅包住画布）内，画布之后放 `.board-banner`（绝对定位铺满、居中、`pointer-events: none`）> `#banner-name`（**纯文字大字**，无背景 / 无边框 / 无圆角）。`.board-banner.show` 触发 `@keyframes banner-cycle 2.5s`：渐入（0→14%）→ 保持（→80%）→ 渐出（→100%），`app.ts` 在 `BANNER_MS = 2500ms` 后移除并隐藏；`showBanner()` 只写 `#banner-name` 的 `data-kind`（check / mate）与文本；每次走子按局面判定（`maybeBanner()`），联机的 `game_over` 与 `move_applied` 用 `moveSeq` + 类型去重 |
 | 字体与配色（v3.7） | 大字用 `--font-chess`（`"STKaiti", "KaiTi", "楷体", "Kaiti SC", "LiSu", "隶书", "SimSun", serif`）并 `font-weight: 900` + 1px 深色描边加粗；将军 `#fff3d6`（58px）、绝杀 `#ff3b30`（46px，略小以免长杀法名超出棋盘），均带深色描边 / 阴影保证压在木纹棋盘上也清晰 |
 | 无障碍 / 减弱动效 | 提示条 `role="status" aria-live="assertive"`；`prefers-reduced-motion: reduce` 下**去掉缩放 / 淡入动效但保持可见**（信息不丢），2.5s 后由脚本隐藏 |
@@ -260,7 +260,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 棋盘上方提示条 | `.board-stage` 顶部绝对定位浮层 `#board-tactics`（`pointer-events: none`，**v3.7 起黑色方框**：`background: #000` / `border-radius: 0`，字用 `--font-chess` 楷体并 `font-weight: 900`），显示战术 `label`（无战术时不显示）；渐入渐出约 2.5s 后隐藏；`prefers-reduced-motion` 下去动效保持可见。**v3.4 起元素放大**：`font-size: 21px` / `letter-spacing: 5px` / `padding: 10px 26px`（小屏 `@media (max-width: 480px)` 收为 `17px` / `6px 16px`） |
 | 被威胁棋子闪电（board.ts） | `BoardView.threats?: Pos[] \| null` → `computeDrawList()` 在**棋子之后**推入 `BoltOp{ bolt: true, cx, cy, radius, color, alpha, seed }`（`cx/cy` 取 `cellCenter`，`seed = r*9 + c` **确定、禁用随机**；**v3.4 起基准半径放大为 `disc/2 + 12`**）；`renderBoard()` 画折线闪电 + 辉光（`lineWidth: 3`、`shadowBlur: 12`），闪烁 `alpha*(0.55 + 0.45*sin(time/90 + seed))`；`prefers-reduced-motion` 下静态不闪 |
 | 将颤抖（board.ts + app.ts） | `BoardView.kingShake?: { dx, dy } \| null` → `computeDrawList()` 对 `checkKing` 那枚棋子的 `DrawOp` 做 `x += dx; y += dy`；`app.ts boardView()` 在将军出现后的**短窗口**内按 `performance.now()` 生成 `dx = A*sin(t/28)、dy = A*cos(t/19)`，幅度 `A = spaceX*0.03`（约为原 `0.06` 的一半）并随时间线性**衰减到 0**，`SHAKE_MS = 1100ms` 后不再颤抖（**不一直抖**）；每次新将军（行棋方 + `moveSeq` 变化）重新起算；`prefersReducedMotion()` 时不抖。`syncPulse()` 在**将军或存在 `fx`** 时以约 **40ms** 重绘（抖动停止后仍为脉冲环续帧） |
-| 开局提示（`renderer/openings.ts`，纯函数） | `detectOpening(history: Move[]): { name: string; index: number } \| null`：从 `initBoard()` 回放，用 `notation.ts describeMove(board, from, to)` 取**红方首着**记谱查表——炮二平五 / 炮八平五 → 当头炮（中炮）；马二进三 / 马八进七 → 起马局（骑马局）；相三进五 / 相七进五 → 飞相局；兵七进一 / 兵三进一 → 仙人指路；炮二平四 / 炮八平六 → 士角炮；炮二平六 / 炮八平四 → 过宫炮。**仅标准开局**（`!S.endgame`）显示，命中时在 `#board-tactics` 显示「开局：X」 |
+| 开局提示（`renderer/openings.ts`，纯函数） | `detectOpening(history: Move[]): { name: string; index: number } \| null`：从 `initBoard()` 回放，用 `notation.ts describeMove(board, from, to)` 取**红方首着**记谱查表——炮二平五 / 炮八平五 → 当头炮；马二进三 / 马八进七 → 起马局；相三进五 / 相七进五 → 飞相局；兵七进一 / 兵三进一 → 仙人指路；炮二平四 / 炮八平六 → 士角炮；炮二平六 / 炮八平四 → 过宫炮。**名称只给简称，不带括号别名**（v3.8）。**仅标准开局**（`!S.endgame`）显示，命中时在 `#board-tactics` **只显示开局名**（如「当头炮」，不再加「开局：」前缀） |
 | 无障碍 / 减弱动效 | 上方提示条仅为视觉提示，不加 `aria-live`（避免与正中提示重复播报）；`prefers-reduced-motion: reduce` 下不做闪电闪烁与将颤抖，但提示文字与闪电静态形态仍可见 |
 | 明确不做 | 战术识别为**启发式提示**，不改变任何规则 / 胜负判定；绝杀时**不再叠加**战术提示与闪电（正中大字已表达）；同一时刻**最多显示 1 条战术** |
 
@@ -361,7 +361,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
   键盘 Tab 到按钮 / 列表行 / 挂板入口有金色焦点环；切屏淡入与弹层缩放淡入在
   `prefers-reduced-motion: reduce` 下被关闭；对局轮到自己时状态框为浅金实底（将军 / 终局仍为警示配色）；
   窄屏下轻提示自动换行、右上角入口超宽省略，页面无水平溢出。
-- v2.10 / v3.7 提示特效：将军 / 绝杀在棋盘正中显示**楷体加粗大字**（v3.7 起无黑底 / 无圆框 / 无小字，
-  将军为「将军」、**绝杀直接显示具体杀法名**）；被将军的将（帅）可见**颤抖**；
+- v2.10 / v3.7 / v3.8 提示特效：将军 / 绝杀在棋盘正中显示**楷体加粗大字**（v3.7 起无黑底 / 无圆框 / 无小字，
+  将军为「将军」、**绝杀直接显示具体杀法名**（纯名称，困毙显示「困毙」）；开局提示只显示开局名）；被将军的将（帅）可见**颤抖**；
   闪击 / 闪将 / 将军抽 / 串打 / 捉双的提示文字出现在**棋盘上方黑色方框**（楷体加粗）且**被威胁棋子周围有闪电**；
   开局首着给出「当头炮 / 起马局」等提示；开启「减少动态效果」后信息仍在但闪电 / 颤抖 / 渐入渐出被关闭。

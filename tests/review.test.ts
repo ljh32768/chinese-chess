@@ -118,8 +118,8 @@ describe('回顾列表文案', () => {
   });
 
   it('结果文案优先展示识别出的杀法（将死不再只显示「将死」）', () => {
-    expect(resultText({ winner: 'r', reason: '将死', killMethod: '马后炮杀' })).toBe('红胜（马后炮杀）');
-    expect(resultText({ winner: 'b', reason: '将死', killMethod: '双车错杀' })).toBe('黑胜（双车错杀）');
+    expect(resultText({ winner: 'r', reason: '将死', killMethod: '马后炮' })).toBe('红胜（马后炮）');
+    expect(resultText({ winner: 'b', reason: '将死', killMethod: '双车错' })).toBe('黑胜（双车错）');
     // 无杀法字段（旧记录 / 非将死）时退回结束原因
     expect(resultText({ winner: 'r', reason: '将死' })).toBe('红胜（将死）');
     expect(resultText({ winner: 'b', reason: '认输' })).toBe('黑胜（认输）');
@@ -133,11 +133,21 @@ describe('回顾列表文案', () => {
       moves: MATE_LINE,
     };
     const mate = mateOf(rec);
-    expect(mate?.pattern.label).toBe('夹车炮杀');
+    expect(mate?.pattern.label).toBe('夹车炮');
     expect(mate?.pattern.definition.length).toBeGreaterThan(0);
     // 非「将死」结束（认输 / 和棋）不展示杀法
     expect(mateOf({ ...rec, reason: '认输', winner: 'b' })).toBeNull();
     expect(mateOf({ ...rec, reason: '同意和棋', winner: null })).toBeNull();
+  });
+
+  it('困毙：复盘同样给出「困毙」终局条目', () => {
+    const rec: GameRecord = {
+      ...summary({ winner: 'r', reason: '困毙' }),
+      id: 'kunbi-1',
+      moveCount: 1,
+      moves: [{ from: [2, 5], to: [1, 5] }],
+    };
+    expect(mateOf(rec)?.pattern.label).toBe('困毙');
   });
 
   it('列表行：红黑方（玩家名） / 取先方式 / 时间 / 胜负', () => {

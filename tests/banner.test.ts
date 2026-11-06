@@ -13,11 +13,12 @@ describe('提示内容 bannerContent', () => {
     expect(c.name).toBe('将军');
   });
 
-  it('绝杀：大字直接显示具体杀法名', () => {
-    const c = bannerContent('mate', { label: '马后炮杀' });
+  it('绝杀：大字直接显示具体杀法名（纯名称，不带「杀」字）', () => {
+    const c = bannerContent('mate', { label: '马后炮' });
     expect(c.kind).toBe('mate');
-    expect(c.name).toBe('马后炮杀');
-    expect(bannerContent('mate', { label: '大刀剜心杀' }).name).toBe('大刀剜心杀');
+    expect(c.name).toBe('马后炮');
+    expect(bannerContent('mate', { label: '困毙' }).name).toBe('困毙');
+    expect(bannerContent('mate', { label: '八脚马' }).name).toBe('八脚马');
   });
 
   it('绝杀缺省：没有杀法名时大字退回「绝杀」', () => {

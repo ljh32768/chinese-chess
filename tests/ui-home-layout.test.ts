@@ -542,10 +542,11 @@ describe('v2.10 提示特效（黑色大圆、将颤抖、战术闪电与开局�
     expect(APP).toContain('S.threats = [];');
   });
 
-  it('战术 / 开局的文字放在棋盘上方提示条（不与正中圆环重复）', () => {
+  it('战术 / 开局的文字放在棋盘上方提示条（不与正中圆环重复）；开局只显示名称', () => {
     expect(APP).toContain('showTactics(text)');
     expect(APP).toContain('hits[0].label');
-    expect(APP).toContain('开局：');
+    expect(APP).toContain('text = opening.name');
+    expect(APP).not.toContain('开局：');
   });
 });
 
