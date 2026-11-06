@@ -20,11 +20,15 @@
  *    不照将走「串打 / 捉双 / 闪击」分支。
  *    「将军抽」的将军来源可为**直接将军或闪将**，被抽子可为**走子后直接攻击到的大子**，
  *    也可为**被照之将同线后方的大子**（对方应将、将移开该线后即落入照将直线子的攻击口——经典抽将）。
+ *    **被抽子须是这一步新造的威胁**——走子前我方就已能获利吃到的子与这步将军无关，不算「抽」。
  *    凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都要求**两者必然失去其一**，且**必须真能获利吃到**：
  *    对方无论怎样应着，都至少有一枚被攻击的子仍会被吃到，而这个「吃到」按**获利口径**
  *    （无根白吃 / 小换大，与吃子提示 `profitableTargets` 一致）成立——
  *    据此排除「被攻击子反吃攻击子」「垫子挡线」「移走炮架」以及**有根且不划算**等可两全的伪战术
  *    （对方弃子反吃即可两全，我方并未得子）。「获利口径」对将军抽 / 串打 / 捉双一视同仁。
+ *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
+ *    ② **移开的这枚子自身也带威胁**（走子后捉到、且走子前我方并未攻击的大子）。两条件缺一不可——
+ *    只让线、移开的子自身不捉子（如躲子 / 闲走）不判闪击。
  */
 
 import { cloneBoard, findKing, isAttacked, legalMoves, pieceMoves, sideHasAnyMove } from './rules.js';
@@ -398,19 +402,28 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
   let wins: Array<Set<string>> | null = null;
   const winsOnce = (): Array<Set<string>> => wins ?? (wins = repliesOnce().map((nb) => winnableKeys(nb, me)));
 
+  // 走子前「可获利吃到的敌子位置键」——将军抽只认**这一步新造**的得子威胁
+  let winsBefore: Set<string> | null = null;
+  const winsBeforeOnce = (): Set<string> => winsBefore ?? (winsBefore = winnableKeys(before, me));
+
   // 严格判定顺序：先看是否照将——照将走「闪将 / 将军抽」分支，否则走「串打 / 捉双 / 闪击」分支。
   if (givesCheck && oppKing) {
     // 将军抽（将军抽车 / 马 / 炮）：本着一身二任——将军（直接将军或闪将）+ 同时捉大子，对方必失其一。
     // 被抽子两类：① 走子后直接攻击到的敌方大子（车 / 马 / 炮，攻击者可为走动的子或后方子力）；
     //             ② 被照之将同线后方的大子（将移开后落入照将直线子的攻击口——经典抽将）。
+    // 两类都须是**这一步新造**的威胁：走子前就已能获利吃到的子（我方原本就有的攻击）与这步将军无关，
+    // 不构成「抽」——否则「本来就白吃着的子 + 任意一步将军」都会被误报成将军抽。
     const candidates: Array<{ pos: Pos; piece: Piece }> = [];
     for (const { pos, piece } of piecesOf(after, opp)) {
-      if (isWorth(piece.t) && isAttacked(after, pos[0], pos[1], me)) candidates.push({ pos, piece });
+      if (!isWorth(piece.t) || !isAttacked(after, pos[0], pos[1], me)) continue;
+      if (winsBeforeOnce().has(key(pos))) continue; // 走子前已可获利吃到 → 非本步新威胁
+      candidates.push({ pos, piece });
     }
     for (const checker of attackersOf(after, oppKing, me)) {
       if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
       const victim = behindKingVictim(after, checker, oppKing, opp);
       if (!victim) continue;
+      if (winsBeforeOnce().has(key(victim))) continue; // 同上：走子前已可获利吃到 → 非本步新威胁
       const p = after[victim[0]][victim[1]];
       if (p) candidates.push({ pos: victim, piece: p });
     }
@@ -480,8 +493,19 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
         actors.push(actor);
       }
     }
-    if (threats.length) {
-      hits.push({ kind: 'discovered-attack', label: '闪击', actors, threats });
+    // 闪击 = **双向**双威胁：让线后后方子力显露的攻击之外，「移开的棋子」自身也必须带威胁
+    // （走子后捉到的、走子前我方并未攻击的大子）。只让线、移开的子自身什么也不捉（如躲子 / 闲走）
+    // 只是单纯让线，不构成闪击。（「将」由闪将分支负责；「献子」等无法静态判定的从略。）
+    const moverThreats = threats.length
+      ? piecesOf(after, opp).filter(
+          ({ pos, piece }) =>
+            isWorth(piece.t) && attacks(after, move.to, pos) && attackersOf(before, pos, me).length === 0,
+        )
+      : [];
+    if (moverThreats.length) {
+      const all = [...threats];
+      for (const { pos } of moverThreats) if (!all.some((t) => samePos(t, pos))) all.push(pos);
+      hits.push({ kind: 'discovered-attack', label: '闪击', actors, threats: all });
     }
   }
 
