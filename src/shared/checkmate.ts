@@ -100,7 +100,8 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     id: 'tiemenshuan',
     name: '铁门栓',
     label: '铁门栓',
-    definition: '炮镇中路控住将门纵线，车或兵（卒）从肋道或底线切入、贴帅攻击成杀，也称「铁门闩」。',
+    definition:
+      '炮镇中路（将（帅）所在纵线）牵制士象，车或兵（卒）从底线或肋道贴帅（与将（帅）正交相邻）将军，把宫门栓死；也称「铁门闩」。',
   },
   {
     id: 'jiachepao',
@@ -169,7 +170,7 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     name: '对面笑',
     label: '对面笑',
     definition:
-      '利用将帅不得在同一路照面的规则：使帅（将）与对方将（帅）直接照面、或仅隔一个可被吃掉的棋子，封死出路；也叫「白脸将」「千里照面」。',
+      '利用将帅不得在同一路照面的规则：将（帅）走进某格即会照面而被封死，或将军的子正夹在双方将（帅）同一纵线之间、靠照面护住不能被吃；也叫「白脸将」「千里照面」。',
   },
   {
     id: 'daodao-wanxin',
@@ -304,12 +305,6 @@ function isDiaoyumaSquare(pos: Pos, mated: Side): boolean {
 function isCemianhuSquare(pos: Pos, mated: Side): boolean {
   const row = mated === 'b' ? 3 : 6;
   return pos[0] === row && SIDE_COLS.includes(pos[1]);
-}
-
-/** 将门：将（帅）正前方一格（仍须在九宫内） */
-function gatePos(king: Pos, mated: Side): Pos | null {
-  const front: Pos = [king[0] + (mated === 'b' ? 1 : -1), king[1]];
-  return inPalace(front[0], front[1], mated) ? front : null;
 }
 
 /** 宫心（花心）位：对方九宫中心 */
@@ -476,17 +471,18 @@ const MATCHERS: Match[] = [
       return own.length >= 1 && own.every((e) => e.piece?.t === 'A');
     },
   },
-  // 铁门栓：己方炮镇住将（帅）所在纵线（中路控门），车 / 兵（卒）贴帅攻击
+  // 铁门栓：炮镇中路（将（帅）所在纵线，牵制士象），车 / 兵（卒）从底线或肋道**贴帅**（与将（帅）正交相邻）将军，
+  // 把宫门「栓死」。旧判据要求将军子正好在将门（正前一格）或与将同纵线，漏掉了车贴帅一侧（底线 / 肋道）的典型构图。
   {
     pattern: PATTERN.tiemenshuan,
     match: (ctx) => {
       const k = ctx.an.king;
       const midCannon = piecesOf(ctx.board, ctx.an.winner, 'C').some(({ pos }) => pos[1] === k[1]);
       if (!midCannon) return false;
-      const gate = gatePos(k, ctx.an.mated);
       return ctx.an.checkers.some(
         (c) =>
-          (c.piece.t === 'R' || c.piece.t === 'P') && (c.pos[1] === k[1] || (!!gate && samePos(c.pos, gate))),
+          (c.piece.t === 'R' || c.piece.t === 'P') &&
+          Math.abs(c.pos[0] - k[0]) + Math.abs(c.pos[1] - k[1]) === 1,
       );
     },
   },
@@ -622,10 +618,21 @@ const MATCHERS: Match[] = [
     pattern: PATTERN.shuangjiang,
     match: (ctx) => ctx.an.checkers.length >= 2,
   },
-  // 对面笑（白脸将 / 千里照面）：将（帅）的出路受「将帅照面」规则限制
+  // 对面笑（白脸将 / 千里照面）：将（帅）的出路受「将帅照面」规则限制——
+  // ① 将（帅）走进某格就会与对方将（帅）同线照面（典型「白脸将」封口）；
+  // ② 或将（帅）想吃掉的将军子正夹在双方将（帅）同一纵线之间（「照面子」），靠照面规则护住它不能吃。
+  // 若照面只挡住「吃侧面将军子」、双方将（帅）本不在同一纵线（如车贴帅一侧的铁门栓），不算对面笑。
   {
     pattern: PATTERN.bailianjiang,
-    match: (ctx) => ctx.an.escapes.some((e) => e.blocked === 'face'),
+    match: (ctx) => {
+      const myKing = findKing(ctx.board, ctx.an.winner);
+      return ctx.an.escapes.some((e) => {
+        if (e.blocked !== 'face') return false;
+        const checker = ctx.an.checkers.find((c) => samePos(c.pos, e.pos));
+        if (!checker) return true; // 走进去照面 → 白脸将封口
+        return !!myKing && myKing[1] === ctx.an.king[1]; // 该子夹在双方将（帅）之间才算「照面子」
+      });
+    },
   },
   // 附加：大刀剜心（车强行吃去对方宫心士破防成杀）
   {
