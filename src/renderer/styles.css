@@ -405,6 +405,39 @@ body::before {
 }
 .login-status.ok { color: var(--ok); }
 .login-status.err { color: var(--err); }
+
+/* 单机应用（v3.29）：登录 / 注册表单下方的次要入口，免登录进入本地人机 / 残局 */
+.login-solo {
+  margin-top: 4px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 207, 122, 0.12);
+}
+.lg-btn.ghost {
+  height: 48px;
+  margin-top: 0;
+  font-size: 15px;
+  letter-spacing: 6px;
+  text-indent: 6px;
+  color: var(--gold);
+  background: rgba(201, 150, 60, 0.06);
+  border-color: rgba(201, 150, 60, 0.42);
+  box-shadow: none;
+}
+.lg-btn.ghost:hover {
+  filter: none;
+  color: var(--gold-bright);
+  background: rgba(201, 150, 60, 0.13);
+  border-color: var(--accent);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32);
+}
+.login-solo-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: var(--text-mute);
+  text-align: center;
+}
+
 .login-server {
   display: flex;
   align-items: center;

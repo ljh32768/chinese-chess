@@ -521,3 +521,16 @@ v2.1 实际使用中暴露的五个问题与修正（不改变「服务器权威
 | 兼容 | 服务端仍保留游客身份签发能力（协议与既有集成测试不变），仅客户端 UI 不再提供游客入口 |
 | 验证 | [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 覆盖首屏 / 用户页 / 头像 / 图标 / 放大契约；`npm test` 509 项通过 |
 
+## 14. v3.29 增量：登录首屏「单机应用」免登录入口（2026-11-07 完成）
+
+| 项 | 规格 |
+|---|---|
+| 动机 | 用户希望应用端进入时可直接玩单机（人机 / 残局），不必先注册账号；联机对局仍保留账号归属与席位恢复 |
+| 入口 | `index.html` 登录首屏表单下方新增 `.login-solo` 分区 + `#btn-solo`「单机应用」（`.lg-btn.ghost` 金色次要按钮），副标题「无需登录 · 直接玩人机对弈与残局挑战」；样式沿用木质 + 金色设计令牌 |
+| 单机进入 | `app.ts enterSoloMode()`：无账号时置 `S.solo = true`，关闭并置空 `net`、清除房间会话（`clearSession()`）与本地对局状态（`resetLocal()`），回到首页；账号入口显示「单机模式」，服务器入口显示「服务器：未连接」；已登录时退化为普通回首页 |
+| 联机守卫 | `needLoginForOnline()`：`createRoom()` / `showJoin()` / `openHistory()` 入口先校验；未登录时弹层「需要登录」（「去登录」→ `showLoginScreen()`，「留在单机」仅关闭弹层）；`enterFromServerScreen()` 未登录时仍回登录首屏 |
+| 状态复位 | `showLoginScreen()` / `logout()` / `auth_ok` 均把 `S.solo` 置 false；单机模式不写入 localStorage，重开应用仍先到登录首屏 |
+| 本地功能 | 人机对弈、残局挑战、自建残局、皮肤与音效不受影响（均不依赖账号）；单机模式下 AI 着法仍按原逻辑请求 `/api/ai/move`，失败回退本机纯 TS 引擎 |
+| 兼容 | 账号 / 联机协议与服务器 `AccountStore` 不变；服务端游客身份能力保留（集成测试不动），仅客户端 UI 不开放游客联机 |
+| 验证 | [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 新增「登录首屏提供「单机应用」免登录入口」，覆盖按钮 / 文案 / `enterSoloMode` / `needLoginForOnline` / 三个联机入口守卫与按钮样式；`npm test` 543 项通过 |
+

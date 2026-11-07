@@ -888,12 +888,13 @@ describe('v3.15 登录首屏、用户头像与整体放大', () => {
     expect(existsSync(path.join(ROOT, 'src', 'renderer', 'assets', 'img', 'symbol.png'))).toBe(true);
   });
 
-  it('未登录首屏是登录 / 注册；已登录才直接进首页；不再提供游客模式', () => {
+  it('未登录首屏是登录 / 注册（另提供单机应用）；已登录才直接进首页；不提供游客联机', () => {
     expect(HTML).toContain('id="screen-login"');
     expect(HTML).toContain('id="login-form"');
     expect(HTML).toContain('id="register-form"');
     expect(HTML).toContain('id="lg-user"');
     expect(HTML).toContain('id="rg-pass2"');
+    expect(HTML).toContain('id="btn-solo"');
     expect(HTML).not.toContain('游客');
     expect(APP).toContain('function showLoginScreen(');
     expect(APP).toContain('function submitAuth(');
@@ -905,6 +906,35 @@ describe('v3.15 登录首屏、用户头像与整体放大', () => {
     expect(init).toContain('if (S.account)');
     expect(init).toContain('showLoginScreen();');
     expect(init).not.toContain("show('screen-servers')");
+  });
+
+  it('登录首屏提供「单机应用」免登录入口（联机仍要求登录）', () => {
+    expect(HTML).toContain('id="btn-solo"');
+    expect(HTML).toContain('单机应用');
+    expect(HTML).toContain('无需登录');
+    expect(APP).toContain('function enterSoloMode(');
+    expect(APP).toContain('function needLoginForOnline(');
+    expect(APP).toContain("$('btn-solo').addEventListener('click', enterSoloMode);");
+    // 单机入口：断开联机连接并回首页（账号区显示「单机模式」）
+    const solo = APP.slice(
+      APP.indexOf('function enterSoloMode('),
+      APP.indexOf('function needLoginForOnline('),
+    );
+    expect(solo).toContain('net?.close()');
+    expect(solo).toContain('S.solo = true');
+    expect(solo).toContain("show('screen-home')");
+    // 联机入口（创建 / 加入房间、对局回顾）先校验登录；本地人机 / 残局不拦截
+    for (const fn of ['async function createRoom(', 'function showJoin(', 'function openHistory(']) {
+      const start = APP.indexOf(fn);
+      expect(start).toBeGreaterThan(-1);
+      expect(APP.slice(start, start + 200)).toContain('needLoginForOnline()');
+    }
+    expect(HTML).toContain('id="btn-create-ai"');
+    expect(HTML).toContain('id="btn-endgame"');
+    // 次要按钮样式（沿用金色木牌，弱化于主按钮）
+    expect(decl('.login-solo', 'border-top')).toContain('1px solid');
+    expect(decl('.lg-btn.ghost', 'height')).toBe('48px');
+    expect(decl('.login-solo-tip', 'font-size')).toBe('12px');
   });
 
   it('登录 / 注册表单：选项卡、浮动标签、密码显隐、错误行与服务器入口', () => {

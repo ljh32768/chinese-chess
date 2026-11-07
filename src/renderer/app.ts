@@ -205,6 +205,8 @@ const S = {
   guessPhase: null as null | 'grasp' | 'waitGrasp' | 'waitGuess',
   /** 当前账号（可选）：登录后对局记录归属账号，并支持跨设备恢复席位 */
   account: null as { token: string; username: string } | null,
+  /** 单机模式：登录首屏点「单机应用」免登录进入（仅本地玩法，联机入口需先登录） */
+  solo: false,
 };
 
 let net: Net | null = null;
@@ -1018,6 +1020,7 @@ function handleMessage(msg: ServerMessage): void {
       return;
     case 'auth_ok':
       S.account = { token: msg.token, username: msg.username };
+      S.solo = false;
       writeStore(TOKEN_KEY, msg.token);
       writeStore(USER_KEY, msg.username);
       renderAccountPanel();
@@ -1767,6 +1770,7 @@ function backToIndex(): void {
 
 /** 创建双人对战房间（口令可选，留空即任何人可加入；房间玩法在等待页选择） */
 async function createRoom(): Promise<void> {
+  if (!needLoginForOnline()) return;
   if (!requireServer()) return;
   const password = $<HTMLInputElement>('create-pass').value.trim();
   // 服务端房间的缺省取先方式是「房主执红」，客户端缺省是「猜先」：
@@ -2274,9 +2278,15 @@ function applyAvatars(): void {
 
 /** 首页右上角账号区：未登录显示入口，登录后显示头像 + 用户名 */
 function updateHomeChips(): void {
-  $('acct-chip-name').textContent = S.account ? S.account.username : '未登录';
+  $('acct-chip-name').textContent = S.account ? S.account.username : S.solo ? '单机模式' : '未登录';
   $('acct-chip').classList.toggle('on', !!S.account);
-  $('server-chip').textContent = S.server ? `服务器：${S.server.host}:${S.server.port}` : '服务器：未连接';
+  // 单机模式不保持联机连接：服务器入口显示未连接（登录后再由连接流程接管）
+  $('server-chip').textContent =
+    S.solo && !S.account
+      ? '服务器：未连接'
+      : S.server
+        ? `服务器：${S.server.host}:${S.server.port}`
+        : '服务器：未连接';
   applyAvatars();
 }
 
@@ -2340,12 +2350,47 @@ function setLoginFieldError(inputId: string, message: string): boolean {
 function showLoginScreen(): void {
   lowerAllLifts();
   closeModal();
+  S.solo = false;
   switchLoginTab('login');
   updateLoginServerStatus();
   const last = readStore(USER_KEY);
   if (last) $<HTMLInputElement>('lg-user').value = last;
   show('screen-login');
   void connectForLogin();
+}
+
+/**
+ * 「单机应用」：免登录进入首页（人机对弈 / 残局挑战等本地玩法）。
+ * 单机模式不保持联机连接，避免以免登录身份被带进联机房间；联机入口会提示先登录。
+ */
+function enterSoloMode(): void {
+  if (S.account) {
+    // 已登录时不会停在登录首屏；这里直接回首页（防御性处理）
+    backToIndex();
+    show('screen-home');
+    updateHomeChips();
+    return;
+  }
+  net?.close();
+  net = null;
+  clearSession();
+  resetLocal();
+  S.solo = true;
+  backToIndex();
+  show('screen-home');
+  updateHomeChips();
+  toast('已进入单机应用 · 人机 / 残局无需登录');
+}
+
+/** 联机入口的登录校验：单机模式未登录时弹层提示先登录（客户端不开放游客联机） */
+function needLoginForOnline(): boolean {
+  if (S.account) return true;
+  showModal({
+    title: '需要登录',
+    sub: '创建 / 加入房间与对局回顾需要登录账号；人机对弈、残局挑战可直接在单机应用中使用。',
+    buttons: [{ label: '去登录', primary: true, onClick: () => showLoginScreen() }, { label: '留在单机' }],
+  });
+  return false;
 }
 
 /** 登录首屏在后台静默尝试连接服务器（不切屏、不弹窗） */
@@ -2498,6 +2543,7 @@ function resetAvatar(): void {
 /** 退出登录：清除凭据并回到登录首屏（不再提供游客模式） */
 function logout(): void {
   S.account = null;
+  S.solo = false;
   writeStore(TOKEN_KEY, null);
   // 保留 USER_KEY 作为下次登录的用户名预填；没有 token 不会被误判为已登录
   clearSession();
@@ -2526,6 +2572,7 @@ function setPwdVisible(visible: boolean): void {
 
 /** 打开「加入房间」：先确认已连接服务器，再拉取房间列表 */
 function showJoin(): void {
+  if (!needLoginForOnline()) return;
   setJoinMsg('');
   setPwdVisible(false);
   $('room-list').replaceChildren();
@@ -3002,6 +3049,7 @@ function onCell([r, c]: Pos): void {
 
 /** 打开对局回顾（需要服务器提供记录接口） */
 function openHistory(): void {
+  if (!needLoginForOnline()) return;
   if (!S.server) {
     toast('请先连接服务器');
     void openServersScreen();
@@ -3063,6 +3111,7 @@ function bindEvents(): void {
     });
   });
   $('btn-login-server').addEventListener('click', () => void openServersScreen());
+  $('btn-solo').addEventListener('click', enterSoloMode);
 
   // 首页
   $('btn-create').addEventListener('click', () => showHomePanel('create'));
