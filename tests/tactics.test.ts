@@ -400,17 +400,17 @@ describe('闪击（discovered-attack）', () => {
   });
 });
 
-describe('将军抽（check-fork）', () => {
-  it('走动的车将军且新抽到马（马应将后仍无法脱身）→ 将军抽马', () => {
+describe('照将分支（闪将 / 将军抽）', () => {
+  it('走动的车将军且新抽到马（动的子将军）→ 判闪将（v3.22 动的子将军口径）', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 2, 0, 'R', 'r');
     put(b, 4, 4, 'N', 'b'); // 被抽的马：走子前红车够不到，走子后落到车的 4 路上
     const hits = run(b, [2, 0], [2, 4]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('check-fork');
-    expect(hits[0].label).toBe('将军抽马');
-    expect(hits[0].threats).toEqual([[4, 4]]);
+    expect(hits[0].kind).toBe('discovered-check');
+    expect(hits[0].label).toBe('闪将');
+    expect(hits[0].threats).toEqual([[0, 4]]);
   });
 
   it('原本就已能合法吃到的敌子：另一子将军后不判将军抽', () => {
@@ -422,25 +422,20 @@ describe('将军抽（check-fork）', () => {
     expect(run(b, [4, 6], [2, 5])).toHaveLength(0);
   });
 
-  it('同时抽到车与炮、两子皆无救 → 取最高价值标签（车 > 炮）', () => {
+  it('走动的马同时抽到车与炮 → 判闪将（动的子将军，不再报将军抽X）', () => {
     const b = emptyBoard();
     kings(b); // 红帅 (7,3)、黑将 (0,4)
-    // 马跳到 (2,5) 照将（马腿 (1,5) 空），同时咬住 (3,7) 的黑车与 (4,4) 的黑炮；
-    // 二者既不能反吃马、也够不到马腿 (1,5) 去蹩腿挡将，故皆必失，取最高价值「车」。
     put(b, 4, 6, 'N', 'r');
     put(b, 3, 7, 'R', 'b');
     put(b, 4, 4, 'C', 'b');
     const hits = run(b, [4, 6], [2, 5]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('check-fork');
-    expect(hits[0].label).toBe('将军抽车');
-    expect(hits[0].threats).toEqual([
-      [3, 7],
-      [4, 4],
-    ]);
+    expect(hits[0].kind).toBe('discovered-check');
+    expect(hits[0].label).toBe('闪将');
+    expect(hits[0].threats).toEqual([[0, 4]]);
   });
 
-  it('被抽子可移去「蹩马腿」同时挡将（对方能两全）→ 只抽得另一子（将军抽炮）', () => {
+  it('被抽子可移去「蹩马腿」同时挡将（对方能两全）→ 动的子将军仍判闪将', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 4, 6, 'N', 'r');
@@ -448,9 +443,8 @@ describe('将军抽（check-fork）', () => {
     put(b, 4, 4, 'C', 'b'); // 被抽的炮：无救
     const hits = run(b, [4, 6], [2, 5]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('check-fork');
-    expect(hits[0].label).toBe('将军抽炮');
-    expect(hits[0].threats).toEqual([[4, 4]]);
+    expect(hits[0].kind).toBe('discovered-check');
+    expect(hits[0].label).toBe('闪将');
   });
 
   it('被抽的炮走子前就已能吃到（非本步新造）→ 不判将军抽炮', () => {
@@ -464,19 +458,18 @@ describe('将军抽（check-fork）', () => {
     expect(run(b, [2, 0], [2, 4])).toHaveLength(0);
   });
 
-  it('将军同时咬住有根炮（不要求获利）→ 判将军抽炮', () => {
+  it('将军同时咬住有根炮（动的子将军）→ 判闪将', () => {
     const before = screenshotBoard();
     before[2][2] = null;
     put(before, 4, 1, 'N', 'r'); // 还原最后一步：红马 (4,1) 跳到 (2,2)
-    // 跳到 (2,2) 后照将，同时咬住 (3,4) 的黑炮；该炮虽有黑马保护，但按「能合法吃到」口径仍算威胁
+    // 跳到 (2,2) 后照将，同时咬住 (3,4) 的黑炮；按 v3.22「动的子将军」口径判闪将
     const hits = run(before, [4, 1], [2, 2]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('check-fork');
-    expect(hits[0].label).toBe('将军抽炮');
-    expect(hits[0].threats).toEqual([[3, 4]]);
+    expect(hits[0].kind).toBe('discovered-check');
+    expect(hits[0].label).toBe('闪将');
   });
 
-  it('闪将（让线车照将）+ 走动的马同时捉车 → 将军抽车（将军来源可为闪将）', () => {
+  it('让线车照将 + 走动的马同时捉车（动的子也将军）→ 判闪将', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 0, 0, 'R', 'r'); // 让线后方车 → 照将
@@ -484,21 +477,19 @@ describe('将军抽（check-fork）', () => {
     put(b, 1, 5, 'R', 'b');
     const hits = run(b, [0, 2], [2, 3]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('check-fork');
-    expect(hits[0].label).toBe('将军抽车');
-    expect(hits[0].threats).toEqual([[1, 5]]);
+    expect(hits[0].kind).toBe('discovered-check');
+    expect(hits[0].label).toBe('闪将');
   });
 
-  it('经典抽将：走动的车照将、被照之将同线后方的大子在应将后落入攻击口 → 将军抽车', () => {
+  it('经典抽将（动的车本人照将）→ 判闪将（v3.22 动的子将军口径）', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 2, 0, 'R', 'r'); // 走到 (0,0) 沿第 0 行照将
     put(b, 0, 7, 'R', 'b'); // 被照之将同线后方的大子（将移开该线后即被吃）
     const hits = run(b, [2, 0], [0, 0]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('check-fork');
-    expect(hits[0].label).toBe('将军抽车');
-    expect(hits[0].threats).toEqual([[0, 7]]);
+    expect(hits[0].kind).toBe('discovered-check');
+    expect(hits[0].label).toBe('闪将');
   });
 
   it('走子只照将、并未同时捉大子 → 仍是闪将（低价值子不算「抽」）', () => {
@@ -627,17 +618,17 @@ describe('捉双（fork）', () => {
 });
 
 describe('优先级与边界', () => {
-  it('闪将结构（移开的子不将军）→ 判为「闪将」，不再误报将军抽车（v3.22 动的子须将军）', () => {
+  it('让线子将军（移开的子不将军）+ 将后同线大子 → 判将军抽车（v3.22 反证：将军抽由让线子发出）', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 0, 0, 'R', 'r');
     put(b, 0, 2, 'N', 'r');
-    put(b, 0, 6, 'R', 'b'); // 让线后不仅照将，将之后还有一枚敌车；但将军来自后方车而非移开的马
+    put(b, 0, 6, 'R', 'b'); // 让线后不仅照将，将之后还有一枚敌车
     const hits = run(b, [0, 2], [2, 1]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('discovered-check');
-    expect(hits[0].label).toBe('闪将');
-    expect(hits[0].threats).toEqual([[0, 4]]);
+    expect(hits[0].kind).toBe('check-fork');
+    expect(hits[0].label).toBe('将军抽车');
+    expect(hits[0].threats).toEqual([[0, 6]]);
   });
 
   it('一步将死（绝杀）→ 不返回任何战术（由正中圆环表达）', () => {

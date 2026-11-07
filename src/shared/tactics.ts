@@ -474,38 +474,55 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
 
   // 严格判定顺序：先看是否照将——照将走「闪将 / 将军抽」分支，否则走「串打 / 捉双 / 闪击」分支。
   if (givesCheck && oppKing) {
-    // 将军抽（将军抽车 / 马 / 炮）：**移开的这枚棋子本人**将军 + 同时捉大子，对方必失其一。
+    // 将军抽（将军抽车 / 马 / 炮）：将军 + 同时捉大子，对方必失其一。
     // 被抽子两类：① 走子后直接攻击到的敌方大子（车 / 马 / 炮，攻击者可为走动的子或后方子力）；
     //             ② 被照之将同线后方的大子（将移开后落入照将直线子的攻击口——经典抽将）。
     // 两类都须是**这一步新造**的威胁：走子前就已能合法吃到的子（我方原本就有的攻击）与这步将军无关，
     // 不构成「抽」——否则「本来就白吃着的子 + 任意一步将军」都会被误报成将军抽。
-    let lost: Array<{ pos: Pos; piece: Piece }> = [];
-    if (moverChecks) {
-      const candidates: Array<{ pos: Pos; piece: Piece }> = [];
-      for (const { pos, piece } of piecesOf(after, opp)) {
-        if (!isWorth(piece.t) || !isAttacked(after, pos[0], pos[1], me)) continue;
-        if (winsBeforeOnce().has(key(pos))) continue; // 走子前已可吃到 → 非本步新威胁
-        candidates.push({ pos, piece });
-      }
-      for (const checker of checkers) {
-        if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
-        const victim = behindKingVictim(after, checker, oppKing, opp);
-        if (!victim) continue;
-        if (winsBeforeOnce().has(key(victim))) continue; // 同上：走子前已可吃到 → 非本步新威胁
-        const p = after[victim[0]][victim[1]];
-        if (p) candidates.push({ pos: victim, piece: p });
-      }
-      // 去重后逐个验证「对方必失其一」——被抽子须在对方每种应着后都仍能被我方合法吃到
-      const w = winsOnce();
-      const seen = new Set<string>();
-      lost = candidates.filter(({ pos }) => {
-        const k = key(pos);
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return unavoidablyLost(w, pos);
-      });
+    const candidates: Array<{ pos: Pos; piece: Piece }> = [];
+    for (const { pos, piece } of piecesOf(after, opp)) {
+      if (!isWorth(piece.t) || !isAttacked(after, pos[0], pos[1], me)) continue;
+      if (winsBeforeOnce().has(key(pos))) continue; // 走子前已可吃到 → 非本步新威胁
+      candidates.push({ pos, piece });
     }
-    if (lost.length) {
+    for (const checker of checkers) {
+      if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
+      const victim = behindKingVictim(after, checker, oppKing, opp);
+      if (!victim) continue;
+      if (winsBeforeOnce().has(key(victim))) continue; // 同上：走子前已可吃到 → 非本步新威胁
+      const p = after[victim[0]][victim[1]];
+      if (p) candidates.push({ pos: victim, piece: p });
+    }
+    // 去重后逐个验证「对方必失其一」——被抽子须在对方每种应着后都仍能被我方合法吃到
+    const w = winsOnce();
+    const seen = new Set<string>();
+    const lost = candidates.filter(({ pos }) => {
+      const k = key(pos);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return unavoidablyLost(w, pos);
+    });
+    // 闪将：**移开的这枚棋子本人**将军（「动的子将军」，v3.22 按用户口径）；
+    // 此外的传统让线闪将（移开的子不将军、由后方车 / 炮让线成将）仍保留：
+    // 走动的子须**真的离开该线**（走子后仍停在线上当炮架只是「换架抽子」，不算闪将），
+    // 且将军须**本步新造**（走子前对方将帅并未被照）、checker **能合法吃到**将帅
+    // （被牵制时看似照将、真吃过去却会送将，属于伪将军）。
+    const discovered =
+      !attackersOf(before, oppKing, me).length &&
+      checkers.some(
+        (c) =>
+          !samePos(c, move.to) &&
+          isLinePiece(after, c) &&
+          openedLine(c, oppKing, move.from) &&
+          !restsOnLine(c, oppKing, move.to) &&
+          canCapture(after, c, oppKing),
+      );
+    // 动的子自己将军且有「闪」的成效（另有子必失 / 同时让线成将）→ 闪将；
+    // 动的子不将军时：让线成将且未同时捉大子 → 闪将，同时捉大子 → 将军抽。
+    const flash = moverChecks ? lost.length > 0 || discovered : !lost.length && discovered;
+    if (flash) {
+      hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
+    } else if (lost.length) {
       const best = lost.reduce((a, b) => (VALUE[b.piece.t] > VALUE[a.piece.t] ? b : a));
       hits.push({
         kind: 'check-fork',
@@ -513,22 +530,6 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
         actors: [move.to],
         threats: lost.map((c) => c.pos),
       });
-    } else {
-      // 闪将：只将军、未同时捉大子——存在一个「非走动的子」的 checker 因让线而成将（checker 限车 / 炮）；
-      // 走动的子须**真的离开该线**（走子后仍停在线上当炮架只是「换架抽子」，不算闪将）。
-      // 该将军还须是**本步新造**（走子前对方将帅并未被照）且**能合法吃到**将帅——
-      // checker 被牵制时虽然「照」到将帅，真吃过去却会送将，属于伪将军，不算闪将。
-      const discovered =
-        !attackersOf(before, oppKing, me).length &&
-        checkers.some(
-          (c) =>
-            !samePos(c, move.to) &&
-            isLinePiece(after, c) &&
-            openedLine(c, oppKing, move.from) &&
-            !restsOnLine(c, oppKing, move.to) &&
-            canCapture(after, c, oppKing),
-        );
-      if (discovered) hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
     }
   } else {
     // 串打：走动的车 / 炮沿同一条射线攻击两枚值得捉的敌子，且对方无法两全（必失其一、且真能吃到）
