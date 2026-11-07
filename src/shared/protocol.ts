@@ -9,6 +9,7 @@
 import {
   FirstMode,
   GameSnapshot,
+  GameVariant,
   GuessChoice,
   GuessResult,
   Move,
@@ -76,6 +77,8 @@ export type ClientMessage =
   | { type: 'wait_new_opponent' }
   /** 房主选择先手（红方）归属方式；仅等待阶段有效 */
   | { type: 'choose_first'; mode: FirstMode }
+  /** 房主选择房间玩法（象棋 / 揭棋）；仅等待阶段有效 */
+  | { type: 'choose_variant'; variant: GameVariant }
   /** 房主「抓子」（猜先第一步）：抓单 / 抓双，作为隐藏结果 */
   | { type: 'grasp'; choice: GuessChoice }
   /** 对手猜先应答（猜单 / 猜双） */

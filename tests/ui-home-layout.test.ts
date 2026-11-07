@@ -311,6 +311,19 @@ describe('其他界面约定', () => {
     expect(CSS).not.toContain('side_opt');
   });
 
+  it('等待页「取先方式」下方新增房间玩法下拉框（默认象棋），创建房间时不再选择玩法', () => {
+    expect(HTML).toContain('for="first-mode"');
+    expect(HTML).toContain('for="room-variant"');
+    expect(HTML.indexOf('id="first-mode"')).toBeLessThan(HTML.indexOf('id="room-variant"'));
+    expect(HTML).toMatch(/<select id="room-variant">[\s\S]*?<option value="xiangqi" selected>/);
+    expect(HTML).toContain('<option value="jieqi">揭棋（暗棋）</option>');
+    // 创建房间面板不再有揭棋勾选，改为等待页选择
+    expect(HTML).not.toContain('create-jieqi');
+    expect(APP).toContain('function chooseVariant(');
+    expect(APP).toContain("type: 'choose_variant'");
+    expect(APP).toContain("mode: 'pvp'");
+  });
+
   it('对局回顾支持「全部对局 / 我的历史」切换（含身份说明位）', () => {
     expect(HTML).toContain('id="tab-history-all"');
     expect(HTML).toContain('id="tab-history-mine"');
@@ -714,16 +727,16 @@ describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', 
 });
 
 describe('人机对弈「我执红 / 我执黑」选择契约', () => {
-  it('人机对弈面板提供「我执红（先行）/ 我执黑（后行）」单选，默认执红', () => {
-    expect(HTML).toContain('name="ai-side"');
-    expect(HTML).toContain('value="r" checked> 我执红（先行）');
-    expect(HTML).toContain('value="b"> 我执黑（后行）');
-    expect(HTML).toContain('「我执黑」由 AI（红方）先走');
+  it('人机对弈面板用下拉框选择我执哪一方，默认红方（先行）', () => {
+    expect(HTML).toContain('<select id="ai-side">');
+    expect(HTML).toContain('<option value="r" selected>红方（先行）</option>');
+    expect(HTML).toContain('<option value="b">黑方（后行）</option>');
+    expect(HTML).toContain('「黑方（后行）」由 AI（红方）先走');
   });
 
   it('app.ts：按所选方设 S.side，AI 执对方，并保证我执黑时由 AI 先行', () => {
     expect(APP).toContain('function aiSideChoice(');
-    expect(APP).toContain("el?.value === 'b' ? 'b' : 'r'");
+    expect(APP).toContain("$<HTMLSelectElement>('ai-side').value === 'b' ? 'b' : 'r'");
     expect(APP).toContain('S.side = aiSideChoice();');
     // AI 执玩家的对方（我执红 → AI 黑；我执黑 → AI 红）
     expect(APP).toContain("S.side === 'r' ? 'b' : 'r'");
@@ -759,24 +772,33 @@ describe('v3.5 重复局面「请变招」提示契约', () => {
 describe('v3.0 揭棋（暗棋）入口与接线契约', () => {
   const BOARD = readFileSync(path.join(ROOT, 'src', 'renderer', 'board.ts'), 'utf8');
 
-  it('人机对弈面板提供「标准象棋 / 揭棋（暗棋）」模式单选', () => {
-    expect(HTML).toContain('name="ai-variant"');
-    expect(HTML).toContain('value="xiangqi"');
-    expect(HTML).toContain('value="jieqi"');
-    expect(HTML).toContain('揭棋（暗棋）');
+  it('人机对弈面板用下拉框选择棋种 / 我执 / 难度，默认标准象棋与中级', () => {
+    expect(HTML).toMatch(/<select id="ai-variant">[\s\S]*?<option value="xiangqi" selected>/);
+    expect(HTML).toContain('<option value="jieqi">揭棋（暗棋）</option>');
+    expect(HTML).toMatch(/<select id="ai-side">[\s\S]*?<option value="r" selected>/);
+    expect(HTML).toMatch(/<select id="ai-depth">[\s\S]*?<option value="3" selected>/);
+    // 冗余的单选项已移除
+    expect(HTML).not.toContain('name="ai-variant"');
+    expect(HTML).not.toContain('name="ai-side"');
+    expect(HTML).not.toContain('name="ai-depth"');
+    expect(APP).toContain("$<HTMLSelectElement>('ai-variant')");
+    expect(APP).toContain("$<HTMLSelectElement>('ai-depth')");
   });
 
-  it('创建房间面板提供「揭棋（暗棋）房间」勾选', () => {
-    expect(HTML).toContain('id="create-jieqi"');
-    expect(HTML).toContain('揭棋（暗棋）房间');
+  it('房间玩法在等待页选择（象棋默认 / 揭棋可选）', () => {
+    expect(HTML).toMatch(/<select id="room-variant">[\s\S]*?<option value="xiangqi" selected>/);
+    expect(HTML).toContain('<option value="jieqi">揭棋（暗棋）</option>');
+    expect(APP).toContain('function renderVariantPick(');
+    expect(APP).toContain("sel.value = S.jieqi ? 'jieqi' : 'xiangqi';");
   });
 
-  it('渲染层接线：本地揭棋开局 / 揭棋房间 / 暗子统计 / 吃子按快照', () => {
+  it('渲染层接线：本地揭棋开局 / 等待页切换玩法 / 暗子统计 / 吃子按快照', () => {
     // 本地人机揭棋：按面板选项以洗子开局
     expect(APP).toContain('localGame.openJieqi()');
     expect(APP).toContain("aiVariant() === 'jieqi'");
-    // 揭棋房间
-    expect(APP).toContain("mode: jieqi ? 'jieqi' : 'pvp'");
+    // 揭棋房间：建房固定为 pvp，玩法在等待页通过 choose_variant 下发
+    expect(APP).toContain("mode: 'pvp'");
+    expect(APP).toContain("type: 'choose_variant'");
     // 暗子统计与揭棋标记
     expect(APP).toContain('coveredCount(S.board');
     // 吃子与变体随快照 / 广播更新

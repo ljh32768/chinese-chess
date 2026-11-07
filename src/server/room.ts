@@ -17,6 +17,7 @@ import {
   FIRST_MODE_LABEL,
   FirstMode,
   GameRecord,
+  GameVariant,
   GuessChoice,
   GuessResult,
   Move,
@@ -41,6 +42,11 @@ export const other = (s: Side): Side => (s === 'r' ? 'b' : 'r');
 const FIRST_MODES: readonly FirstMode[] = ['r', 'b', 'random', 'guess'];
 const isFirstMode = (x: unknown): x is FirstMode => FIRST_MODES.includes(x as FirstMode);
 const isGuessChoice = (x: unknown): x is GuessChoice => x === 'odd' || x === 'even';
+
+/** 房间玩法白名单（象棋 / 揭棋）与展示名 */
+const VARIANTS: readonly GameVariant[] = ['xiangqi', 'jieqi'];
+const isGameVariant = (x: unknown): x is GameVariant => VARIANTS.includes(x as GameVariant);
+const VARIANT_LABEL: Record<GameVariant, string> = { xiangqi: '象棋', jieqi: '揭棋（暗棋）' };
 
 /** 房间对服务器暴露的依赖（服务器注入，避免房间反向依赖服务器实现） */
 export interface RoomDeps {
@@ -91,6 +97,8 @@ export class Room {
   private readonly invited = new Set<string>();
 
   private readonly aiDepth: number;
+  /** 房间玩法：等待阶段由房主选择（创建时固定为象棋；mode='jieqi' 的旧客户端仍兼容） */
+  private variant: GameVariant;
   private firstMode: FirstMode = 'r';
   private ownerSide: Side = 'r';
   private guessStage: 'grasp' | 'guess' | null = null;
@@ -124,12 +132,13 @@ export class Room {
     this.mode = mode;
     this.pwd = password;
     this.aiDepth = aiDepth;
+    this.variant = mode === 'jieqi' ? 'jieqi' : 'xiangqi';
     if (mode === 'ai') {
       // AI 占虚拟黑席：没有连接，不参与宽限
       this.b = { conn: null, player: AI_PLAYER, seat: 'b', graceTimer: null };
     } else {
       // 揭棋房间：与双人房同构，仅开局方式与快照抹除不同
-      if (mode === 'jieqi') this.game.variant = 'jieqi';
+      if (this.variant === 'jieqi') this.game.variant = 'jieqi';
       // 双人房：创建后即进入「等待对手」状态
       this.game.reset('waiting');
     }
@@ -206,13 +215,13 @@ export class Room {
     return !!this.a?.conn || !!this.b?.conn || this.spectators.size > 0;
   }
 
-  /** 房间摘要（房间列表用） */
+  /** 房间摘要（房间列表用）：揭棋玩法以 `jieqi` 展示，供列表加标记 */
   summary(): RoomSummary {
     return {
       roomId: this.id,
       players: (this.a?.conn ? 1 : 0) + (this.b?.conn ? 1 : 0),
       status: this.game.status,
-      mode: this.mode,
+      mode: this.mode === 'pvp' && this.variant === 'jieqi' ? 'jieqi' : this.mode,
       locked: this.password !== null,
       ownerName: this.a?.player.name ?? '—',
     };
@@ -472,6 +481,17 @@ export class Room {
         this.maybeStart();
         return;
       }
+      case 'choose_variant': {
+        if (!this.isOwner(conn)) return this.fail(conn, '只有房主可以选择房间玩法');
+        if (this.mode === 'ai') return;
+        if (this.game.status === 'playing') return this.fail(conn, '对局进行中，无法更改房间玩法');
+        if (!isGameVariant(msg.variant)) return this.fail(conn, '房间玩法非法');
+        this.variant = msg.variant;
+        // 同步给状态机：等待期快照即携带变体（揭棋的洗子仍在开局时进行）
+        this.game.variant = msg.variant;
+        logInfo(`房间 ${this.id}：房主选择房间玩法 ${VARIANT_LABEL[msg.variant]}`);
+        return;
+      }
       case 'grasp': {
         if (!this.isOwner(conn)) return this.fail(conn, '只有房主可以抓子');
         if (this.guessStage !== 'grasp') return this.fail(conn, '当前不在抓子阶段');
@@ -567,7 +587,7 @@ export class Room {
   /** 开局：重置对局（揭棋为洗子开局）并向各连接下发各自阵营 + 记录本局信息 */
   private startGame(): void {
     this.cancelOverTimer();
-    if (this.mode === 'jieqi') this.game.openJieqi();
+    if (this.variant === 'jieqi') this.game.openJieqi();
     else this.game.reset('playing');
     this.afterMoveApplied(); // 开局即开始回合计时（若启用）
     this.dispatchStart();
@@ -662,7 +682,7 @@ export class Room {
       logInfo(`房间 ${this.id}：人机对战不计入对局回顾，跳过落库`);
       return;
     }
-    if (this.mode === 'jieqi') {
+    if (this.variant === 'jieqi') {
       // 揭棋初始暗子分布无法由「标准开局 + 着法」复原，本版不落库（见 ADR-0011 §4）
       logInfo(`房间 ${this.id}：揭棋对局不计入对局回顾，跳过落库`);
       return;

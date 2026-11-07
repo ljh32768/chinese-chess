@@ -120,24 +120,8 @@ body::before {
 
 .panel-lg label { display: block; margin-top: 8px; line-height: 1.7; color: var(--text-dim); letter-spacing: 0.5px; cursor: pointer; }
 .panel-lg .hint { margin-top: 8px; }
-.panel-lg .radio-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 6px;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s var(--ease);
-}
-.panel-lg .radio-row:hover { background: rgba(255, 207, 122, 0.08); }
-.panel-lg .radio-row input {
-  width: 16px;
-  height: 16px;
-  /* 让原生单选圆点跟随木色 + 强调金，避免默认蓝色控件与主题冲突 */
-  accent-color: var(--accent);
-  cursor: pointer;
-}
 
-/* 表单行：左标签 + 右控件（取先方式下拉框 / 房间号 + 按钮） */
+/* 表单行：左标签 + 右控件（取先方式 / 房间玩法下拉框 / 房间号 + 按钮） */
 .form-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .form-row label { flex: none; margin-top: 0; color: var(--gold); letter-spacing: 1px; }
 .form-row input[type="text"],

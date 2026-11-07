@@ -1399,6 +1399,53 @@ describe('服务器 · 揭棋（暗棋）房间', () => {
   /** 棋盘是否已抹除全部真实身份（客户端 / 观战者都看不到底牌） */
   const noSecrets = (board: Board): boolean => board.flat().every((p) => !p || p.real === undefined);
 
+  it('等待页选择揭棋：房主 choose_variant 切换玩法，开局洗子且房间列表带揭棋标记', async () => {
+    const s = await startServer();
+    const { c: host, joined, roomId } = await createRoom(s);
+    // 建房不再提交玩法：默认标准象棋
+    expect(joined.state.variant).toBeUndefined();
+
+    host.send({ type: 'choose_variant', variant: 'jieqi' });
+    host.send({ type: 'list_rooms' });
+    const list = await host.waitType('room_list');
+    expect(list.rooms.find((r) => r.roomId === roomId)?.mode).toBe('jieqi');
+
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
+    const hStart = await host.waitType('start');
+    const gStart = await guest.waitType('start');
+    expect(hStart.state.variant).toBe('jieqi');
+    expect(hStart.side).toBe('r');
+    expect(gStart.side).toBe('b');
+    expect(hiddenCount(hStart.state.board, 'r')).toBe(15);
+    expect(hiddenCount(hStart.state.board, 'b')).toBe(15);
+    expect(noSecrets(hStart.state.board)).toBe(true);
+  });
+
+  it('等待页可把玩法切回象棋：开局标准棋盘并从房间列表移除揭棋标记', async () => {
+    const s = await startServer();
+    const { c: host, roomId } = await createRoom(s);
+    host.send({ type: 'choose_variant', variant: 'jieqi' });
+    host.send({ type: 'choose_variant', variant: 'xiangqi' });
+    host.send({ type: 'list_rooms' });
+    const list = await host.waitType('room_list');
+    expect(list.rooms.find((r) => r.roomId === roomId)?.mode).toBe('pvp');
+
+    const guest = await joinRoom(s, roomId);
+    await guest.waitType('room_joined');
+    const hStart = await host.waitType('start');
+    expect(hStart.state.variant).toBeUndefined();
+    expect(hStart.state.board).toEqual(initBoard());
+    expect(hiddenCount(hStart.state.board, 'r')).toBe(0);
+  });
+
+  it('开局后不能再更改房间玩法', async () => {
+    const s = await startServer();
+    const { host } = await setupGame(s);
+    host.send({ type: 'choose_variant', variant: 'jieqi' });
+    expect((await host.waitType('error')).message).toBe('对局进行中，无法更改房间玩法');
+  });
+
   it('创建揭棋房间：快照标记 variant=jieqi，房间列表带 jieqi 模式', async () => {
     const s = await startServer();
     const { c: host, joined, roomId } = await createRoom(s, { mode: 'jieqi' });

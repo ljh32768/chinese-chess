@@ -12,6 +12,7 @@ import {
   Board,
   FirstMode,
   GameSnapshot,
+  GameVariant,
   GuessChoice,
   Move,
   Piece,
@@ -187,7 +188,7 @@ const S = {
   threats: [] as Pos[],
   /** 残局挑战进度；null 表示当前不是残局模式 */
   endgame: null as EndgameState | null,
-  /** 揭棋（暗棋）模式：棋盘含暗子，吃子按快照记录展示 */
+  /** 揭棋（暗棋）模式：棋盘含暗子，吃子按快照记录展示；等待页亦表示房间玩法 */
   jieqi: false,
   /** 揭棋：双方吃子记录（快照下发，含被吃暗子翻开后的身份） */
   capRed: [] as PieceType[],
@@ -941,6 +942,7 @@ function showWaiting(): void {
     : '未设口令，任何人点击即可加入';
   $('host-wait').textContent = S.aiMode ? '正在开始人机对战…' : '让对方在「加入房间」中选择本房间';
   renderSidePick();
+  renderVariantPick();
   renderInvitePanel();
   show('screen-host');
   refreshInviteList();
@@ -965,6 +967,21 @@ function chooseFirst(mode: FirstMode): void {
   S.firstMode = mode;
   renderSidePick();
   net?.send({ type: 'choose_first', mode });
+}
+
+/** 等待页：渲染房间玩法下拉框（象棋 / 揭棋；仅房主可改，开赛后服务端会拒绝） */
+function renderVariantPick(): void {
+  const sel = $<HTMLSelectElement>('room-variant');
+  sel.value = S.jieqi ? 'jieqi' : 'xiangqi';
+  sel.disabled = !S.isOwner;
+}
+
+/** 等待页：选择房间玩法（象棋 / 揭棋；仅等待阶段有效，开赛后服务端会拒绝） */
+function chooseVariant(variant: GameVariant): void {
+  const jieqi = variant === 'jieqi';
+  if (S.jieqi === jieqi) return;
+  S.jieqi = jieqi;
+  net?.send({ type: 'choose_variant', variant });
 }
 
 // -------------------------------------------------------------- 消息处理
@@ -1696,11 +1713,10 @@ function backToIndex(): void {
   showHomePanel('index');
 }
 
-/** 创建双人对战房间（口令可选，留空即任何人可加入；可勾选揭棋） */
+/** 创建双人对战房间（口令可选，留空即任何人可加入；房间玩法在等待页选择） */
 async function createRoom(): Promise<void> {
   if (!requireServer()) return;
   const password = $<HTMLInputElement>('create-pass').value.trim();
-  const jieqi = $<HTMLInputElement>('create-jieqi').checked;
   // 服务端房间的缺省取先方式是「房主执红」，客户端缺省是「猜先」：
   // 建房成功后立即把本端默认同步给服务器，并回写本端状态（否则会被 room_joined 覆盖成服务端缺省值）
   const firstMode = FIRST_MODE_DEFAULT;
@@ -1711,7 +1727,7 @@ async function createRoom(): Promise<void> {
     S.guessPhase = null;
     await request({
       type: 'create_room',
-      mode: jieqi ? 'jieqi' : 'pvp',
+      mode: 'pvp',
       password: password || null,
       token: S.account?.token,
     });
@@ -1719,7 +1735,6 @@ async function createRoom(): Promise<void> {
     renderSidePick();
     net?.send({ type: 'choose_first', mode: firstMode });
     backToIndex();
-    if (jieqi) toast('已创建揭棋房间，等待对手加入');
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
     show('screen-home');
@@ -1728,21 +1743,18 @@ async function createRoom(): Promise<void> {
 
 /** 读取人机对战难度档位（1 入门 / 2 菜鸟 / 3 中级 / 4 高手 / 5 棋圣） */
 function aiDepth(): number {
-  const el = document.querySelector<HTMLInputElement>('input[name="ai-depth"]:checked');
-  const depth = Number(el?.value ?? 3);
+  const depth = Number($<HTMLSelectElement>('ai-depth').value);
   return Number.isInteger(depth) && depth >= 1 && depth <= 5 ? depth : 3;
 }
 
 /** 读取本地人机对弈的棋种：标准象棋 / 揭棋（暗棋） */
-function aiVariant(): 'xiangqi' | 'jieqi' {
-  const el = document.querySelector<HTMLInputElement>('input[name="ai-variant"]:checked');
-  return el?.value === 'jieqi' ? 'jieqi' : 'xiangqi';
+function aiVariant(): GameVariant {
+  return $<HTMLSelectElement>('ai-variant').value === 'jieqi' ? 'jieqi' : 'xiangqi';
 }
 
 /** 读取本地人机对弈「我执哪一方」：红（先行）/ 黑（后行），默认执红 */
 function aiSideChoice(): Side {
-  const el = document.querySelector<HTMLInputElement>('input[name="ai-side"]:checked');
-  return el?.value === 'b' ? 'b' : 'r';
+  return $<HTMLSelectElement>('ai-side').value === 'b' ? 'b' : 'r';
 }
 
 /** 人机对弈（本地）：不依赖服务器，规则与搜索都在本机运行；玩家可选执红（先行）或执黑（后行） */
@@ -2770,9 +2782,12 @@ function bindEvents(): void {
   $('btn-skin').addEventListener('click', switchSkin);
   $('btn-history').addEventListener('click', openHistory);
 
-  // 等待页：取先方式下拉框（默认猜先；仅等待阶段有效）
+  // 等待页：取先方式 / 房间玩法下拉框（默认猜先 / 象棋；仅等待阶段有效）
   $('first-mode').addEventListener('change', (e) => {
     chooseFirst((e.target as HTMLSelectElement).value as FirstMode);
+  });
+  $('room-variant').addEventListener('change', (e) => {
+    chooseVariant((e.target as HTMLSelectElement).value as GameVariant);
   });
   $('btn-cancel-host').addEventListener('click', leaveToHome);
   $('ip-box').addEventListener('click', () => void copyRoomNo());
