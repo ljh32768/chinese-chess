@@ -239,6 +239,18 @@ describe('残局题库：自检（checkPuzzle / checkEndgameBank）', () => {
       expect(p!.name).toBe(name);
       expect(p!.goalMoves).toBe(1);
       expect(checkPuzzle(p!).ok, `${id}：${checkPuzzle(p!).problems.join('、')}`).toBe(true);
+      if (id === 'kunbi') continue; // 困毙不是「将死」杀法，下面单独核验
+      // 题库与杀法判定联动：提示首着必须走成「将死」，且识别出的杀法与题目名一致
+      const mated: Side = p!.side === 'r' ? 'b' : 'r';
+      const hintBoard = buildPuzzleBoard(p!);
+      const hint = findMateMove(hintBoard, p!.side, p!.goalMoves);
+      expect(hint, `${id}：应求得出正解首着`).toBeTruthy();
+      makeMove(hintBoard, hint!.from, hint!.to);
+      expect(judgeAfterMove(hintBoard, mated)?.reason, `${id}：提示着法应走成将死（而非困毙）`).toBe('将死');
+      expect(
+        classifyCheckmate(hintBoard, mated, { lastMove: hint }).pattern.name,
+        `${id}：杀法应与题目名一致`,
+      ).toBe(name);
     }
     // 新增的困毙示例：一步走成欠行（未被将军但对方无子可走）
     const k = PUZZLES.find((x) => x.id === 'kunbi')!;

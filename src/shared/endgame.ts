@@ -219,17 +219,15 @@ export const PUZZLES: EndgamePuzzle[] = [
     side: 'r',
     goalMoves: 1,
     intro:
-      '一炮镇中路（天炮）牵制中士中象、一炮沉底线（地炮）牵制底士底象，红车再沉底照将；黑将被自家士象挡住，退路全封。',
+      '一炮镇中路（天炮）牵制黑象 / 黑士，另一炮平到黑方底线（地炮）借黑士为架照将；黑将被自家双士堵死，双炮配合成杀（无须车马兵参与）。',
     pieces: [
       [0, 4, 'K', 'b'],
-      [0, 2, 'N', 'b'],
       [0, 3, 'A', 'b'],
       [1, 4, 'A', 'b'],
-      [2, 4, 'N', 'b'],
+      [2, 4, 'B', 'b'],
       [9, 4, 'K', 'r'],
-      [0, 0, 'C', 'r'],
-      [4, 4, 'C', 'r'],
-      [5, 8, 'R', 'r'],
+      [3, 4, 'C', 'r'],
+      [1, 2, 'C', 'r'],
     ],
   },
   {
@@ -299,16 +297,16 @@ export const PUZZLES: EndgamePuzzle[] = [
     level: 'easy',
     side: 'r',
     goalMoves: 1,
-    intro: '红车平到将门贴帅将军，中炮镇住将门纵线——黑士无论吃车还是填塞，都会成为炮架。',
+    intro: '中炮镇住将门纵线牵制黑象 / 黑士（黑士因此不敢吃车），红车沉到底线贴帅照将，把宫门栓死。',
     pieces: [
       [0, 4, 'K', 'b'],
       [0, 3, 'A', 'b'],
-      [0, 5, 'A', 'b'],
-      [3, 2, 'N', 'b'],
-      [9, 4, 'K', 'r'],
-      [1, 0, 'R', 'r'],
-      [4, 4, 'C', 'r'],
-      [2, 2, 'N', 'r'],
+      [1, 4, 'A', 'b'],
+      [0, 2, 'B', 'b'],
+      [2, 4, 'B', 'b'],
+      [9, 5, 'K', 'r'],
+      [4, 5, 'R', 'r'],
+      [3, 4, 'C', 'r'],
     ],
   },
   {
@@ -566,6 +564,10 @@ export function canForceMate(board: Board, side: Side, moves: number, deadline =
 /**
  * 求解正解首着：返回可在 moves 步内强制将死的一步；无解返回 null。
  * 客户端「提示」按剩余步数调用，既能给出正解着法，也能判断玩家是否已走离杀棋。
+ *
+ * **一步杀时优先给「真将死」**（对方被将军且无子可走）；若该步只能走成困毙（欠行），
+ * 才退回困毙着法——两者都算取胜，但「对面笑」等杀法题目不该把提示给成困毙
+ * （否则玩家跟着提示走完看到的是「困毙」，看不到题目要练的杀法）。
  */
 export function findMateMove(board: Board, side: Side, moves: number, deadline = Infinity): Move | null {
   const b = cloneForSolve(board);
@@ -573,11 +575,14 @@ export function findMateMove(board: Board, side: Side, moves: number, deadline =
   if (n <= 0) return null;
   const cache = new Map<string, boolean>();
   const opp = other(side);
+  let stalemateOnly: Move | null = null;
   for (const m of genMoves(b, side)) {
     const captured = play(b, m);
-    let ok: boolean;
+    let ok = false;
+    let checkmate = false;
     if (genMoves(b, opp).length === 0) {
       ok = true;
+      checkmate = isInCheck(b, opp); // 真将死（非困毙）
     } else if (n > 1) {
       ok = true;
       for (const reply of genMoves(b, opp)) {
@@ -589,13 +594,13 @@ export function findMateMove(board: Board, side: Side, moves: number, deadline =
           break;
         }
       }
-    } else {
-      ok = false;
     }
     unplay(b, m, captured);
-    if (ok) return m;
+    if (!ok) continue;
+    if (n > 1 || checkmate) return m; // 多步杀沿用原顺序；一步杀优先真将死
+    stalemateOnly ??= m; // 一步杀只能困毙：先记下，整个搜索都找不到真将死再退回
   }
-  return null;
+  return stalemateOnly;
 }
 
 /** 求解不修改调用方棋盘（内部就地试走，故先深拷贝） */
