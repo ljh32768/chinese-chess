@@ -30,6 +30,9 @@
  *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
  *    ② **移开的这枚子自身也带威胁**（走子后捉到、且走子前我方并未攻击的大子）。两条件缺一不可——
  *    只让线、移开的子自身不捉子（如躲子 / 闲走）不判闪击。
+ *    闪击**两处攻击都须是「能合法吃到」的真威胁**（`canCapture()`，已过滤送将 / 照面）——
+ *    攻击方自身被牵制、看起来够得着却吃不过去时不算威胁，不得据此判闪击。
+ *    闪击的**被威胁棋子只算车 / 马 / 炮**（士 / 象 / 兵与将帅不算，也不画闪电）。
  *    「闪将 / 闪击」的让线须**真的离开该线**：走动的子走子后仍停在这条连线上（继续充当炮架 / 挡子，
  *    如炮架向前吃子后炮改打后面的子）不算让线，不算闪将 / 闪击（`restsOnLine()`）。
  */
@@ -234,6 +237,15 @@ function attackersOf(board: Board, target: Pos, by: Side): Pos[] {
 /** `from` 处的棋子能否吃到 `target` 格（含炮需炮架，不含将帅照面） */
 function attacks(board: Board, from: Pos, target: Pos): boolean {
   return pieceMoves(board, from[0], from[1]).some(([r, c]) => r === target[0] && c === target[1]);
+}
+
+/**
+ * `from` 处的棋子能否**合法**吃到 `target` 格（过滤送将 / 将帅照面）。
+ * 用于「真威胁」判定：伪攻击（如攻击方自身被牵制、吃过去会送将）不算威胁，
+ * 否则「移开的子看似捉到大子、实际吃不到」会被误判成闪击（v3.19）。
+ */
+function canCapture(board: Board, from: Pos, target: Pos): boolean {
+  return legalMoves(board, from[0], from[1]).some(([r, c]) => r === target[0] && c === target[1]);
 }
 
 /** 同行 / 同列两点之间的格子；不同线返回空数组 */
@@ -505,11 +517,13 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       hits.push({ kind: 'fork', label: '捉双', actors: [move.to], threats: valuable.map((f) => f.pos) });
     }
 
-    // 闪击：让线后新威胁到的敌方子（非将），攻击者为非走动的直线子力
+    // 闪击：让线后新威胁到的敌方子，攻击者为非走动的直线子力。
+    // 被威胁的棋子**只算车 / 马 / 炮**（士 / 象 / 兵与将帅不算，也不画闪电）；
+    // 攻击者须**能合法吃到**该子（被牵制等伪攻击不算威胁）。
     const threats: Pos[] = [];
     const actors: Pos[] = [];
     for (const { pos, piece } of piecesOf(after, opp)) {
-      if (piece.t === 'K') continue;
+      if (!isWorth(piece.t)) continue;
       if (!attackersOf(after, pos, me).length) continue;
       if (attackersOf(before, pos, me).length) continue; // 须为「新攻击」
       const actor = attackersOf(after, pos, me).find(
@@ -517,7 +531,8 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
           !samePos(a, move.to) &&
           isLinePiece(after, a) &&
           openedLine(a, pos, move.from) &&
-          !restsOnLine(a, pos, move.to),
+          !restsOnLine(a, pos, move.to) &&
+          canCapture(after, a, pos),
       );
       if (actor) {
         threats.push(pos);
@@ -525,12 +540,13 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       }
     }
     // 闪击 = **双向**双威胁：让线后后方子力显露的攻击之外，「移开的棋子」自身也必须带威胁
-    // （走子后捉到的、走子前我方并未攻击的大子）。只让线、移开的子自身什么也不捉（如躲子 / 闲走）
+    // （走子后捉到、且走子前我方并未攻击的大子）。只让线、移开的子自身什么也不捉（如躲子 / 闲走）
     // 只是单纯让线，不构成闪击。（「将」由闪将分支负责；「献子」等无法静态判定的从略。）
+    // 移开的子也须**能合法吃到**——被牵制时它看起来够得着目标，实际吃过去会送将，不算威胁。
     const moverThreats = threats.length
       ? piecesOf(after, opp).filter(
           ({ pos, piece }) =>
-            isWorth(piece.t) && attacks(after, move.to, pos) && attackersOf(before, pos, me).length === 0,
+            isWorth(piece.t) && canCapture(after, move.to, pos) && attackersOf(before, pos, me).length === 0,
         )
       : [];
     if (moverThreats.length) {
