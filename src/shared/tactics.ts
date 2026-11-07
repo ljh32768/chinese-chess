@@ -289,12 +289,19 @@ function isLinePiece(board: Board, pos: Pos): boolean {
   return !!p && (p.t === 'R' || p.t === 'C');
 }
 
+/** 对方的一步合法应着（`board` 为应着后的局面，`from` / `to` 为该步） */
+interface Reply {
+  board: Board;
+  from: Pos;
+  to: Pos;
+}
+
 /**
- * 对方（`opp`）在当前局面下的全部合法应着（每种应着各返回一份局面副本）。
+ * 对方（`opp`）在当前局面下的全部合法应着（每种应着各返回一份局面副本 + 该步起止）。
  * 用于「两者必然失去其一」验证：逐个模拟对方的每一种应着。
  */
-function repliesOf(board: Board, opp: Side): Board[] {
-  const out: Board[] = [];
+function repliesOf(board: Board, opp: Side): Reply[] {
+  const out: Reply[] = [];
   for (let r = 0; r < board.length; r++) {
     for (let c = 0; c < board[r].length; c++) {
       const p = board[r][c];
@@ -303,7 +310,7 @@ function repliesOf(board: Board, opp: Side): Board[] {
         const nb = cloneBoard(board);
         nb[tr][tc] = nb[r][c];
         nb[r][c] = null;
-        out.push(nb);
+        out.push({ board: nb, from: [r, c], to: [tr, tc] });
       }
     }
   }
@@ -340,17 +347,21 @@ function capturableKeys(board: Board, side: Side): Set<string> {
  * @param board   走子后的局面（校验攻击子的真威胁）
  * @param replies 对方全部合法应着局面（调用方一次性算好并复用，见 `detectTactics`）
  */
-function mustLoseOne(board: Board, replies: Board[], actor: Pos, targets: Pos[], me: Side): boolean {
+function mustLoseOne(board: Board, replies: Reply[], actor: Pos, targets: Pos[], me: Side): boolean {
   const opp = other(me);
   if (!targets.length || !replies.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
   // 真威胁：攻击子至少能合法吃到一枚目标（被牵制时「够得着却吃不过去」不算威胁）
   if (!targets.some((t) => canCapture(board, actor, t))) return false;
-  for (const nb of replies) {
+  for (const { board: nb, from, to } of replies) {
     const still = nb[actor[0]][actor[1]];
     if (!still || still.s !== me) return false; // 攻击子被吃 → 被攻击子全部保住
     const hit = targets.some((t) => {
       const tp = nb[t[0]][t[1]];
-      return !!tp && tp.s === opp && attacks(nb, actor, t);
+      if (tp && tp.s === opp && attacks(nb, actor, t)) return true;
+      // 被威胁的子这步沿射线退到攻击子口上（原位已空、仍挡着后面的子）→ 它仍会被吃，算未脱身
+      if (!samePos(from, t)) return false;
+      const moved = nb[to[0]][to[1]];
+      return !!moved && moved.s === opp && attacks(nb, actor, to);
     });
     if (!hit) return false;
   }
@@ -444,14 +455,18 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
 
   const hits: TacticHit[] = [];
   const givesCheck = !!oppKing && isAttacked(after, oppKing[0], oppKing[1], me);
+  // 「动的子将军」：将军抽须由**移开的这枚棋子本人**将军；若将军来自让线露出的其他车 / 炮，
+  // 那属于闪将（v3.22 收紧——此前「闪将 + 后方子力捉子」被误报成将军抽）。
+  const checkers = oppKing ? attackersOf(after, oppKing, me) : [];
+  const moverChecks = checkers.some((c) => samePos(c, move.to));
 
   // 「两者必然失去其一」验证要逐个模拟对方的每一种合法应着（较贵），只在实际需要时算一次
-  let replies: Board[] | null = null;
-  const repliesOnce = (): Board[] => replies ?? (replies = repliesOf(after, opp));
+  let replies: Reply[] | null = null;
+  const repliesOnce = (): Reply[] => replies ?? (replies = repliesOf(after, opp));
   // 每种应着局面下「我方此时能合法吃到的敌子位置键」，与 repliesOnce() 一一对应（将军抽用）
   let wins: Array<Set<string>> | null = null;
   const winsOnce = (): Array<Set<string>> =>
-    wins ?? (wins = repliesOnce().map((nb) => capturableKeys(nb, me)));
+    wins ?? (wins = repliesOnce().map((r) => capturableKeys(r.board, me)));
 
   // 走子前「能合法吃到的敌子位置键」——将军抽只认**这一步新造**的得子威胁
   let winsBefore: Set<string> | null = null;
@@ -459,34 +474,37 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
 
   // 严格判定顺序：先看是否照将——照将走「闪将 / 将军抽」分支，否则走「串打 / 捉双 / 闪击」分支。
   if (givesCheck && oppKing) {
-    // 将军抽（将军抽车 / 马 / 炮）：本着一身二任——将军（直接将军或闪将）+ 同时捉大子，对方必失其一。
+    // 将军抽（将军抽车 / 马 / 炮）：**移开的这枚棋子本人**将军 + 同时捉大子，对方必失其一。
     // 被抽子两类：① 走子后直接攻击到的敌方大子（车 / 马 / 炮，攻击者可为走动的子或后方子力）；
     //             ② 被照之将同线后方的大子（将移开后落入照将直线子的攻击口——经典抽将）。
-    // 两类都须是**这一步新造**的威胁：走子前就已能获利吃到的子（我方原本就有的攻击）与这步将军无关，
+    // 两类都须是**这一步新造**的威胁：走子前就已能合法吃到的子（我方原本就有的攻击）与这步将军无关，
     // 不构成「抽」——否则「本来就白吃着的子 + 任意一步将军」都会被误报成将军抽。
-    const candidates: Array<{ pos: Pos; piece: Piece }> = [];
-    for (const { pos, piece } of piecesOf(after, opp)) {
-      if (!isWorth(piece.t) || !isAttacked(after, pos[0], pos[1], me)) continue;
-      if (winsBeforeOnce().has(key(pos))) continue; // 走子前已可获利吃到 → 非本步新威胁
-      candidates.push({ pos, piece });
+    let lost: Array<{ pos: Pos; piece: Piece }> = [];
+    if (moverChecks) {
+      const candidates: Array<{ pos: Pos; piece: Piece }> = [];
+      for (const { pos, piece } of piecesOf(after, opp)) {
+        if (!isWorth(piece.t) || !isAttacked(after, pos[0], pos[1], me)) continue;
+        if (winsBeforeOnce().has(key(pos))) continue; // 走子前已可吃到 → 非本步新威胁
+        candidates.push({ pos, piece });
+      }
+      for (const checker of checkers) {
+        if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
+        const victim = behindKingVictim(after, checker, oppKing, opp);
+        if (!victim) continue;
+        if (winsBeforeOnce().has(key(victim))) continue; // 同上：走子前已可吃到 → 非本步新威胁
+        const p = after[victim[0]][victim[1]];
+        if (p) candidates.push({ pos: victim, piece: p });
+      }
+      // 去重后逐个验证「对方必失其一」——被抽子须在对方每种应着后都仍能被我方合法吃到
+      const w = winsOnce();
+      const seen = new Set<string>();
+      lost = candidates.filter(({ pos }) => {
+        const k = key(pos);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return unavoidablyLost(w, pos);
+      });
     }
-    for (const checker of attackersOf(after, oppKing, me)) {
-      if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
-      const victim = behindKingVictim(after, checker, oppKing, opp);
-      if (!victim) continue;
-      if (winsBeforeOnce().has(key(victim))) continue; // 同上：走子前已可获利吃到 → 非本步新威胁
-      const p = after[victim[0]][victim[1]];
-      if (p) candidates.push({ pos: victim, piece: p });
-    }
-    // 去重后逐个验证「对方必失其一」——被抽子须在对方每种应着后都仍能被我方获利吃到
-    const w = winsOnce();
-    const seen = new Set<string>();
-    const lost = candidates.filter(({ pos }) => {
-      const k = key(pos);
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return unavoidablyLost(w, pos);
-    });
     if (lost.length) {
       const best = lost.reduce((a, b) => (VALUE[b.piece.t] > VALUE[a.piece.t] ? b : a));
       hits.push({
@@ -502,7 +520,7 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       // checker 被牵制时虽然「照」到将帅，真吃过去却会送将，属于伪将军，不算闪将。
       const discovered =
         !attackersOf(before, oppKing, me).length &&
-        attackersOf(after, oppKing, me).some(
+        checkers.some(
           (c) =>
             !samePos(c, move.to) &&
             isLinePiece(after, c) &&
