@@ -5,20 +5,22 @@
  * 这里提供地址解析、网段推导与「浏览器 or 桌面客户端」判定等最小逻辑。
  */
 
+import { DEFAULT_PORT } from '../shared/defaults.js';
+
 /** 服务器地址（WebSocket 目标） */
 export interface ServerAddr {
   host: string;
   port: number;
 }
 
-/** 缺省端口（与中心服务器默认一致） */
-export const DEFAULT_PORT = 7777;
+/** 缺省端口（与中心服务器默认同源，见 `shared/defaults.ts`） */
+export { DEFAULT_PORT };
 
 const HOST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
  * 解析用户输入的服务器地址，允许以下写法：
- * `192.168.1.5`、`192.168.1.5:7777`、`http://192.168.1.5:7777/`、`ws://host:port/ws`
+ * `192.168.1.5`、`192.168.1.5:27310`、`http://192.168.1.5:27310/`、`ws://host:port/ws`
  * 非法输入返回 null。
  */
 export function parseAddress(text: string, defaultPort = DEFAULT_PORT): ServerAddr | null {

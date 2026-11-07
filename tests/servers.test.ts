@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_PORT as SHARED_DEFAULT_PORT } from '../src/shared/defaults.js';
 import {
   DEFAULT_PORT,
   isDesktopClient,
@@ -12,6 +13,13 @@ import {
   serverKey,
   subnetPrefix,
 } from '../src/renderer/servers.js';
+
+describe('缺省端口', () => {
+  it('固定为不常用的 27310，且渲染层与服务端同源', () => {
+    expect(DEFAULT_PORT).toBe(27310);
+    expect(DEFAULT_PORT).toBe(SHARED_DEFAULT_PORT);
+  });
+});
 
 describe('服务器地址解析 parseAddress', () => {
   it('支持 host、host:port、带协议与路径的写法', () => {

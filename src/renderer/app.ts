@@ -3014,7 +3014,7 @@ function bindEvents(): void {
   // 连接服务器
   $('btn-server-connect').addEventListener('click', () => {
     const addr = parseAddress($<HTMLInputElement>('server-addr').value, DEFAULT_PORT);
-    if (!addr) return setServerMsg('地址格式不正确，示例：192.168.1.42:7777', 'err');
+    if (!addr) return setServerMsg('地址格式不正确，示例：192.168.1.42:27310', 'err');
     void connectServer(addr);
   });
   $('btn-server-scan').addEventListener('click', () => void scanServers());

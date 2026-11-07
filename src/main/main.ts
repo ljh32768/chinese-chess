@@ -7,15 +7,16 @@
  *
  * 通过 URL 参数把初始信息交给渲染层：
  *   - `client=electron`：标记这是桌面客户端（连接服务器板块可用；浏览器打开时该板块锁定）
- *   - `server=<host:port>`：优先尝试的服务器（环境变量 `LANSCHESS_SERVER`，缺省 127.0.0.1:7777）
+ *   - `server=<host:port>`：优先尝试的服务器（环境变量 `LANSCHESS_SERVER`，缺省 127.0.0.1:27310）
  *   - `lan=<ip>`：本机局域网地址，供客户端推导要扫描的网段
  */
 
 import { BrowserWindow, app } from 'electron';
 import path from 'node:path';
+import { DEFAULT_PORT } from '../shared/defaults.js';
 import { GameServer, getLanIp } from '../server/server.js';
 
-const DEFAULT_SERVER = '127.0.0.1:7777';
+const DEFAULT_SERVER = `127.0.0.1:${DEFAULT_PORT}`;
 
 /** 本机外壳服务（只提供页面与静态资源；不参与对局） */
 let shellServer: GameServer | null = null;

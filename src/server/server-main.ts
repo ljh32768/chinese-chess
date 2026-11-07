@@ -6,13 +6,14 @@
  * 环境变量：
  * | 变量 | 默认值 | 作用 |
  * |---|---|---|
- * | `LANSCHESS_PORT` | `7777` | 监听端口；显式指定被占用时报错退出，未指定则回退随机端口 |
+ * | `LANSCHESS_PORT` | `27310` | 监听端口；显式指定被占用时报错退出，未指定则回退随机端口 |
  * | `LANSCHESS_DATA` | `<cwd>/data` | 账号与对局记录的持久化目录；设为 `off` 则仅内存 |
  * | `LANSCHESS_TURN_MS` | `0` | 每回合限时毫秒数，0 表示不限时 |
  * | `LANSCHESS_DEBUG` | 未设置 | 日志开关：未设置输出 info；`1` 追加 debug；`0` 全部关闭 |
  */
 
 import path from 'node:path';
+import { DEFAULT_PORT } from '../shared/defaults.js';
 import { GameServer, getLanIp, listenWithFallback } from './server.js';
 
 let server: GameServer | null = null;
@@ -25,7 +26,7 @@ function resolveDataDir(): string | null {
 }
 
 try {
-  const preferred = Number(process.env.LANSCHESS_PORT ?? 7777);
+  const preferred = Number(process.env.LANSCHESS_PORT ?? DEFAULT_PORT);
   const explicit = process.env.LANSCHESS_PORT !== undefined;
   const started = await listenWithFallback(preferred, explicit, resolveDataDir());
   server = started.server;

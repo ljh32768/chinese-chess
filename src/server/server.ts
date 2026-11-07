@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
+import { DEFAULT_PORT } from '../shared/defaults.js';
 import { ClientMessage, OnlinePlayer, Role, ServerMessage, decode } from '../shared/protocol.js';
 import { EnginePort, normalizeLevel } from '../shared/engine.js';
 import { GameRecord, Move, PlayerRef, RoomMode, RoomSummary, Side } from '../shared/types.js';
@@ -113,7 +114,7 @@ export function getLanIp(): string {
 }
 
 export interface GameServerOptions {
-  /** 监听端口，0 表示随机端口；默认 7777 */
+  /** 监听端口，0 表示随机端口；缺省为固定端口 `DEFAULT_PORT` */
   port?: number;
   /** 静态资源目录；null 表示不提供静态服务（仅测试用） */
   staticDir?: string | null;
@@ -157,7 +158,7 @@ export class GameServer {
 
   constructor(opts: GameServerOptions = {}) {
     this.opts = {
-      port: opts.port ?? 7777,
+      port: opts.port ?? DEFAULT_PORT,
       staticDir: opts.staticDir === undefined ? defaultStaticDir() : opts.staticDir,
       host: opts.host ?? '0.0.0.0',
       graceMs: opts.graceMs ?? 30000,
