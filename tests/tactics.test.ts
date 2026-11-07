@@ -439,7 +439,7 @@ describe('照将分支（闪将 / 将军抽）', () => {
     ]);
   });
 
-  it('被抽子可移去「蹩马腿」同时挡将（车能两全、炮无救）→ 将军抽炮', () => {
+  it('将军同时咬住车与炮（车可蹩马腿脱身）→ 仍按图案判将军抽车（v3.25 不要求对方必失）', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 4, 6, 'N', 'r');
@@ -448,8 +448,11 @@ describe('照将分支（闪将 / 将军抽）', () => {
     const hits = run(b, [4, 6], [2, 5]);
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('check-fork');
-    expect(hits[0].label).toBe('将军抽炮');
-    expect(hits[0].threats).toEqual([[4, 4]]);
+    expect(hits[0].label).toBe('将军抽车');
+    expect(hits[0].threats).toEqual([
+      [1, 7],
+      [4, 4],
+    ]);
   });
 
   it('被抽的炮走子前就已能吃到（非本步新造）→ 不判将军抽炮', () => {
@@ -492,16 +495,39 @@ describe('照将分支（闪将 / 将军抽）', () => {
     ]);
   });
 
-  it('让线车照将 + 走动的马同时捉车（移开的子不将军）→ 闪将（别子的捉子不算将军抽）', () => {
+  it('让线车照将 + 走动的马同时捉车 → 将军抽车（用户截图②：将军 + 同时攻击大子）', () => {
     const b = emptyBoard();
     kings(b);
     put(b, 0, 0, 'R', 'r'); // 让线后方车 → 照将（移开的马本身不将军）
     put(b, 0, 2, 'N', 'r'); // 让开的马：走到 (1,4) 同时咬住 (3,5) 的黑车
-    put(b, 3, 5, 'R', 'b'); // 让开的马走到 (1,4) 后咬住的敌车（不落在红帅纵线上）
+    put(b, 3, 5, 'R', 'b');
     const hits = run(b, [0, 2], [1, 4]);
     expect(hits).toHaveLength(1);
-    expect(hits[0].kind).toBe('discovered-check');
-    expect(hits[0].label).toBe('闪将');
+    expect(hits[0].kind).toBe('check-fork');
+    expect(hits[0].label).toBe('将军抽车');
+    expect(hits[0].threats).toEqual([[3, 5]]);
+  });
+
+  it('用户截图②：红炮借卒照将、红车同时捉马 → 将军抽马（不是闪将）', () => {
+    const b = emptyBoard();
+    put(b, 0, 2, 'N', 'r');
+    put(b, 2, 1, 'C', 'r');
+    put(b, 4, 4, 'R', 'r'); // 走到 (4,3) 让开红炮 (6,4) 借黑卒 (3,4) 照将，同时捉黑马 (7,3)
+    put(b, 4, 6, 'N', 'r');
+    put(b, 6, 4, 'C', 'r');
+    put(b, 9, 1, 'R', 'r');
+    put(b, 9, 3, 'A', 'r');
+    put(b, 9, 5, 'K', 'r');
+    put(b, 0, 4, 'K', 'b');
+    put(b, 3, 4, 'P', 'b');
+    put(b, 4, 8, 'C', 'b');
+    put(b, 7, 3, 'N', 'b');
+    put(b, 7, 5, 'C', 'b');
+    const hits = run(b, [4, 4], [4, 3]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].kind).toBe('check-fork');
+    expect(hits[0].label).toBe('将军抽马');
+    expect(hits[0].threats).toEqual([[7, 3]]);
   });
 
   it('经典抽将（动的车本人照将、将后有敌车）→ 将军抽车（v3.24 用户截图口径）', () => {
@@ -580,13 +606,45 @@ describe('串打（skewer）', () => {
     expect(hits[0].label).toBe('串打');
   });
 
-  it('前子可反吃攻击子（对方能两全）→ 不成立（不误报串打）', () => {
+  it('前子可反吃攻击子 → 仍按图案判串打（v3.25 不要求对方必失）', () => {
     const b = emptyBoard();
     kings(b, [2, 5]);
     put(b, 5, 1, 'R', 'r');
     put(b, 5, 6, 'R', 'b'); // 前子：车（可直取走到 (5,4) 的红车）
     put(b, 5, 8, 'C', 'b'); // 后子：炮
-    expect(run(b, [5, 1], [5, 4])).toHaveLength(0);
+    const hits = run(b, [5, 1], [5, 4]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].kind).toBe('skewer');
+    expect(hits[0].label).toBe('串打');
+    expect(hits[0].threats).toEqual([
+      [5, 6],
+      [5, 8],
+    ]);
+  });
+
+  it('用户截图①：红车 (7,1) 同线打黑马 (7,3) 与黑炮 (7,5) → 串打（炮可借马为架反吃车也照提示）', () => {
+    const b = emptyBoard();
+    put(b, 0, 2, 'N', 'r');
+    put(b, 2, 1, 'C', 'r');
+    put(b, 4, 4, 'R', 'r');
+    put(b, 4, 6, 'N', 'r');
+    put(b, 6, 4, 'C', 'r');
+    put(b, 7, 0, 'R', 'r'); // 走到 (7,1) 形成串打
+    put(b, 9, 3, 'A', 'r');
+    put(b, 9, 5, 'K', 'r');
+    put(b, 0, 4, 'K', 'b');
+    put(b, 3, 4, 'P', 'b');
+    put(b, 4, 8, 'C', 'b');
+    put(b, 7, 3, 'N', 'b');
+    put(b, 7, 5, 'C', 'b');
+    const hits = run(b, [7, 0], [7, 1]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].kind).toBe('skewer');
+    expect(hits[0].label).toBe('串打');
+    expect(hits[0].threats).toEqual([
+      [7, 3],
+      [7, 5],
+    ]);
   });
 
   it('前子有根（受后子保护）→ 仍判串打（不要求获利）', () => {

@@ -18,29 +18,26 @@
  *    纯函数，复用 `shared/rules.ts` 的走法与攻击判定，便于单测；只做**启发式提示**，
  *    不参与任何规则 / 胜负判定。判定口径见 ADR-0007 §3.5.7。
  *    严格判定顺序：**先看是否照将**——照将走「闪将 / 将军抽」分支，不照将走「串打 / 捉双 / 闪击」分支。
- *    **将军抽**（将军抽车 / 马 / 炮）= **将军的同时还在攻击大子**：由**正在将军的那枚子本人**
- *    因这一步新咬到一枚大子（车 / 马 / 炮），且对方无论怎样应着都必失其一（`unavoidablyLost()`）。
- *    被抽子两类：将军子走子后**直接攻击到**的大子，或**被照之将同线后方的大子**（`behindKingVictim()`：
- *    将移开该线后即落入这枚将军子的口里——经典抽将，如「车照将、将后车被抽」）。
+ *    **将军抽**（将军抽车 / 马 / 炮）= **将军的同时还在攻击大子**：本步**新造**、且我方**能合法吃到**的敌方
+ *    大子（车 / 马 / 炮）——攻击者可为将军的子、走动的子或其它子（图案口径，v3.25）。
+ *    另含**被照之将同线后方的大子**（`behindKingVictim()`：将移开该线后即落入照将直线子的攻击口——
+ *    经典抽将，如「车照将、将后车被抽」；这类子被将挡住、走子当步吃不到，仍按「将移开后必失」复核）。
  *    **被抽子须是这一步新造的威胁**——走子前我方就已能合法吃到的子与这步将军无关，不算「抽」。
- *    注意必须由**将军的那枚子**吃下；由别的子（如让线露出的后方车 / 炮）顺带捉子不算将军抽。
  *    **闪将**（闪开的子让线、将军由藏在后面的子发出）分两种：
- *    ① 传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将；
- *    ② 移开的子本人将军 + **藏在后面的子**因让线**新捉到大子**（动的子将军且后方子力同时攻击大子）。
+ *    ① 移开的子本人将军 + **藏在后面的子**因让线**新捉到大子**（动的子将军且后方子力同时攻击大子）；
+ *    ② 传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将。
  *    闪将的让线须**真的离开该线**（`restsOnLine()`：走子后仍停留在车 / 炮与目标的连线上、
- *    继续充当炮架 / 挡子不算让线），将军须**本步新造**且 **能合法吃到**将帅（`canCapture()`）。
+ *    继续充当炮架 / 挡子不算让线），②的将军须**本步新造**且 **能合法吃到**将帅（`canCapture()`）。
  *    只由移开的子直接将军、又没有抽到大子时，不做战术提示（将军本身由正中大字表达）。
  *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
  *    ② **移开的这枚子自身也带威胁**（走子后捉到、且走子前我方并未攻击的大子）。两条件缺一不可——
  *    只让线、移开的子自身不捉子（如躲子 / 闲走）不判闪击。
- *    闪击**两处攻击都须是「能合法吃到」的真威胁**（`canCapture()`，已过滤送将 / 照面）——
- *    攻击方自身被牵制、看起来够得着却吃不过去时不算威胁，不得据此判闪击。
- *    闪击的**被威胁棋子只算车 / 马 / 炮**（士 / 象 / 兵与将帅不算，也不画闪电）。
- *    凡「攻击多子」类战术（将军抽 / 串打 / 捉双）都要求**两者必然失去其一**：
- *    对方无论怎样应着，都至少有一枚被攻击的子仍能被**合法吃到**（`canCapture()`，按 `legalMoves`
- *    过滤送将 / 照面；**不要求获利**——有根、等价交换也算吃到，与闪击同口径，v3.21）——
- *    据此排除「被攻击子反吃攻击子」「垫子挡线」「移走炮架」「移子蹩马腿同时挡将」等可两全的伪战术。
- *    该口径对将军抽 / 串打 / 捉双与闪击一视同仁；**吃子提示**的绿 / 红环仍按获利口径
+ *    「串打」= 走动的车 / 炮沿**同一条射线**攻击前、后两枚值得捉的敌子；
+ *    「捉双」= 走动的**单枚子**同时攻击 ≥2 枚值得捉的敌子（两者都只要求「能合法吃到」的图案口径）。
+ *    以上攻击都须**能合法吃到**（`canCapture()`，按 `legalMoves` 过滤送将 / 照面）——
+ *    被牵制时「够得着却吃不过去」的伪攻击不算威胁；**不要求获利**（有根 / 等价交换也算）。
+ *    v3.25 起**不再额外要求「对方必然失去其一」**（对方反吃攻击子、或把被威胁子走开，
+ *    都不影响走子当步给出的图案提示）；**吃子提示**的绿 / 红环仍按获利口径
  *    （无根白吃 / 明显小换大——净赚 ≥1 分，见 `profitableTargets`）。
  */
 
@@ -302,7 +299,7 @@ interface Reply {
 
 /**
  * 对方（`opp`）在当前局面下的全部合法应着（每种应着各返回一份局面副本 + 该步起止）。
- * 用于「两者必然失去其一」验证：逐个模拟对方的每一种应着。
+ * 用于「将后同线」抽将的复核（`unavoidablyLost()`）：逐个模拟对方的每一种应着。
  */
 function repliesOf(board: Board, opp: Side): Reply[] {
   const out: Reply[] = [];
@@ -323,8 +320,8 @@ function repliesOf(board: Board, opp: Side): Reply[] {
 
 /**
  * 局面 `board` 中 `side` 当前能**合法吃到**的敌方大子（车 / 马 / 炮）位置键集合。
- * 与闪击同口径：只要求「真能吃过去」（按 `legalMoves` 过滤送将 / 照面），**不要求获利**——
- * 有根、等价交换的目标也算「吃到」（v3.21 起将军抽 / 串打 / 捉双统一采用此口径）。
+ * 只要求「真能吃过去」（按 `legalMoves` 过滤送将 / 照面），**不要求获利**——有根、等价交换的目标也算「吃到」。
+ * v3.25 起将军抽 / 串打 / 捉双都按此口径（不再额外要求「对方必然失去其一」）。
  */
 function capturableKeys(board: Board, side: Side): Set<string> {
   const out = new Set<string>();
@@ -342,41 +339,10 @@ function capturableKeys(board: Board, side: Side): Set<string> {
 }
 
 /**
- * 「两者必然失去其一」：走子方在 `actor` 处的子，在对方**任意**应着之后，
- * 都至少有一枚 `targets` 中的子「仍被它攻击」——据此排除「被攻击子反吃攻击子」
- * 「垫子挡住射线」「移走炮架」等能两全的伪战术。
- * 走子后的「真威胁」按 `canCapture()` 校验（被牵制等伪攻击不算，与闪击同口径，不要求获利）；
- * 对方应着后的判定只看「是否仍被攻击」（同样不要求获利）：对方若以**将军**应将，我方虽须先应将，
- * 但被威胁子并未因此脱身，不能据此把串打 / 捉双判掉。
- * @param board   走子后的局面（校验攻击子的真威胁）
- * @param replies 对方全部合法应着局面（调用方一次性算好并复用，见 `detectTactics`）
- */
-function mustLoseOne(board: Board, replies: Reply[], actor: Pos, targets: Pos[], me: Side): boolean {
-  const opp = other(me);
-  if (!targets.length || !replies.length) return false; // 对方已无着法（将死 / 困毙），交由正中圆环表达
-  // 真威胁：攻击子至少能合法吃到一枚目标（被牵制时「够得着却吃不过去」不算威胁）
-  if (!targets.some((t) => canCapture(board, actor, t))) return false;
-  for (const { board: nb, from, to } of replies) {
-    const still = nb[actor[0]][actor[1]];
-    if (!still || still.s !== me) return false; // 攻击子被吃 → 被攻击子全部保住
-    const hit = targets.some((t) => {
-      const tp = nb[t[0]][t[1]];
-      if (tp && tp.s === opp && attacks(nb, actor, t)) return true;
-      // 被威胁的子这步沿射线退到攻击子口上（原位已空、仍挡着后面的子）→ 它仍会被吃，算未脱身
-      if (!samePos(from, t)) return false;
-      const moved = nb[to[0]][to[1]];
-      return !!moved && moved.s === opp && attacks(nb, actor, to);
-    });
-    if (!hit) return false;
-  }
-  return true;
-}
-
-/**
  * 将军抽用：`target`（某一位置）在对方**每一种**应着之后都仍能被走子方**合法吃到**
- * （`capturableKeys()`：按 `legalMoves` 过滤送将 / 照面，不要求获利，与闪击同口径）。
- * 与 `mustLoseOne` 的区别：被抽子可由我方**任意**子吃下（走动的子、被让线的后方子力，
- * 乃至将移开后重新落入攻击口的直线子），不限于某一枚子，故按位置键判定即可。
+ * （`capturableKeys()`：按 `legalMoves` 过滤送将 / 照面，不要求获利）。
+ * 用于「将后同线」的经典抽将——该类被抽子走子当步被将挡住、无法直接吃到，
+ * 须确认将移开该线后它确实落入攻击口。被抽子可由我方**任意**子吃下，故按位置键判定即可。
  * @param wins 与对方各应着局面一一对应的「我方此时能合法吃到的敌子位置键」集合
  */
 function unavoidablyLost(wins: Array<Set<string>>, target: Pos): boolean {
@@ -512,40 +478,32 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
 
   // 严格判定顺序：先看是否照将——照将走「闪将 / 将军抽」分支，否则走「串打 / 捉双 / 闪击」分支。
   if (givesCheck && oppKing) {
-    // 将军抽（将军抽车 / 马 / 炮）= **将军的同时还在攻击大子**：
-    // 由**正在将军的那枚子本人**这步新咬到大子（对方必失其一）——对方应将后（将移开该线 / 保将）
-    // 这枚大子仍会落在这枚将军子的口里。两类被抽子：
-    //   ① 将军子走子后直接攻击到的敌方大子（车 / 马 / 炮）；
-    //   ② 被照之将同线后方的大子（将移开后即落入这枚将军子的攻击口——经典抽将，如「车照将、将后车被抽」）。
-    // 只认**这一步新造**的威胁：走子前我方就已能合法吃到的子（原本就有的攻击）与这步将军无关，不算「抽」。
-    // 注意必须由**将军的那枚子**吃下：别的子（如让线露出的后方车 / 炮）顺带捉子属于「闪将」，不是将军抽。
-    const candidates: Array<{ pos: Pos; piece: Piece }> = [];
+    // 闪将①：移开的子本人将军 + **藏在后面的子**因让线**新捉到大子**（动的子将军且后方子力同时攻击大子）。
+    const hidden = moverChecks ? revealedThreats(before, after, move, me) : { threats: [], actors: [] };
+    // 将军抽 = **将军的同时还在攻击大子**（图案口径，v3.25）：本步新造、且我方**能合法吃到**的敌方大子
+    // （车 / 马 / 炮）——攻击者可为将军的子、走动的子或其它子；**不再要求「对方必然失去其一」**
+    //（对方反吃攻击子 / 把被攻击子走开也不影响提示：只按走子当步形成的图案判定）。
+    const winsBeforeSet = winsBeforeOnce();
+    const capturable = capturableKeys(after, me);
+    const victims: Array<{ pos: Pos; piece: Piece }> = [];
+    for (const { pos, piece } of piecesOf(after, opp)) {
+      if (!isWorth(piece.t)) continue;
+      if (!capturable.has(key(pos))) continue; // 须能合法吃到（过滤送将 / 照面）
+      if (winsBeforeSet.has(key(pos))) continue; // 走子前已可吃到 → 非本步新威胁
+      victims.push({ pos, piece });
+    }
+    // ② 被照之将同线后方的大子（将移开后即落入照将直线子的攻击口——经典抽将）；
+    //    这类子走子当步并不「能被合法吃到」（被将挡住），仍按「将移开后必失」复核（`unavoidablyLost()`）。
     for (const checker of checkers) {
-      for (const { pos, piece } of piecesOf(after, opp)) {
-        if (!isWorth(piece.t) || !attacks(after, checker, pos)) continue;
-        if (winsBeforeOnce().has(key(pos))) continue; // 走子前已可吃到 → 非本步新威胁
-        candidates.push({ pos, piece });
-      }
       if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
       const victim = behindKingVictim(after, checker, oppKing, opp);
-      if (!victim || winsBeforeOnce().has(key(victim))) continue;
+      if (!victim || winsBeforeSet.has(key(victim))) continue;
       const p = after[victim[0]][victim[1]];
-      if (p) candidates.push({ pos: victim, piece: p });
+      if (p && unavoidablyLost(winsOnce(), victim)) victims.push({ pos: victim, piece: p });
     }
-    // 去重后逐个验证「对方必失其一」——被抽子须在对方每种应着后都仍能被我方合法吃到
-    const w = winsOnce();
-    const seen = new Set<string>();
-    const lost = candidates.filter(({ pos }) => {
-      const k = key(pos);
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return unavoidablyLost(w, pos);
-    });
-    // 闪将（**闪开的子让线、将军由藏在后面的子发出**）：
-    // ① 传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将；走动的子须**真的离开该线**
-    //    （走子后仍停在线上当炮架只是「换架抽子」，不算闪将），且将军须**本步新造**（走子前对方将帅并未被照）、
-    //    checker **能合法吃到**将帅（被牵制时看似照将、真吃过去却会送将，属于伪将军）。
-    // ② 移开的子本人将军 + **藏在后面的子**因让线**新捉到大子**（动的子将军且后方子力同时攻击大子）。
+    // 闪将②：传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将；
+    // 走动的子须**真的离开该线**（走子后仍停在线上当炮架只是「换架抽子」），且将军须**本步新造**、
+    // checker **能合法吃到**将帅（被牵制时看似照将、真吃过去却会送将，属于伪将军）。
     const discovered =
       !attackersOf(before, oppKing, me).length &&
       checkers.some(
@@ -556,9 +514,23 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
           !restsOnLine(c, oppKing, move.to) &&
           canCapture(after, c, oppKing),
       );
-    const hidden = moverChecks ? revealedThreats(before, after, move, me) : { threats: [], actors: [] };
-    if (lost.length) {
-      // 将军 + 将军的子本人还咬到大子（两者必然失去其一）→ 将军抽车 / 炮 / 马
+    const seen = new Set<string>();
+    const lost = victims.filter(({ pos }) => {
+      const k = key(pos);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (moverChecks && hidden.threats.length) {
+      // 闪开的子将军 + 藏在后面的子捉大子 → 闪将（用户口径，优先于将军抽）
+      hits.push({
+        kind: 'discovered-check',
+        label: '闪将',
+        actors: hidden.actors,
+        threats: [oppKing, ...hidden.threats],
+      });
+    } else if (lost.length) {
+      // 将军 + 同时攻击大子 → 将军抽车 / 炮 / 马
       const best = lost.reduce((a, b) => (VALUE[b.piece.t] > VALUE[a.piece.t] ? b : a));
       hits.push({
         kind: 'check-fork',
@@ -568,39 +540,26 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       });
     } else if (discovered) {
       hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
-    } else if (hidden.threats.length) {
-      hits.push({
-        kind: 'discovered-check',
-        label: '闪将',
-        actors: hidden.actors,
-        threats: [oppKing, ...hidden.threats],
-      });
     }
   } else {
-    // 串打：走动的车 / 炮沿同一条射线攻击两枚值得捉的敌子，且对方无法两全（必失其一、且真能吃到）
+    // 串打 = 走动的车 / 炮沿同一条射线攻击前、后两枚值得捉的敌子（图案口径，v3.25）：
+    // 车打前子（后子被前子挡住）、炮打后子（前子正是炮架）——攻击子至少要能合法吃到其中一枚
+    // （`canCapture()`，过滤送将 / 照面）；**不再要求「对方必然失去其一」**——
+    // 对方反吃攻击子、或把前子退到攻击子口上仍会被吃等应着，都不影响这步按图案给出提示。
     if (moved.t === 'R' || moved.t === 'C') {
-      const ray = skewerRays(after, move.to, moved.t, opp).find(([front, back]) =>
-        mustLoseOne(after, repliesOnce(), move.to, [front, back], me),
+      const ray = skewerRays(after, move.to, moved.t, opp).find(
+        ([front, back]) => canCapture(after, move.to, front) || canCapture(after, move.to, back),
       );
       if (ray) {
         hits.push({ kind: 'skewer', label: '串打', actors: [move.to], threats: ray });
       }
     }
 
-    // 捉双：走动的子同时攻击两枚及以上「值得捉」的敌子（不含将），且对方无法两全（必失其一、且真能吃到）
+    // 捉双 = 走动的单枚子同时攻击两枚及以上「值得捉」的敌子（不含将），且都能合法吃到（图案口径）
     const valuable = piecesOf(after, opp).filter(
-      ({ pos, piece }) => isWorth(piece.t) && attacks(after, move.to, pos),
+      ({ pos, piece }) => isWorth(piece.t) && canCapture(after, move.to, pos),
     );
-    if (
-      valuable.length >= 2 &&
-      mustLoseOne(
-        after,
-        repliesOnce(),
-        move.to,
-        valuable.map((f) => f.pos),
-        me,
-      )
-    ) {
+    if (valuable.length >= 2) {
       hits.push({ kind: 'fork', label: '捉双', actors: [move.to], threats: valuable.map((f) => f.pos) });
     }
 
