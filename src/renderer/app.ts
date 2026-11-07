@@ -1971,6 +1971,13 @@ function backToEndgamePanel(): void {
   openEndgamePanel();
 }
 
+/** 残局「离开」：清理本局并回到残局列表（不是首页） */
+function leaveEndgameToPanel(): void {
+  closeModal();
+  resetLocal();
+  backToEndgamePanel();
+}
+
 /** 读取本机自建残局（纯逻辑见 shared/endgame.ts `parseCustomEndgames`） */
 function readCustomEndgames(): EndgamePuzzle[] {
   return parseCustomEndgames(readStore(CUSTOM_KEY));
@@ -2696,18 +2703,29 @@ function refreshInviteList(): void {
   net?.send({ type: 'list_players' });
 }
 
+/** 邀请列表 / 邀请弹层的玩家头像：账号按本机保存的头像取用，其余回退默认图标（头像不上传服务器） */
+function playerAvatar(p: Pick<OnlinePlayer, 'name' | 'kind'>): string {
+  if (p.kind !== 'account') return DEFAULT_AVATAR;
+  const saved = readStore(AVATAR_KEY_PREFIX + p.name);
+  return saved && saved.startsWith('data:image/') ? saved : DEFAULT_AVATAR;
+}
+
 /** 邀请列表的一行：在线且在大厅的玩家可一键邀请；在别处对局中 / 离线的置灰且不显示按钮 */
 function playerRow(p: OnlinePlayer, role: 'player' | 'spectator'): HTMLElement {
   const inviteable = p.online && p.roomId === null;
   const item = document.createElement('div');
   item.className = 'player-item ' + (inviteable ? 'online' : p.online ? 'busy' : 'offline');
 
+  const avatar = document.createElement('img');
+  avatar.className = 'p-avatar p-item-avatar';
+  avatar.alt = '';
+  avatar.src = playerAvatar(p);
   const dot = document.createElement('span');
   dot.className = 'p-dot';
   const name = document.createElement('span');
   name.className = 'p-name';
   name.textContent = p.name;
-  item.append(dot, name);
+  item.append(avatar, dot, name);
   if (p.kind === 'account') {
     const kind = document.createElement('span');
     kind.className = 'p-kind';
@@ -2767,9 +2785,21 @@ function sendInvite(playerId: string, role: 'player' | 'spectator'): void {
 /** 收到他人的房间邀请：可直接加入（房间设口令也免口令） */
 function showInviteModal(msg: Extract<ServerMessage, { type: 'invite' }>): void {
   const roleText = msg.role === 'player' ? '加入对局' : '观战';
+  // 邀请者头像：账号按本机保存的头像取用，其他玩家回退默认图标
+  const who = document.createElement('div');
+  who.className = 'invite-who';
+  const avatar = document.createElement('img');
+  avatar.className = 'p-avatar';
+  avatar.alt = '';
+  avatar.src = playerAvatar(msg.from);
+  const name = document.createElement('span');
+  name.className = 'invite-who-name';
+  name.textContent = msg.from.name;
+  who.append(avatar, name);
   showModal({
     title: '房间邀请',
-    sub: `「${msg.from.name}」邀请你${roleText}：房间 ${msg.roomId}${msg.locked ? '（已上锁，邀请可免口令）' : ''}`,
+    sub: `邀请你${roleText}：房间 ${msg.roomId}${msg.locked ? '（已上锁，邀请可免口令）' : ''}`,
+    body: who,
     buttons: [
       { label: '接受', primary: true, onClick: () => void acceptInvite(msg.roomId, msg.role) },
       { label: '拒绝' },
@@ -3094,7 +3124,7 @@ function bindEvents(): void {
   $('btn-eg-hint').addEventListener('click', endgameHint);
   $('btn-eg-next').addEventListener('click', endgameNext);
   $('btn-eg-restart').addEventListener('click', restartPuzzle);
-  $('btn-eg-leave').addEventListener('click', leaveToHome);
+  $('btn-eg-leave').addEventListener('click', leaveEndgameToPanel);
   $('btn-play-again').addEventListener('click', requestRestart);
   $('btn-home').addEventListener('click', leaveToHome);
   $('btn-leave').addEventListener('click', leaveToHome);

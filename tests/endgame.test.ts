@@ -723,6 +723,20 @@ describe('残局挑战：界面接线', () => {
     expect(APP).toContain('挑战失败：「${eg.puzzle.name}」');
   });
 
+  it('残局「离开」回到残局列表界面（不再直接回首页）', () => {
+    expect(APP).toContain('function leaveEndgameToPanel()');
+    expect(APP).toContain("$('btn-eg-leave').addEventListener('click', leaveEndgameToPanel)");
+    expect(APP).not.toContain("$('btn-eg-leave').addEventListener('click', leaveToHome)");
+    const body = APP.slice(
+      APP.indexOf('function leaveEndgameToPanel()'),
+      APP.indexOf('function readCustomEndgames()'),
+    );
+    // 先清理本局，再回到「残局挑战」面板（而不是首页挂板）
+    expect(body).toContain('resetLocal()');
+    expect(body).toContain('backToEndgamePanel()');
+    expect(body).not.toContain('leaveToHome()');
+  });
+
   it('残局页面「下一关」按钮：题库还有下一局才显示，点击进入下一局', () => {
     expect(APP).toContain('function endgameNext()');
     expect(APP).toContain('const next = nextPuzzle(eg.puzzle.id)');

@@ -852,6 +852,8 @@ body::before {
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
 }
 .player-item:hover { border-color: var(--line-strong); background: #33241a; }
+/* 邀请行头像：比玩家行头像小一档，与状态点 / 名称同排 */
+.player-item .p-item-avatar { width: 26px; height: 26px; }
 .player-item .p-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #4fd24f; }
 .player-item .p-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-item .p-kind,
@@ -1535,6 +1537,10 @@ body::before {
 .modal-title { font-size: 20px; letter-spacing: 2px; color: var(--gold); margin-bottom: 8px; }
 .modal-sub { min-height: 16px; font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
 .modal-body { max-height: 46vh; overflow-y: auto; }
+/* 房间邀请弹层：邀请者头像 + 名字 */
+.invite-who { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 14px; }
+.invite-who .p-avatar { width: 44px; height: 44px; }
+.invite-who-name { font-size: 15px; font-weight: 600; color: var(--text); word-break: break-all; }
 .modal .btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .modal .btns.col { flex-direction: column; }
 .modal .btns.col .btn { width: 100%; }

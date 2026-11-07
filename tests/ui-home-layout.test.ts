@@ -267,6 +267,22 @@ describe('大面板内的列表行（房间 / 服务器 / 邀请玩家）', () =
     expect(decl('.player-item .btn', 'flex')).toBe('none');
   });
 
+  it('房间邀请显示头像：邀请列表行与收到的邀请弹层都带头像', () => {
+    expect(APP).toContain('function playerAvatar(');
+    expect(APP).toContain("if (p.kind !== 'account') return DEFAULT_AVATAR;");
+    expect(APP).toContain("avatar.className = 'p-avatar p-item-avatar'");
+    expect(APP).toContain('avatar.src = playerAvatar(p)');
+    expect(APP).toContain('item.append(avatar, dot, name)');
+    // 收到的「房间邀请」弹层：邀请者头像 + 名字
+    expect(APP).toContain("who.className = 'invite-who'");
+    expect(APP).toContain('avatar.src = playerAvatar(msg.from)');
+    expect(APP).toContain('body: who');
+    // 邀请行头像小一档；弹层头像大一档
+    expect(decl('.player-item .p-item-avatar', 'width')).toBe('26px');
+    expect(decl('.invite-who .p-avatar', 'width')).toBe('44px');
+    expect(decl('.invite-who-name', 'font-weight')).toBe('600');
+  });
+
   it('邀请玩家：列表常驻等待页右栏 / 对局页侧栏（不再有邀请按钮与邀请弹层）', () => {
     // 原「邀请玩家」按钮及其弹层入口已移除
     expect(HTML).not.toContain('btn-invite-host');

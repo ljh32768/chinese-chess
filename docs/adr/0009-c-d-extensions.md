@@ -149,7 +149,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 对局页展示 | [app.ts `updatePanel()`](../../src/renderer/app.ts)：将死且识别到杀法时，状态框显示「红方胜 · 夹车炮」，其下渲染杀法框（杀法名 + 定义 + 「同时构成：…」）；**困毙终局以 `KUNBI_PATTERN` 显示「红方胜 · 困毙」并给出「欠行」定义**；联机、观战、本地人机共用同一判定 |
 | 回顾展示 | 列表「胜负」列优先显示记录中的 `killMethod`（旧记录退回「将死」）；复盘页新增「终局杀法」面板，按记录着法即时识别，因此新老记录都能给出具体杀法 |
 
-### 3.12 残局挑战（v2.5；v2.6 追加「下一关」与「自检题库」；v2.7 改为不限步数 + 状态标记；v2.9 追加「自建残局」编辑器；v3.3 核验上限 4 → 50 步并移到 Web Worker；v3.7 编辑器棋子栏同款素材 + 剩余枚数 + 拖拽；v3.16 结果不再弹结果卡）
+### 3.12 残局挑战（v2.5；v2.6 追加「下一关」与「自检题库」；v2.7 改为不限步数 + 状态标记；v2.9 追加「自建残局」编辑器；v3.3 核验上限 4 → 50 步并移到 Web Worker；v3.7 编辑器棋子栏同款素材 + 剩余枚数 + 拖拽；v3.16 结果不再弹结果卡；v3.17「离开」回到残局列表）
 
 | 项 | 规格 |
 |---|---|
@@ -165,7 +165,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
 | 自建残局落盘与列表 | [app.ts `renderEndgameList()`](../../src/renderer/app.ts)：内置题库在前、自建残局在后，共用同一 `endgameRow()` 行（状态标记 + 名称 + 难度 / 「自建」徽章 + 最优步数）；自建条目右侧多出「编辑（`✎`）/ 删除（`✕`）」两个小按钮（[`askDeleteCustom()`](../../src/renderer/app.ts) 二次确认，并一并清掉本机对应的通关记录）。保存（`saveCustomEndgame()`）通过 `upsertCustomEndgame()` 写入本机存档后回到残局面板；自建残局与内置残局一样可开局、可记通关记录，只是题库中没有下一局（「下一关」按钮隐藏） |
 | 状态机 | [game.ts `setup(board, turn)`](../../src/shared/game.ts)：以自定义局面开局（清空着法 / 悔棋栈 / 待处理请求，标记先行方是否被将军），残局与既有 `applyMove` / `undo` / 终局判定完全复用 |
 | 入口 | 首页木质挂板「残局挑战」（`btn-endgame`，v2.5 由 5 入口改为 6 入口）→ 大面板 `menu-endgame` 列出题库（名称 / 难度徽章 / **最优步数** / **状态标记**），点击任意一条即开局 |
-| 对局页 | 残局用独立操作行 `actions-endgame`：**悔棋**（连同 AI 应招一起回退）、**提示**（不限步数，用 `minMateDepth` 求出当前局面最少取胜步数，再由 `findMateMove` 给出对应着法——棋盘高亮起点 / 终点金环 + 轻提示记谱 + 步数；已走成无法强制取胜则提示重来）、**下一关**（`nextPuzzle` 直接进入题库中的下一局；题库中无下一局时按钮隐藏，已到末关点击提示「已经是最后一关了」）、**重来**（恢复初始局面）、**离开**；隐藏「和棋 / 认输」。侧栏 `eg-box` 显示残局名、难度、**最优步数**、已用步数与本局要点；状态框显示「轮到你走棋（第 x 步）」（不再有步数上限） |
+| 对局页 | 残局用独立操作行 `actions-endgame`：**悔棋**（连同 AI 应招一起回退）、**提示**（不限步数，用 `minMateDepth` 求出当前局面最少取胜步数，再由 `findMateMove` 给出对应着法——棋盘高亮起点 / 终点金环 + 轻提示记谱 + 步数；已走成无法强制取胜则提示重来）、**下一关**（`nextPuzzle` 直接进入题库中的下一局；题库中无下一局时按钮隐藏，已到末关点击提示「已经是最后一关了」）、**重来**（恢复初始局面）、**离开**（v3.17：`leaveEndgameToPanel()` 先 `resetLocal()` 清理本局，再 `backToEndgamePanel()` 回到题库列表面板——不再直接回首页）；隐藏「和棋 / 认输」。侧栏 `eg-box` 显示残局名、难度、**最优步数**、已用步数与本局要点；状态框显示「轮到你走棋（第 x 步）」（不再有步数上限） |
 | 防守 AI | 执玩家的对方（高手档 level 4），延迟 0.35s 应招。**v3.0 起改由引擎出着法（皮卡鱼优先，见 [ADR-0011](./0011-pikafish-engine.md)）**：`app.ts runLocalAi()` 经 `POST /api/ai/move` 取着法，请求失败回退 [shared/ai.ts `pickMove()`](../../src/shared/ai.ts)（depth 4 / 0.9s）；玩家走完一步后由 `endgameEvaluate()` 继续调度 AI（未出结果时）。题库可解性由 `minMateDepth` 按「对**最优防守**仍可强制将死」校验，故加强防守不破坏契约 |
 | 胜负判定 | **不限步数**：每步（玩家与 AI）之后只看终局——我方取胜（将死 / 困毙）→ 成功并记录取胜最少步数；被对方将死 / 困毙 → 失败（「被将死 / 被困毙」）。**v3.16 起不再弹结果卡**：成功 / 失败都沿用残局操作行（`actions-endgame` 常驻、`actions-over` 在残局恒隐藏），**「悔棋 / 提示」置灰，`下一关 / 重来 / 离开`照常可用**；结果改在状态框（「挑战成功 · 杀法名」/「挑战失败 · 原因」）与轻提示里报出，不再出现「再来一局 / 返回首页」 |
 | 记录与状态标记 | 本机记录仅存 `localStorage['lanschess-endgame']`：`id → { win?: 取胜最少步数, fail?: 是否曾失败 }`（兼容 v2.5/v2.6 的「数字 = 最少步数」旧格式，读入时视为已通关；损坏数据按未完成处理）。列表每行状态标记：**勾叉表示完成 / 失败 / 未完成——绿勾（已完成）、红叉（失败）、白勾（未完成）；外圈绿色表示已达成最优步数（`win === goalMoves`）、灰色表示未达成**（[styles.css `.eg-mark`](../../src/renderer/styles.css)） |
@@ -267,3 +267,7 @@ C 档（工程化）与 D 档（功能扩展）引入四个新模块与若干跨
   - **复盘 AI 推荐**：`toggleHint()` 改为请求 `/api/ai/line?plies=5`（不再单独请求 `/api/ai/hint`），首手画箭头 / 蓝盘；新增 `btn-replay-step-prev` / `btn-replay-step-next` / `replay-step-pos`，`lineStep` 逐步预览；在已算末端且 `lineDone = false` 时点 ▶ 调用 `extendLine()` 续算 5 手（`lineChunkTarget()`，封顶 30），把已算整段变化用 `encodeLinePrefix()` 编码为 `prefix` 回传；`lineEndsGame()` 为真且到最后一步时右箭头置灰。
   - **复盘试下**：新增 `trialStep` 与同一组 ◀ / ▶ 导航；预览历史试走着法时棋盘只读，点棋盘回到最新一步；← / → 方向键按当前形态生效。
   - 自动化：`npm test`（515 项）新增 [tests/review.test.ts](../../tests/review.test.ts)（`lineChunkTarget` / `lineEndsGame` / `encodeLinePrefix`）、[tests/server.test.ts](../../tests/server.test.ts)（`prefix` 续算原样保留已算变化）、[tests/endgame.test.ts](../../tests/endgame.test.ts)（结果沿用操作行 / 不再弹结果卡）、[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（吃子归并 + 角标、侧栏居中、复盘步数导航与按钮态）；lint / format / build 全绿。
+- v3.17（房间邀请头像 + 残局离开回列表，2026-11-07）：
+  - **邀请头像**：新增 `app.ts playerAvatar()`——账号按本机 `lanschess-avatar:<用户名>` 取自定义头像，其他玩家 / 游客回退 `DEFAULT_AVATAR`（头像仍不上传服务器）；`playerRow()` 在列表行加 `<img class="p-avatar p-item-avatar">`（26px），`showInviteModal()` 在「房间邀请」弹层加 `.invite-who`（44px 头像 + 名字）。
+  - **残局离开**：新增 `leaveEndgameToPanel()`（`closeModal()` + `resetLocal()` + `backToEndgamePanel()`），`btn-eg-leave` 改绑该函数——清理本局后回到残局题库列表，不再直接回首页。
+  - 自动化：`npm test`（517 项）新增 [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（邀请行 / 邀请弹层头像与尺寸）、[tests/endgame.test.ts](../../tests/endgame.test.ts)（残局离开回到列表且不再调用 `leaveToHome`）；lint / format / build 全绿。
