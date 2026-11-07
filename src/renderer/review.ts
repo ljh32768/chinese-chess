@@ -226,7 +226,7 @@ export function initReview(deps: ReviewDeps): ReviewController {
       box.replaceChildren();
       const tip = document.createElement('p');
       tip.className = 'review_empty';
-      tip.textContent = '尚未识别到你的身份：登录账号后可按账号查看「我的历史」；游客请先加入过一局。';
+      tip.textContent = '尚未识别到你的身份：请重新登录账号后查看「我的历史」。';
       box.appendChild(tip);
       return;
     }

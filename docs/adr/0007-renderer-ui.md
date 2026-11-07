@@ -269,6 +269,22 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 [tests/board.test.ts](../../tests/board.test.ts)（`BoltOp` 存在性与 `seed`、**放大后的基准半径 `disc/2 + 12`**、画在棋子之后；`kingShake` 使将位 `DrawOp` 坐标偏移）、
 [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（`#board-tactics` 结构、**v3.7 黑色方框 + 楷体加粗**、正中大字 `data-kind` 白红配色与无黑底 / 无圆框、减少动态效果块、`app.ts` 的 `detectTactics` / `detectOpening` 接线）。
 
+### 3.5.8 v3.15 登录首屏、用户头像与整体放大
+
+| 项 | 规格 |
+|---|---|
+| 首屏与流转 | 新增 `screen-login`（登录 / 注册首屏）。`init()`：本机同时存在 `lanschess-token` 与 `lanschess-user` → 直接 `backToIndex()` + `show('screen-home')`，后台 `connectQuietly()` 并尝试恢复上次房间；否则 `showLoginScreen()`。**取消游客模式**：未登录不能进入首页；`logout()` 清除 token 后回到登录首屏。启动不再打开「连接服务器」界面 |
+| 登录页版式 | 版式参考登录页（左视觉区 + 右表单面板），但配色 / 控件全部使用本项目令牌（深棕木纹 + `--gold`），不照搬参考页的冷色玻璃与红色按钮：左侧 `login-logo`（`symbol.png`）+ 大字标题「落子无悔 / 一局定乾坤」+ 两枚暗纹棋子；右侧 `login-tabs`（登录 / 注册滑块）→ `#login-form` / `#register-form` → `.lg-field`（左侧图标 + 浮动标签 + 密码显隐 `.lg-eye` + 行内错误 `.lg-err`）→ `.lg-btn` 金色主按钮 → `#login-status` → 底部 `#login-server-status` + `#btn-login-server` |
+| 校验 | 与服务器一致：用户名 `^[A-Za-z0-9_]{3,16}$`、密码 4–20 位、注册须两次一致；不通过时字段标红 + `.login-panel.shake` 抖动。服务器错误（重名 / 密码错误 / 未连接）显示在 `#login-status.err` |
+| 服务器连接 | 登录页在后台静默 `connectQuietly()`（不切换屏幕、不弹窗）；状态行显示已连接 / 未连接；点「连接服务器」进入 `screen-servers`。连接页 `btn-server-enter` 未登录时返回登录页，已登录时回首页 |
+| 连接页版式 | 参考连接页结构：标题 + 进入按钮 → 地址输入 + 连接 → 搜索 / 刷新工具栏 → 服务器列表（圆点 + 等宽地址 + 状态标签，绿 / 红 / 灰）→ 底部 `#server-lock-tip` 说明（浏览器锁定 / 桌面可切换）；样式沿用 `.panel-lg` 木质面板 |
+| 用户页 | `menu-acct` 改为用户页：`user-avatar`（118px 圆形头像）+ `btn-avatar-pick` / `avatar-file` + `btn-avatar-default`；`user-name` / `user-server` / `user-badge` / 三行账号信息；底部 `btn-logout`。旧的首页用户名 / 密码登录表单已删除（登录统一走首屏） |
+| 用户头像 | 默认 `./assets/img/symbol.png`（`DEFAULT_AVATAR`）；自定义头像按账号保存在本机，键 `lanschess-avatar:<username>`（data URL，≤2 MB），不上传服务器。`applyAvatars()` 同步到主页入口 `acct-chip-avatar`、用户页 `user-avatar`、对局侧栏 `p-bottom-avatar`；对手 `p-top-avatar` 用默认图标 |
+| 整体放大 | `--ui-scale` 1.25 → **1.4**；`.app` 最大宽 1180 → **1360**（`--app-max`）；`.panel-lg` 620 → **760**（`--panel-max`）、`.review_box` → **920**（`--review-max`）；对局侧栏 `.panel` 268 → **320px**（`min-width: 280px`）；吃子条 40 → 50px、缩略图 34 → **42px**；状态框 14.5 → 15.5px；`body` 字号 14 → **16px** |
+| 棋盘放大 | 画布不再锁定原生 523×580：`.chess-box canvas` 宽 = `min(calc((100vh - 200px) * 0.9017), 680px, calc(100vw - 48px))`（复盘 / 通用），对局页 = `min(calc((100vh - 190px) * 0.9017), 660px, ...)`；编辑器 = `min(calc((100vh - 330px) * 0.9017), 640px, ...)`。`board.ts` 新增 `renderPixelRatio(cssWidth, skinWidth, dpr)`（上限 3×），`renderBoard()` 按 CSS 显示宽 × 设备像素比设置画布内部尺寸并 `setTransform`，放大后不发虚；点击换算仍走 `canvasPoint()` |
+| 应用图标 | 浏览器 `<link rel="icon">` / `apple-touch-icon`、Electron `BrowserWindow.icon`（`dist/renderer/assets/img/symbol.png`）、electron-builder `build.win.icon`（`Reference/picture/symbol.png`）统一使用 `symbol.png`；Electron 窗口 1120×840 → **1360×960**（最小 900×700） |
+| 验收 | [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 新增「v3.15 登录首屏、用户头像与整体放大」：图标路径与窗口尺寸、登录 / 注册首屏与 `init` 流转、表单 / 选项卡 / 密码显隐、用户页头像与退出登录、头像默认值、放大后的棋盘 / 面板 / 侧栏尺寸；[tests/board.test.ts](../../tests/board.test.ts) 新增 `renderPixelRatio` 倍率与上限用例 |
+
 ### 3.6 走子交互（app.ts `onCell`）
 
 | 场景 | 行为 |

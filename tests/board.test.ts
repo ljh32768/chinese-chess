@@ -29,6 +29,7 @@ import {
   moveAnimFrame,
   nextSkin,
   pickCell,
+  renderPixelRatio,
   RingOp,
   toLogic,
   toView,
@@ -150,6 +151,20 @@ describe('坐标换算与命中 pickCell', () => {
       getBoundingClientRect: () => ({ left: 10, top: 20, width: skin2.width / 2, height: skin2.height / 2 }),
     } as unknown as HTMLCanvasElement;
     expect(canvasPoint(fake, 10 + 50, 20 + 60, skin2)).toEqual({ x: 100, y: 120 });
+  });
+
+  it('v3.15 棋盘放大后按显示尺寸提高内部像素密度（上限 3 倍）', () => {
+    // 原始尺寸 / 1 倍屏：不额外放大
+    expect(renderPixelRatio(523, 523, 1)).toBe(1);
+    // 显示放大到 660px：内部按 660/523 ≈ 1.26 倍渲染
+    expect(renderPixelRatio(660, 523, 1)).toBeCloseTo(660 / 523);
+    // 高分屏再叠加设备像素比
+    expect(renderPixelRatio(660, 523, 2)).toBeCloseTo(Math.min(3, (660 / 523) * 2));
+    // 上限 3 倍（避免超大屏浪费性能）
+    expect(renderPixelRatio(3000, 523, 3)).toBe(3);
+    // 非法尺寸回退 1 倍
+    expect(renderPixelRatio(0, 523, 1)).toBe(1);
+    expect(renderPixelRatio(523, 0, 1)).toBe(1);
   });
 });
 

@@ -95,3 +95,12 @@
 - `npm start` 打开桌面窗口并显示首页；端口被占用时仍能启动（随机端口）。
 - `npm run host` 打印可访问的局域网地址，浏览器打开后能创建/加入对局。
 - 关闭窗口后进程退出且端口释放（`close()` 生效）。
+
+## 6. v3.15 增量：窗口尺寸与图标（2026-11-07 完成）
+
+| 项 | 规格 |
+|---|---|
+| 窗口 | `BrowserWindow` 默认 1120×840 → **1360×960**，最小 900×700（配合 v3.15 整体放大后的棋盘 / 侧栏） |
+| 窗口图标 | `BrowserWindow.icon` 使用 `path.join(app.getAppPath(), 'dist/renderer/assets/img/symbol.png')`（构建时由 `copy-assets.mjs` 随素材复制；打包后位于 asar 内，Electron 可直接读取） |
+| 安装包图标 | `package.json` `build.win.icon` = `Reference/picture/symbol.png`（350×350 PNG，electron-builder 自动转 ico） |
+| 浏览器 | `index.html` 的 `<link rel="icon">` / `apple-touch-icon` 指向 `./assets/img/symbol.png` |

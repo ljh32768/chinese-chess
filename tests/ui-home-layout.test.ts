@@ -7,7 +7,7 @@
  * 5) v2.4 视觉与交互精修：设计令牌、焦点可见、切屏 / 弹层动效、减少动态效果、状态框「轮到你走棋」强调。
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
@@ -20,6 +20,8 @@ const read = (p: string): string => readFileSync(path.join(ROOT, p), 'utf8').rep
 const CSS = read('src/renderer/styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
 const HTML = read('src/renderer/index.html');
 const APP = read('src/renderer/app.ts');
+const MAIN = read('src/main/main.ts');
+const PKG = JSON.parse(read('package.json')) as { build?: { win?: { icon?: string } } };
 const BG_PNG = path.join(ROOT, 'src', 'renderer', 'assets', 'img', 'init_bg.png');
 
 // ---------------------------------------------------------------- CSS 解析辅助
@@ -207,11 +209,13 @@ describe('首页木质挂板：仅入口，按 --ui-scale 放大', () => {
 // ---------------------------------------------------------------- 点击板块后的大面板
 
 describe('点击板块后的界面：不再与木框对齐，改用大面板（参考对局回顾）', () => {
-  it('大面板与「对局回顾」同款：宽 620、限高可滚动', () => {
-    expect(decl('.panel-lg', 'max-width')).toBe('620px');
-    expect(decl('.review_box', 'max-width')).toBe('620px');
+  it('大面板与「对局回顾」同款：v3.15 放大到 760px / 920px，限高可滚动', () => {
+    expect(decl(':root', '--panel-max')).toBe('760px');
+    expect(decl(':root', '--review-max')).toBe('920px');
+    expect(decl('.panel-lg', 'max-width')).toBe('var(--panel-max)');
+    expect(decl('.review_box', 'max-width')).toBe('var(--review-max)');
     expect(decl('.panel-lg', 'overflow-y')).toBe('auto');
-    expect(decl('.panel-lg', 'max-height')).toBe('calc(100vh - 48px)');
+    expect(decl('.panel-lg', 'max-height')).toBe('calc(100vh - 40px)');
   });
 
   it('已删除「与木板内框对齐」的窄面板规则（.menu_info / 280 宽 / 内框几何常量）', () => {
@@ -273,7 +277,7 @@ describe('大面板内的列表行（房间 / 服务器 / 邀请玩家）', () =
     expect(HTML).toContain('id="player-list-host"');
     expect(HTML).toContain('id="player-list-game"');
     expect(decl('.wait-layout', 'display')).toBe('flex');
-    expect(decl('.wait-layout > .panel-lg', 'min-width')).toBe('300px');
+    expect(decl('.wait-layout > .panel-lg', 'min-width')).toBe('340px');
     // 列表行风格沿用：flex 排布，离线 / 对局中的玩家置灰且不显示邀请按钮
     expect(decl('.player-item', 'display')).toBe('flex');
     expect(decl('.player-item.offline', 'opacity')).toBe('0.6');
@@ -281,9 +285,9 @@ describe('大面板内的列表行（房间 / 服务器 / 邀请玩家）', () =
     expect(RULES.some((r) => r.selectors.includes('.player-item.offline .btn'))).toBe(true);
     expect(RULES.some((r) => r.selectors.includes('.player-item.busy .btn'))).toBe(true);
     // 对局侧栏窄：列表限高可滚动，不撑破面板
-    expect(decl('.panel-box .player-list', 'max-height')).toBe('208px');
+    expect(decl('.panel-box .player-list', 'max-height')).toBe('240px');
     // 宽版弹层仍保留（题库自检结果复用）
-    expect(decl('.modal.wide', 'max-width')).toBe('520px');
+    expect(decl('.modal.wide', 'max-width')).toBe('640px');
     expect(HTML).toContain('id="modal-body"');
     expect(decl('.modal-body', 'overflow-y')).toBe('auto');
   });
@@ -337,7 +341,7 @@ describe('其他界面约定', () => {
 
 describe('v2.4 视觉与交互精修', () => {
   it('设计令牌集中在 :root（木色层次 / 强调金 / 焦点环 / 缓动）', () => {
-    expect(decl(':root', '--ui-scale')).toBe('1.25');
+    expect(decl(':root', '--ui-scale')).toBe('1.4');
     expect(decl(':root', '--gold')).toBe('#ffcf7a');
     expect(decl(':root', '--surface-3')).toBeTruthy();
     expect(decl(':root', '--focus-ring')).toBeTruthy();
@@ -449,7 +453,7 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     expect(decl('.board-banner', 'inset')).toBe('0');
     expect(decl('.board-banner', 'pointer-events')).toBe('none');
     expect(decl('.board-tactics-slot', 'display')).toBe('flex');
-    expect(decl('.board-tactics-slot', 'min-height')).toBe('64px');
+    expect(decl('.board-tactics-slot', 'min-height')).toBe('70px');
     expect(decl('.board-tactics', 'position')).toBeUndefined();
     expect(decl('.board-tactics', 'top')).toBeUndefined();
     expect(decl('.board-tactics', 'pointer-events')).toBe('none');
@@ -477,7 +481,7 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     expect(decl('.banner-name', 'font-weight')).toBe('900');
     expect(decl(".banner-name[data-kind='check']", 'color')).toBe('#fff3d6');
     expect(decl(".banner-name[data-kind='mate']", 'color')).toBe('#ff3b30');
-    expect(decl(".banner-name[data-kind='mate']", 'font-size')).toBe('46px');
+    expect(decl(".banner-name[data-kind='mate']", 'font-size')).toBe('52px');
   });
 
   it('战术提示改为黑色方框，字体与正中大字同款楷体加粗', () => {
@@ -530,7 +534,7 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
 
 describe('v2.10 提示特效（黑色大圆、将颤抖、战术闪电与开局提示）', () => {
   it('上方提示条放在棋盘上方、不接收事件，2.5s 渐入渐出', () => {
-    expect(decl('.board-tactics-slot', 'min-height')).toBe('64px');
+    expect(decl('.board-tactics-slot', 'min-height')).toBe('70px');
     expect(decl('.board-tactics', 'position')).toBeUndefined();
     expect(decl('.board-tactics.show', 'animation')).toContain('tactic-cycle 2.5s');
     expect(CSS).toContain('@keyframes tactic-cycle');
@@ -542,9 +546,9 @@ describe('v2.10 提示特效（黑色大圆、将颤抖、战术闪电与开局�
   });
 
   it('战术元素已放大：上方提示条字号 / 内边距加大，闪电基准半径加大', () => {
-    expect(decl('.board-tactics', 'font-size')).toBe('30px');
+    expect(decl('.board-tactics', 'font-size')).toBe('34px');
     expect(decl('.board-tactics', 'letter-spacing')).toBe('6px');
-    expect(decl('.board-tactics', 'padding')).toBe('10px 36px');
+    expect(decl('.board-tactics', 'padding')).toBe('12px 40px');
     expect(read('src/renderer/board.ts')).toContain('radius: skin.disc / 2 + 12');
   });
 
@@ -814,5 +818,106 @@ describe('v3.0 揭棋（暗棋）入口与接线契约', () => {
     expect(BOARD).toContain('export interface BackOp');
     expect(BOARD).toContain('back: true');
     expect(BOARD).toContain('p.hidden');
+  });
+});
+
+// ---------------------------------------------------------------- v3.15 登录首屏 / 头像 / 放大
+
+describe('v3.15 登录首屏、用户头像与整体放大', () => {
+  it('浏览器 / Electron / 安装包图标统一使用 symbol.png', () => {
+    expect(HTML).toContain('<link rel="icon" type="image/png" href="./assets/img/symbol.png">');
+    expect(HTML).toContain('<img class="login-logo" src="./assets/img/symbol.png"');
+    expect(MAIN).toContain("'symbol.png'");
+    expect(MAIN).toContain('width: 1360');
+    expect(MAIN).toContain('height: 960');
+    expect(PKG.build?.win?.icon).toBe('Reference/picture/symbol.png');
+    expect(existsSync(path.join(ROOT, 'src', 'renderer', 'assets', 'img', 'symbol.png'))).toBe(true);
+  });
+
+  it('未登录首屏是登录 / 注册；已登录才直接进首页；不再提供游客模式', () => {
+    expect(HTML).toContain('id="screen-login"');
+    expect(HTML).toContain('id="login-form"');
+    expect(HTML).toContain('id="register-form"');
+    expect(HTML).toContain('id="lg-user"');
+    expect(HTML).toContain('id="rg-pass2"');
+    expect(HTML).not.toContain('游客');
+    expect(APP).toContain('function showLoginScreen(');
+    expect(APP).toContain('function submitAuth(');
+    expect(APP).toContain("type: 'login'");
+    expect(APP).toContain("type: 'register'");
+    expect(APP).not.toContain('未登录将以游客身份游玩');
+    // init：已登录进首页，否则进入登录页；不再一启动就打开连接服务器界面
+    const init = APP.slice(APP.indexOf('async function init('));
+    expect(init).toContain('if (S.account)');
+    expect(init).toContain('showLoginScreen();');
+    expect(init).not.toContain("show('screen-servers')");
+  });
+
+  it('登录 / 注册表单：选项卡、浮动标签、密码显隐、错误行与服务器入口', () => {
+    for (const id of ['login-tabs', 'login-form', 'register-form', 'login-status', 'btn-login-server']) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    expect(HTML).toContain('class="login-indicator"');
+    expect(HTML).toContain('class="lg-eye"');
+    expect(decl('.login-stage', 'display')).toBe('flex');
+    expect(decl('.login-tabs', 'display')).toBe('grid');
+    expect(decl('.login-form.active', 'display')).toBe('block');
+    expect(decl('.lg-field input:focus', 'border-color')).toBeTruthy();
+    expect(APP).toContain('function switchLoginTab(');
+    expect(APP).toContain('function setLoginFieldError(');
+    expect(APP).toContain('async function connectForLogin(');
+  });
+
+  it('账号 / 用户界面带头像与退出登录（版式参考用户页，沿用木色）', () => {
+    for (const id of [
+      'user-avatar',
+      'avatar-file',
+      'btn-avatar-pick',
+      'btn-avatar-default',
+      'btn-logout',
+      'user-name',
+      'user-server',
+      'user-badge',
+    ]) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    // 旧的账号登录 / 注册表单已移出首页面板（登录统一走首屏）
+    expect(HTML).not.toContain('id="acct-user"');
+    expect(HTML).not.toContain('id="acct-pwd"');
+    expect(HTML).not.toContain('id="btn-login"');
+    expect(APP).toContain("const DEFAULT_AVATAR = './assets/img/symbol.png'");
+    expect(APP).toContain("const AVATAR_KEY_PREFIX = 'lanschess-avatar:'");
+    expect(APP).toContain('function onAvatarFile(');
+    expect(APP).toContain('function resetAvatar(');
+    expect(decl('.user-avatar', 'width')).toBe('118px');
+    expect(decl('.user-actions .btn', 'flex')).toBe('1');
+  });
+
+  it('头像在主页 / 用户页 / 对局侧栏展示，未设置时默认 symbol.png', () => {
+    for (const id of ['acct-chip-avatar', 'p-top-avatar', 'p-bottom-avatar']) {
+      expect(HTML).toContain(`id="${id}"`);
+    }
+    const defaultSrc = HTML.match(/src="\.\/assets\/img\/symbol\.png"/g) ?? [];
+    expect(defaultSrc.length).toBeGreaterThanOrEqual(5);
+    expect(APP).toContain("$<HTMLImageElement>('p-bottom-avatar').src = own;");
+  });
+
+  it('界面整体放大：棋盘 / 大面板 / 侧栏 / 提示字号（含子页面与桌面窗口）', () => {
+    expect(decl(':root', '--app-max')).toBe('1360px');
+    expect(decl('.app', 'max-width')).toBe('var(--app-max)');
+    expect(decl(':root', '--ui-scale')).toBe('1.4');
+    expect(decl('.chess-box canvas', 'width')).toBe(
+      'min(calc((100vh - 200px) * 0.9017), 680px, calc(100vw - 48px))',
+    );
+    expect(decl('#screen-game .chess-box canvas', 'width')).toBe(
+      'min(calc((100vh - 190px) * 0.9017), 660px, calc(100vw - 48px))',
+    );
+    expect(decl('.panel', 'flex')).toBe('0 1 320px');
+    expect(px('.cap-piece', 'width')).toBeGreaterThan(40);
+    expect(px('.board-tactics', 'font-size')).toBe(34);
+    expect(px('.banner-name', 'font-size')).toBe(64);
+    expect(decl('body', 'font')).toContain('16px');
+    expect(decl('.editor-main #eg-board', 'width')).toContain('640px');
+    expect(MAIN).toContain('width: 1360');
   });
 });

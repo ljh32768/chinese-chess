@@ -4,28 +4,173 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>局域网象棋</title>
+<link rel="icon" type="image/png" href="./assets/img/symbol.png">
+<link rel="apple-touch-icon" href="./assets/img/symbol.png">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <div class="app">
 
-  <!-- ========== 连接服务器（客户端启动后的第一个板块；浏览器打开时锁定） ========== -->
-  <section id="screen-servers" class="screen active">
-    <div class="panel-lg" id="server-panel">
+  <!-- ========== 登录 / 注册（未登录时的首屏；已登录则直接进入首页） ========== -->
+  <section id="screen-login" class="screen">
+    <div class="login-stage">
+      <aside class="login-visual" aria-hidden="true">
+        <div class="login-brand">
+          <img class="login-logo" src="./assets/img/symbol.png" alt="">
+          <h1>落子无悔<br><em>一局定乾坤</em></h1>
+          <p>局域网中国象棋 · 与好友同盘对弈</p>
+        </div>
+        <div class="login-piece big">帥</div>
+        <div class="login-piece small">將</div>
+      </aside>
+
+      <main class="login-panel" id="login-panel">
+        <div class="login-tabs" id="login-tabs" data-active="login" role="tablist">
+          <button type="button" class="login-tab active" data-tab="login" role="tab" aria-selected="true">登 录</button>
+          <button type="button" class="login-tab" data-tab="register" role="tab" aria-selected="false">注 册</button>
+          <span class="login-indicator" aria-hidden="true"></span>
+        </div>
+
+        <!-- ===== 登录 ===== -->
+        <form id="login-form" class="login-form active" novalidate autocomplete="on">
+          <div class="lg-field">
+            <span class="lg-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="3.6"/>
+                <path d="M4.5 20c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6"/>
+              </svg>
+            </span>
+            <input type="text" id="lg-user" placeholder=" " autocomplete="username" maxlength="16" />
+            <label for="lg-user">用户名</label>
+            <span class="lg-err"></span>
+          </div>
+
+          <div class="lg-field">
+            <span class="lg-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/>
+                <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/>
+              </svg>
+            </span>
+            <input type="password" id="lg-pass" placeholder=" " autocomplete="current-password" maxlength="20" />
+            <label for="lg-pass">密码</label>
+            <span class="lg-err"></span>
+            <button type="button" class="lg-eye" data-target="lg-pass" aria-label="显示密码">
+              <svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M4 20 20 4"/>
+              </svg>
+            </button>
+          </div>
+
+          <button type="submit" class="lg-btn" id="btn-login-submit">登 录</button>
+        </form>
+
+        <!-- ===== 注册 ===== -->
+        <form id="register-form" class="login-form" novalidate autocomplete="on">
+          <div class="lg-field">
+            <span class="lg-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="8" r="3.6"/>
+                <path d="M4.5 20c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6"/>
+              </svg>
+            </span>
+            <input type="text" id="rg-user" placeholder=" " autocomplete="username" maxlength="16" />
+            <label for="rg-user">设置用户名（3-16 位字母 / 数字 / 下划线）</label>
+            <span class="lg-err"></span>
+          </div>
+
+          <div class="lg-field">
+            <span class="lg-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/>
+                <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/>
+              </svg>
+            </span>
+            <input type="password" id="rg-pass" placeholder=" " autocomplete="new-password" maxlength="20" />
+            <label for="rg-pass">设置密码（4-20 位）</label>
+            <span class="lg-err"></span>
+            <button type="button" class="lg-eye" data-target="rg-pass" aria-label="显示密码">
+              <svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M4 20 20 4"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="lg-field">
+            <span class="lg-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3.5 4.5 6.8v5c0 4.2 3.1 7.3 7.5 8.7 4.4-1.4 7.5-4.5 7.5-8.7v-5L12 3.5Z"/>
+                <path d="m9 12 2.2 2.2L15.2 10"/>
+              </svg>
+            </span>
+            <input type="password" id="rg-pass2" placeholder=" " autocomplete="new-password" maxlength="20" />
+            <label for="rg-pass2">确认密码</label>
+            <span class="lg-err"></span>
+            <button type="button" class="lg-eye" data-target="rg-pass2" aria-label="显示密码">
+              <svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M4 20 20 4"/>
+              </svg>
+            </button>
+          </div>
+
+          <button type="submit" class="lg-btn" id="btn-register-submit">注 册</button>
+        </form>
+
+        <p class="login-status" id="login-status" role="status" aria-live="polite"></p>
+
+        <div class="login-server">
+          <span id="login-server-status">服务器：—</span>
+          <button type="button" id="btn-login-server">连接服务器</button>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ========== 连接服务器（登录页 / 首页的「服务器」入口；浏览器打开时锁定） ========== -->
+  <section id="screen-servers" class="screen">
+    <div class="panel-lg connect-panel" id="server-panel">
       <div class="panel-lg-head">
         <span class="panel-lg-title">连接服务器</span>
         <button type="button" class="btn small" id="btn-server-enter">进入游戏</button>
       </div>
       <div class="server-manual">
-        <input type="text" id="server-addr" autocomplete="off" placeholder="192.168.1.42:7777">
-        <button type="button" class="btn small" id="btn-server-connect">连接</button>
+        <input type="text" id="server-addr" autocomplete="off" spellcheck="false" placeholder="IP:端口，例如 192.168.1.42:7777">
+        <button type="button" class="btn small" id="btn-server-connect">连 接</button>
       </div>
       <div class="scan-actions">
-        <button type="button" class="btn small" id="btn-server-scan">搜索局域网</button>
-        <button type="button" class="btn small" id="btn-server-list">刷新列表</button>
+        <button type="button" class="btn small ghost" id="btn-server-scan">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          搜索局域网
+        </button>
+        <button type="button" class="btn small ghost" id="btn-server-list">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          刷新列表
+        </button>
       </div>
       <div class="server-list" id="server-list"></div>
       <p class="hint" id="server-msg"></p>
+      <div class="connect-tip" id="server-lock-tip">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <span id="server-lock-text">浏览器访问：服务器地址与访问地址一致，已锁定；桌面客户端可切换任意局域网服务器。</span>
+      </div>
     </div>
   </section>
 
@@ -33,7 +178,10 @@
   <section id="screen-home" class="screen">
     <div class="home-corner">
       <button type="button" class="chip" id="server-chip" title="点击查看 / 切换服务器">服务器：—</button>
-      <button type="button" class="chip" id="acct-chip" title="注册 / 登录">登录 / 注册</button>
+      <button type="button" class="chip chip-user" id="acct-chip" title="查看账号">
+        <img class="chip-avatar" id="acct-chip-avatar" src="./assets/img/symbol.png" alt="">
+        <span id="acct-chip-name">未登录</span>
+      </button>
     </div>
 
     <div class="menu_box" id="menu-board">
@@ -101,20 +249,36 @@
       <p class="hint" id="endgame-hint">选一局开战：轮到你（先手方）走，把对方将死即挑战成功（不限步数）；列表上的勾叉表示完成 / 失败 / 未完成，外圈绿色代表已达成最优步数；卡住了可用「提示」看最快取胜的着法，想跳关可用棋盘下的「下一关」；「自建残局」可自己摆一个局面，保存时会自动核验（局面合法且能强制将死对方）并算出最优步数。</p>
     </div>
 
-    <div class="panel-lg" id="menu-acct" hidden>
+    <div class="panel-lg user-panel" id="menu-acct" hidden>
       <div class="panel-lg-head">
         <span class="menu_fh" id="btn-acct-back" title="返回"></span>
         <span class="panel-lg-title">账号</span>
+        <span class="user-badge" id="user-badge">已登录</span>
       </div>
-      <label for="acct-user">用户名</label>
-      <input type="text" id="acct-user" autocomplete="username" placeholder="3-16 位字母 / 数字 / 下划线">
-      <label for="acct-pwd">密码</label>
-      <input type="password" id="acct-pwd" autocomplete="current-password" placeholder="至少 4 位">
-      <div class="scan-actions">
-        <button type="button" class="btn small" id="btn-login">登 录</button>
-        <button type="button" class="btn small" id="btn-register">注 册</button>
+
+      <div class="user-top">
+        <div class="user-avatar-wrap">
+          <img class="user-avatar" id="user-avatar" src="./assets/img/symbol.png" alt="用户头像">
+          <button type="button" class="user-avatar-edit" id="btn-avatar-pick">更换头像</button>
+          <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+        </div>
+        <div class="user-meta">
+          <div class="user-name" id="user-name">未登录</div>
+          <div class="user-server" id="user-server">服务器：—</div>
+          <div class="user-state" id="user-state">账号已登录</div>
+        </div>
       </div>
-      <button type="button" class="btn small danger block" id="btn-logout" hidden>退出登录</button>
+
+      <div class="user-info">
+        <div class="user-info-row"><span>账号状态</span><b id="user-state-text">已登录</b></div>
+        <div class="user-info-row"><span>对局记录</span><b>按账号保存</b></div>
+        <div class="user-info-row"><span>席位恢复</span><b>支持跨设备</b></div>
+      </div>
+
+      <div class="user-actions">
+        <button type="button" class="btn small" id="btn-avatar-default">恢复默认头像</button>
+        <button type="button" class="btn small danger" id="btn-logout">退出登录</button>
+      </div>
       <p class="hint" id="acct-msg"></p>
     </div>
   </section>
@@ -227,11 +391,13 @@
       </div>
       <aside class="panel">
         <div class="player-row" id="p-top">
+          <img class="p-avatar" id="p-top-avatar" src="./assets/img/symbol.png" alt="">
           <span class="dot"></span>
           <span class="pname" id="p-top-name">对手</span>
           <span class="tag" id="p-top-tag"></span>
         </div>
         <div class="player-row" id="p-bottom">
+          <img class="p-avatar" id="p-bottom-avatar" src="./assets/img/symbol.png" alt="">
           <span class="dot"></span>
           <span class="pname" id="p-bottom-name">你</span>
           <span class="tag" id="p-bottom-tag"></span>

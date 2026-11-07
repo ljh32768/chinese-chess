@@ -12,6 +12,7 @@
  */
 
 import { BrowserWindow, app } from 'electron';
+import path from 'node:path';
 import { GameServer, getLanIp } from '../server/server.js';
 
 const DEFAULT_SERVER = '127.0.0.1:7777';
@@ -39,13 +40,16 @@ async function createWindow(): Promise<void> {
     lan: getLanIp(),
   });
 
+  // 窗口与任务栏 / 安装包图标统一使用 Reference/picture/symbol.png（构建时随素材复制到 dist/renderer）
+  const iconPath = path.join(app.getAppPath(), 'dist', 'renderer', 'assets', 'img', 'symbol.png');
   const win = new BrowserWindow({
-    width: 1120,
-    height: 840,
-    minWidth: 720,
-    minHeight: 640,
+    width: 1360,
+    height: 960,
+    minWidth: 900,
+    minHeight: 700,
     backgroundColor: '#2b2016',
     title: '局域网象棋',
+    icon: iconPath,
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });

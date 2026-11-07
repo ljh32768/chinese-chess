@@ -215,6 +215,16 @@ export function cellCenter([vr, vc]: Pos, skin: Skin): { x: number; y: number } 
   };
 }
 
+/**
+ * 画布内部像素倍率：CSS 显示宽度大于皮肤原始宽度（v3.15 起棋盘整体放大）时按比例提高分辨率，
+ * 再叠加设备像素比，避免放大后棋子素材发虚；上限 3 倍（兼顾性能与清晰度）。
+ */
+export function renderPixelRatio(cssWidth: number, skinWidth: number, dpr: number): number {
+  if (!(cssWidth > 0) || !(skinWidth > 0)) return 1;
+  const wanted = (cssWidth / skinWidth) * (dpr > 0 ? dpr : 1);
+  return Math.min(3, Math.max(1, wanted));
+}
+
 /** 把画布内坐标（视图坐标）映射为逻辑棋盘坐标；远离交叉点返回 null */
 export function pickCell(px: number, py: number, skin: Skin, flip: boolean): Pos | null {
   const vc = Math.round((px - skin.pointStartX - skin.discX) / skin.spaceX);
@@ -682,9 +692,15 @@ export function renderBoard(
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  // 内部尺寸固定为皮肤尺寸（与参考项目一致），显示尺寸交给 CSS 响应式缩放
-  if (canvas.width !== skin.width) canvas.width = skin.width;
-  if (canvas.height !== skin.height) canvas.height = skin.height;
+  // 逻辑坐标固定为皮肤尺寸；内部像素按 CSS 显示尺寸 × 设备像素比放大（v3.15 放大棋盘后仍清晰）
+  const rect = typeof canvas.getBoundingClientRect === 'function' ? canvas.getBoundingClientRect() : null;
+  const dpr = typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
+  const ratio = renderPixelRatio(rect?.width ?? 0, skin.width, dpr);
+  const pxWidth = Math.round(skin.width * ratio);
+  const pxHeight = Math.round(skin.height * ratio);
+  if (canvas.width !== pxWidth) canvas.width = pxWidth;
+  if (canvas.height !== pxHeight) canvas.height = pxHeight;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, skin.width, skin.height);
 
   for (const op of computeDrawList(v, skin)) {

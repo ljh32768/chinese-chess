@@ -97,12 +97,16 @@ const TOKEN_KEY = 'lanschess-token';
 const USER_KEY = 'lanschess-user';
 /** 进行中的房间会话（刷新页面后可自动重连原局） */
 const SESSION_KEY = 'lanschess-session';
-/** 本机最近一次入座身份（游客 id 只在本机稳定，用于「我的历史」过滤） */
+/** 本机最近一次入座身份（兼容旧版本的本机记录，用于「我的历史」过滤） */
 const PLAYER_KEY = 'lanschess-player';
 /** 残局挑战通关记录（id → 取胜所用步数） */
 const ENDGAME_KEY = 'lanschess-endgame';
 /** 自建残局存档（编辑器保存的题目列表，同样只存本机） */
 const CUSTOM_KEY = 'lanschess-endgame-custom';
+/** 默认用户头像 / 应用图标（未设置头像时使用） */
+const DEFAULT_AVATAR = './assets/img/symbol.png';
+/** 用户头像按账号保存在本机（data URL，不上传服务器） */
+const AVATAR_KEY_PREFIX = 'lanschess-avatar:';
 
 /** 残局挑战的进度（本地对弈，不连服务器） */
 interface EndgameState {
@@ -998,7 +1002,6 @@ function handleMessage(msg: ServerMessage): void {
       writeStore(USER_KEY, msg.username);
       renderAccountPanel();
       updateHomeChips();
-      toast(`已登录：${msg.username}`);
       settlePending(true);
       return;
     case 'room_list':
@@ -1550,7 +1553,11 @@ function renderServers(): void {
     }
     list.appendChild(row);
   }
-  $('btn-server-enter').textContent = net?.connected ? '进入游戏' : '进入（本机对弈）';
+  $('btn-server-enter').textContent = S.account ? '进入游戏' : '返回登录';
+  $('server-lock-text').textContent = S.serverLocked
+    ? '浏览器访问：服务器地址与访问地址一致，已锁定；桌面客户端可切换任意局域网服务器。'
+    : '桌面客户端：可搜索局域网或手动输入服务器地址；登录 / 注册需要服务器连接。';
+  updateLoginServerStatus();
 }
 
 /** 连接指定服务器：探测成功则切换 WebSocket 目标并标记为已连接 */
@@ -1605,6 +1612,22 @@ async function connectLockedServer(): Promise<void> {
   }
   renderServers();
   updateHomeChips();
+  updateLoginServerStatus();
+}
+
+/** 静默连接（不弹任何界面）：登录首屏 / 已登录直接进首页时在后台尝试连上服务器 */
+async function connectQuietly(): Promise<boolean> {
+  if (net?.connected) return true;
+  if (!S.server) return false;
+  try {
+    await openSocket(S.server);
+    renderServers();
+    updateLoginServerStatus();
+    return true;
+  } catch {
+    updateLoginServerStatus();
+    return false;
+  }
 }
 
 /** 可扫描的 /24 网段前缀（来自启动参数的本机地址与已选服务器地址） */
@@ -1649,7 +1672,12 @@ let autoScanned = false;
 async function openServersScreen(): Promise<void> {
   renderServers();
   show('screen-servers');
-  if (S.serverLocked || autoScanned) return;
+  if (S.serverLocked) {
+    // 浏览器访问：地址锁定，只需尝试连上访问地址（失败时给出红色提示）
+    if (!net?.connected) await connectLockedServer();
+    return;
+  }
+  if (autoScanned) return;
   autoScanned = true;
   const prefill = S.server ?? { host: '127.0.0.1', port: DEFAULT_PORT };
   upsertServer(prefill);
@@ -1658,8 +1686,12 @@ async function openServersScreen(): Promise<void> {
   await scanServers();
 }
 
-/** 「进入游戏」：尽力连接，失败也允许进入首页（本机人机对弈仍可用） */
+/** 连接页的「进入游戏」：未登录先回登录页；已登录则回首页 */
 async function enterFromServerScreen(): Promise<void> {
+  if (!S.account) {
+    showLoginScreen();
+    return;
+  }
   if (S.server && !net?.connected) await connectServer(S.server, true);
   backToIndex();
   show('screen-home');
@@ -2210,63 +2242,260 @@ function endgameNext(): void {
   startPuzzle(next);
 }
 
-// -------------------------------------------------------------- 账号（可选）
+// -------------------------------------------------------------- 登录 / 注册（首屏）
 
-/** 首页右上角账号区：未登录显示入口，登录后显示用户名 */
-function updateHomeChips(): void {
-  const chip = $('acct-chip');
-  chip.textContent = S.account ? S.account.username : '登录 / 注册';
-  chip.classList.toggle('on', !!S.account);
-  $('server-chip').textContent = S.server ? `服务器：${S.server.host}:${S.server.port}` : '服务器：未连接';
+type LoginTab = 'login' | 'register';
+
+/** 当前账号的头像（按账号保存在本机；未设置时回退默认图标） */
+function currentAvatar(): string {
+  if (!S.account) return DEFAULT_AVATAR;
+  const saved = readStore(AVATAR_KEY_PREFIX + S.account.username);
+  return saved && saved.startsWith('data:image/') ? saved : DEFAULT_AVATAR;
 }
 
-/** 打开账号面板（登录 / 注册 / 退出登录） */
+/** 把头像同步到主页入口 / 账号面板 / 对局侧栏（对手头像由服务端下发，未下发时用默认图标） */
+function applyAvatars(): void {
+  const own = currentAvatar();
+  $<HTMLImageElement>('acct-chip-avatar').src = own;
+  $<HTMLImageElement>('user-avatar').src = own;
+  $<HTMLImageElement>('p-bottom-avatar').src = own;
+  $<HTMLImageElement>('p-top-avatar').src = DEFAULT_AVATAR;
+}
+
+/** 首页右上角账号区：未登录显示入口，登录后显示头像 + 用户名 */
+function updateHomeChips(): void {
+  $('acct-chip-name').textContent = S.account ? S.account.username : '未登录';
+  $('acct-chip').classList.toggle('on', !!S.account);
+  $('server-chip').textContent = S.server ? `服务器：${S.server.host}:${S.server.port}` : '服务器：未连接';
+  applyAvatars();
+}
+
+/** 登录页状态行 */
+function setLoginStatus(text: string, kind?: 'ok' | 'err'): void {
+  const el = $('login-status');
+  el.textContent = text;
+  el.className = 'login-status' + (kind ? ` ${kind}` : '');
+}
+
+/** 登录页服务器连接状态（底部「连接服务器」入口旁） */
+function updateLoginServerStatus(): void {
+  const el = $('login-server-status');
+  if (!S.server) {
+    el.textContent = '服务器：未选择';
+    el.className = 'err';
+    return;
+  }
+  const addr = `${S.server.host}:${S.server.port}`;
+  el.textContent = net?.connected ? `服务器：${addr}` : `服务器未连接：${addr}`;
+  el.className = net?.connected ? 'ok' : 'err';
+}
+
+/** 切换登录 / 注册表单（滑块 + 清理上一个表单的错误） */
+function switchLoginTab(tab: LoginTab): void {
+  $('login-tabs').dataset.active = tab;
+  document.querySelectorAll<HTMLButtonElement>('.login-tab').forEach((btn) => {
+    const on = btn.dataset.tab === tab;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  $('login-form').classList.toggle('active', tab === 'login');
+  $('register-form').classList.toggle('active', tab === 'register');
+  clearLoginErrors();
+}
+
+function clearLoginErrors(): void {
+  document.querySelectorAll('.lg-field.invalid').forEach((f) => f.classList.remove('invalid'));
+  document.querySelectorAll('.lg-err').forEach((e) => (e.textContent = ''));
+  setLoginStatus('');
+}
+
+function shakeLoginPanel(): void {
+  const panel = $('login-panel');
+  panel.classList.remove('shake');
+  void panel.offsetWidth; // 强制回流，让连续触发的抖动动画能重新播放
+  panel.classList.add('shake');
+}
+
+/** 字段错误：无效时在输入框下方显示原因（返回是否通过） */
+function setLoginFieldError(inputId: string, message: string): boolean {
+  const input = $<HTMLInputElement>(inputId);
+  const field = input.closest('.lg-field');
+  const err = field?.querySelector('.lg-err');
+  field?.classList.toggle('invalid', !!message);
+  if (err) err.textContent = message;
+  return !message;
+}
+
+/** 打开登录首屏（未登录时的唯一入口；已登录时由调用方直接进首页） */
+function showLoginScreen(): void {
+  lowerAllLifts();
+  closeModal();
+  switchLoginTab('login');
+  updateLoginServerStatus();
+  const last = readStore(USER_KEY);
+  if (last) $<HTMLInputElement>('lg-user').value = last;
+  show('screen-login');
+  void connectForLogin();
+}
+
+/** 登录首屏在后台静默尝试连接服务器（不切屏、不弹窗） */
+let loginConnecting = false;
+async function connectForLogin(): Promise<void> {
+  if (net?.connected) {
+    updateLoginServerStatus();
+    return;
+  }
+  if (!S.server || loginConnecting) return;
+  loginConnecting = true;
+  setLoginStatus('正在连接服务器…');
+  const ok = await connectQuietly();
+  loginConnecting = false;
+  updateLoginServerStatus();
+  setLoginStatus(
+    ok ? '服务器已连接，请登录或注册' : '无法连接服务器，请点击下方「连接服务器」重试',
+    ok ? 'ok' : 'err',
+  );
+}
+
+/**
+ * 登录 / 注册（取消游客模式：必须先登录才能进入首页）。
+ * 账号校验规则与服务器一致：用户名 3-16 位字母 / 数字 / 下划线，密码 4-20 位。
+ */
+async function submitAuth(isRegister: boolean): Promise<void> {
+  const userEl = $<HTMLInputElement>(isRegister ? 'rg-user' : 'lg-user');
+  const passEl = $<HTMLInputElement>(isRegister ? 'rg-pass' : 'lg-pass');
+  const username = userEl.value.trim();
+  const password = passEl.value;
+  clearLoginErrors();
+
+  let ok = true;
+  ok =
+    setLoginFieldError(
+      isRegister ? 'rg-user' : 'lg-user',
+      /^[A-Za-z0-9_]{3,16}$/.test(username) ? '' : '用户名需为 3-16 位字母、数字或下划线',
+    ) && ok;
+  ok =
+    setLoginFieldError(
+      isRegister ? 'rg-pass' : 'lg-pass',
+      password.length >= 4 && password.length <= 20 ? '' : '密码需为 4-20 位',
+    ) && ok;
+  if (isRegister) {
+    const pass2 = $<HTMLInputElement>('rg-pass2').value;
+    ok = setLoginFieldError('rg-pass2', pass2 && pass2 === password ? '' : '两次输入的密码不一致') && ok;
+  }
+  if (!ok) {
+    shakeLoginPanel();
+    return;
+  }
+
+  if (!S.server) {
+    setLoginStatus('请先连接服务器', 'err');
+    void openServersScreen();
+    return;
+  }
+
+  const btn = $<HTMLButtonElement>(isRegister ? 'btn-register-submit' : 'btn-login-submit');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  try {
+    if (!(await ensureSocket())) throw new Error('无法连接服务器，请点击下方「连接服务器」重试');
+    await request(
+      isRegister ? { type: 'register', username, password } : { type: 'login', username, password },
+    );
+    // auth_ok 已在 handleMessage 中写入账号与 token：登录成功直接进入首页
+    $<HTMLInputElement>('lg-user').value = '';
+    $<HTMLInputElement>('lg-pass').value = '';
+    $<HTMLInputElement>('rg-user').value = '';
+    $<HTMLInputElement>('rg-pass').value = '';
+    $<HTMLInputElement>('rg-pass2').value = '';
+    switchLoginTab('login');
+    backToIndex();
+    show('screen-home');
+    updateHomeChips();
+    toast(`欢迎，${S.account?.username ?? username}`);
+    if (net?.connected) void tryResumeSession();
+  } catch (e) {
+    setLoginStatus(e instanceof Error ? e.message : '操作失败，请稍后重试', 'err');
+    shakeLoginPanel();
+  } finally {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+/** 打开账号（用户）面板：未登录时回到登录首屏 */
 function openAccountPanel(): void {
+  if (!S.account) {
+    showLoginScreen();
+    return;
+  }
   showHomePanel('acct');
   renderAccountPanel();
 }
 
 function renderAccountPanel(): void {
+  const name = S.account?.username ?? '未登录';
+  $('user-name').textContent = name;
+  $('user-server').textContent = S.server ? `服务器：${S.server.host}:${S.server.port}` : '服务器：未连接';
+  $('user-badge').textContent = S.account ? '已登录' : '未登录';
+  $('user-state').textContent = S.account ? '账号已登录 · 记录按账号保存' : '未登录';
+  $('user-state-text').textContent = S.account ? '已登录' : '未登录';
+  $<HTMLButtonElement>('btn-logout').hidden = !S.account;
+  $<HTMLButtonElement>('btn-avatar-pick').disabled = !S.account;
+  $<HTMLButtonElement>('btn-avatar-default').disabled = !S.account;
   const msg = $('acct-msg');
   msg.className = 'hint';
-  msg.textContent = S.account ? `已登录：${S.account.username}` : '未登录将以游客身份游玩';
-  $<HTMLButtonElement>('btn-logout').hidden = !S.account;
-  $<HTMLInputElement>('acct-user').value = S.account?.username ?? '';
+  msg.textContent = S.account ? '头像仅保存在本机，不会上传到服务器。' : '';
+  applyAvatars();
 }
 
-/** 登录 / 注册（可选：不登录也能以游客身份游玩） */
-async function doAuth(isRegister: boolean): Promise<void> {
-  const username = $<HTMLInputElement>('acct-user').value.trim();
-  const password = $<HTMLInputElement>('acct-pwd').value;
-  const setMsg = (t: string, kind?: 'ok' | 'err') => {
-    const msg = $('acct-msg');
-    msg.textContent = t;
-    msg.className = 'hint' + (kind ? ` ${kind}` : '');
-  };
-  if (!username || !password) return setMsg('请输入用户名与密码', 'err');
-  if (!S.server) {
-    setMsg('请先连接服务器', 'err');
-    void openServersScreen();
-    return;
-  }
+/** 保存头像（失败返回 false：图片过大或本机存储已满） */
+function saveAvatarData(data: string): boolean {
+  if (!S.account) return false;
   try {
-    if (!(await ensureSocket())) return setMsg('无法连接服务器', 'err');
-    await request(
-      isRegister ? { type: 'register', username, password } : { type: 'login', username, password },
-    );
-    $<HTMLInputElement>('acct-pwd').value = '';
-  } catch (e) {
-    setMsg(e instanceof Error ? e.message : '操作失败', 'err');
+    window.localStorage.setItem(AVATAR_KEY_PREFIX + S.account.username, data);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-/** 退出登录（仅清除本地凭据） */
+/** 选择本地图片作为头像（限制 2 MB，读取为 data URL 后存本机） */
+function onAvatarFile(file: File | null): void {
+  if (!file || !S.account) return;
+  if (!file.type.startsWith('image/')) return toast('请选择图片文件');
+  if (file.size > 2 * 1024 * 1024) return toast('头像图片不能超过 2 MB');
+  const reader = new FileReader();
+  reader.onload = () => {
+    const data = typeof reader.result === 'string' ? reader.result : '';
+    if (!data.startsWith('data:image/')) return toast('头像读取失败');
+    if (!saveAvatarData(data)) return toast('头像保存失败（图片过大或本机存储已满）');
+    applyAvatars();
+    toast('头像已更新');
+  };
+  reader.onerror = () => toast('头像读取失败');
+  reader.readAsDataURL(file);
+}
+
+/** 恢复默认头像（symbol.png） */
+function resetAvatar(): void {
+  if (!S.account) return;
+  writeStore(AVATAR_KEY_PREFIX + S.account.username, null);
+  applyAvatars();
+  toast('已恢复默认头像');
+}
+
+/** 退出登录：清除凭据并回到登录首屏（不再提供游客模式） */
 function logout(): void {
   S.account = null;
   writeStore(TOKEN_KEY, null);
-  writeStore(USER_KEY, null);
+  // 保留 USER_KEY 作为下次登录的用户名预填；没有 token 不会被误判为已登录
+  clearSession();
+  resetLocal();
   renderAccountPanel();
   updateHomeChips();
+  backToIndex();
+  showLoginScreen();
   toast('已退出登录');
 }
 
@@ -2764,6 +2993,44 @@ function bindEvents(): void {
     if ((e as KeyboardEvent).key === 'Enter') $('btn-server-connect').click();
   });
 
+  // 登录 / 注册首屏：选项卡 / 表单提交 / 密码显隐 / 字段错误清理 / 服务器入口
+  document.querySelectorAll<HTMLButtonElement>('.login-tab').forEach((btn) => {
+    btn.addEventListener('click', () =>
+      switchLoginTab(btn.dataset.tab === 'register' ? 'register' : 'login'),
+    );
+  });
+  $('login-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitAuth(false);
+  });
+  $('register-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitAuth(true);
+  });
+  document.querySelectorAll<HTMLButtonElement>('.lg-eye').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.target;
+      if (!target) return;
+      const input = $<HTMLInputElement>(target);
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.classList.toggle('on', show);
+      btn.setAttribute('aria-label', show ? '隐藏密码' : '显示密码');
+      input.focus({ preventScroll: true });
+    });
+  });
+  document.querySelectorAll<HTMLInputElement>('.lg-field input').forEach((input) => {
+    input.addEventListener('input', () => {
+      const field = input.closest('.lg-field');
+      if (field?.classList.contains('invalid')) {
+        field.classList.remove('invalid');
+        const err = field.querySelector('.lg-err');
+        if (err) err.textContent = '';
+      }
+    });
+  });
+  $('btn-login-server').addEventListener('click', () => void openServersScreen());
+
   // 首页
   $('btn-create').addEventListener('click', () => showHomePanel('create'));
   $('btn-create-back').addEventListener('click', backToIndex);
@@ -2776,8 +3043,13 @@ function bindEvents(): void {
   $('btn-endgame-back').addEventListener('click', backToIndex);
   $('btn-eg-create').addEventListener('click', openEndgameEditor);
   $('btn-acct-back').addEventListener('click', backToIndex);
-  $('btn-login').addEventListener('click', () => void doAuth(false));
-  $('btn-register').addEventListener('click', () => void doAuth(true));
+  $('btn-avatar-pick').addEventListener('click', () => $<HTMLInputElement>('avatar-file').click());
+  $('avatar-file').addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    onAvatarFile(input.files?.[0] ?? null);
+    input.value = '';
+  });
+  $('btn-avatar-default').addEventListener('click', resetAvatar);
   $('btn-logout').addEventListener('click', logout);
   $('btn-skin').addEventListener('click', switchSkin);
   $('btn-history').addEventListener('click', openHistory);
@@ -2919,12 +3191,6 @@ async function init(): Promise<void> {
   });
   render();
 
-  // 账号：恢复上次登录的 token（可选使用）
-  const token = readStore(TOKEN_KEY);
-  const username = readStore(USER_KEY);
-  if (token && username) S.account = { token, username };
-  updateHomeChips();
-
   // 服务器：浏览器访问时锁定为当前访问地址；桌面客户端由启动参数预填
   S.serverLocked = !isDesktopClient(window.location.search);
   S.server = S.serverLocked
@@ -2934,6 +3200,13 @@ async function init(): Promise<void> {
         port: DEFAULT_PORT,
       });
   upsertServer(S.server);
+
+  // 账号：恢复上次登录的 token（有 token 才视为已登录；取消游客模式）
+  const token = readStore(TOKEN_KEY);
+  const username = readStore(USER_KEY);
+  if (token && username) S.account = { token, username };
+  renderAccountPanel();
+  updateHomeChips();
 
   // 计时读秒（D4）：定时刷新剩余时间显示（未启用计时时几乎零开销）
   window.setInterval(() => {
@@ -2947,13 +3220,17 @@ async function init(): Promise<void> {
     if (onWaiting || onGame) refreshInviteList();
   }, 5000);
 
-  // 首个板块：连接服务器
-  show('screen-servers');
+  // 首个板块：已登录直接进首页（后台静默连服务器），未登录进入登录 / 注册首屏。
+  // 不再一启动就打开「连接服务器」界面。
   renderServers();
-  if (S.serverLocked) {
-    await connectLockedServer();
+  if (S.account) {
+    backToIndex();
+    show('screen-home');
+    void (async () => {
+      if (await connectQuietly()) await tryResumeSession();
+    })();
   } else {
-    await openServersScreen();
+    showLoginScreen();
   }
 }
 
