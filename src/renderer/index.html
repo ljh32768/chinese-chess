@@ -183,6 +183,11 @@
   <!-- ========== 首页：木质挂板（仅入口）+ 点击板块后的大面板 ========== -->
   <section id="screen-home" class="screen">
     <div class="home-corner">
+      <button type="button" class="chip chip-service" id="local-service-chip" aria-pressed="true" title="本机服务" hidden>
+        <span>本机服务</span>
+        <span class="svc-state" id="local-service-state">已开启</span>
+        <span class="svc-switch" aria-hidden="true"></span>
+      </button>
       <button type="button" class="chip" id="server-chip" title="点击查看 / 切换服务器">服务器：—</button>
       <button type="button" class="chip chip-user" id="acct-chip" title="查看账号">
         <img class="chip-avatar" id="acct-chip-avatar" src="./assets/img/symbol.png" alt="">

@@ -104,3 +104,17 @@
 | 窗口图标 | `BrowserWindow.icon` 使用 `path.join(app.getAppPath(), 'dist/renderer/assets/img/symbol.png')`（构建时由 `copy-assets.mjs` 随素材复制；打包后位于 asar 内，Electron 可直接读取） |
 | 安装包图标 | `package.json` `build.win.icon` = `Reference/picture/symbol.png`（350×350 PNG，electron-builder 自动转 ico） |
 | 浏览器 | `index.html` 的 `<link rel="icon">` / `apple-touch-icon` 指向 `./assets/img/symbol.png` |
+
+## 7. v3.30 增量：本机服务开关（2026-11-07 完成）
+
+| 项 | 规格 |
+|---|---|
+| 动机 | 安装包会在登录时自启后台服务端；用户需要在应用主界面直接关闭 / 开启本机局域网服务，关闭后不再自启 |
+| 入口 | 桌面客户端首页右上角 `#local-service-chip`「本机服务」（默认开启，绿色拨动开关；浏览器页面隐藏——只能控制本机进程） |
+| 计划任务模式 | 存在 `LanChessServer` 计划任务（安装包注册，`schtasks /Query` 判定）时：关闭 = 停掉正在运行的服务进程（优先本机 `POST /api/local-service/shutdown`，老版本兜底 `schtasks /End`），并写入 `enabled=false`；计划任务保持注册，登录触发时 `--server` 读到关闭偏好会直接退出（服务保持关闭，**无需管理员权限改任务 ACL**）。开启 = 写入 `enabled=true`；服务未运行时 `schtasks /Run`，启动失败（权限 / 任务被删）则客户端内置托管兜底 |
+| 无任务模式 | 开发 / 绿色版没有计划任务 → 客户端内置托管一个 `GameServer`（`0.0.0.0:27310`，数据落 `<userData>/data`，与 `--server` 模式同源）；关闭即 `close()` 释放端口；应用退出只释放内置托管，计划任务托管的服务保持常驻 |
+| 外部进程 | 端口已有其它进程提供的局域网象棋服务 → 只展示「已开启（由其它进程提供）」，客户端无法关闭，也不会误杀未知进程 |
+| 偏好 | `<userData>/local-service.json`（`{ enabled }`，缺省 / 损坏按开启）；客户端与 `--server` 共用：开关关闭时写入 false，登录自启的 `--server` 启动即退出；无任务时也据此决定是否内置托管 |
+| 接口 | ① `GameServer` 新增可选 `localService` 控制器：仅桌面客户端外壳服务（`127.0.0.1:<随机端口>`）提供 `GET /api/local-service`（查询状态）与 `POST`（`{ enabled: boolean }`）；远端 / CLI 不注入 → 404。② 新增可选 `shutdown` 控制：仅无头 `--server` 注入 `POST /api/local-service/shutdown`，只接受**本机回环** + `<userData>/local-service-token` 正确的请求，先回 `{ ok: true }` 再优雅退出 |
+| 接线 | [main.ts](../../src/main/main.ts) 创建 `LocalServiceManager` 并注入外壳服务；`--server` 启动先读关闭偏好（false 直接退出）并注入 token / 关闭控制；`window-all-closed` 一并释放内置服务；[local-service.ts](../../src/main/local-service.ts) 负责启停 / 内置托管 / 端口探测；[server-mode.ts](../../src/main/server-mode.ts) 提供偏好 / token 文件路径与读取；[shared/local-service.ts](../../src/shared/local-service.ts) 提供共享类型与偏好纯函数 |
+| 验证 | [tests/local-service.test.ts](../../tests/local-service.test.ts) 覆盖计划任务名与安装脚本一致、偏好缺省、`/api/local-service` 的 GET / POST / 400 / 404 / 405、`/api/local-service/shutdown` 的 404 / 错误 token 403 / 正确 token 触发关闭；[tests/server-mode.test.ts](../../tests/server-mode.test.ts) 覆盖偏好读取与 token 首次生成 / 复用；[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 覆盖首页开关结构、桌面客户端显示与样式、主进程 `schtasks` / shutdown 接线；`npm test` 552 项通过 |

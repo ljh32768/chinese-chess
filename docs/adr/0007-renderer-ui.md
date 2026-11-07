@@ -287,6 +287,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 应用图标 | 浏览器 `<link rel="icon">` / `apple-touch-icon`、Electron `BrowserWindow.icon`（`dist/renderer/assets/img/symbol.png`）、electron-builder `build.win.icon`（`Reference/picture/symbol.png`）统一使用 `symbol.png`；Electron 窗口 1120×840 → **1360×960**（最小 900×700） |
 | 对局侧栏居中（v3.16） | `.game-layout` 仍 `align-items: flex-start`；**`#screen-game .panel { align-self: center }`**——对局页侧栏不再与棋盘上沿（含上方战术提示行）齐平，而是在棋盒高度内纵向居中；窄屏（≤900px）侧栏改为整行铺满时不受影响 |
 | 单机应用入口（v3.29） | 登录 / 注册表单下方新增 `.login-solo` 分区（金色发丝分隔线 + `#btn-solo`「单机应用」+ `.login-solo-tip` 文案）；按钮用 `.lg-btn.ghost`（48px、金色描边 / 弱底色，悬停提亮，弱化于登录主按钮）；点击进入首页（单机模式），联机入口由 `needLoginForOnline()` 弹层提示先登录 |
+| 本机服务开关（v3.30） | 首页右上角 `.home-corner` 新增 `#local-service-chip`（`本机服务` + `#local-service-state` 已开启 / 已关闭 + `.svc-switch` 拨动开关）；默认 `hidden`，仅桌面客户端（`client=electron`）显示。开启为 `.chip.on` 金色底 + 绿色轨道 / 滑块右移，关闭为暗色轨道 / 滑块左移；操作中按钮禁用。状态由 `refreshLocalService()` 从 `GET /api/local-service` 读取，点击 `toggleLocalService()` 以 `POST { enabled }` 切换并在轻提示里显示结果（关闭时提示登录后不再启动） |
 | 验收 | [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 新增「v3.15 登录首屏、用户头像与整体放大」：图标路径与窗口尺寸、登录 / 注册首屏与 `init` 流转、表单 / 选项卡 / 密码显隐、用户页头像与退出登录、头像默认值、放大后的棋盘 / 面板 / 侧栏尺寸；[tests/board.test.ts](../../tests/board.test.ts) 新增 `renderPixelRatio` 倍率与上限用例；**v3.16 增加 `#screen-game .panel { align-self: center }` 断言** |
 
 ### 3.6 走子交互（app.ts `onCell`）

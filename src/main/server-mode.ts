@@ -5,8 +5,11 @@
  * 而是以本机为局域网中心服务器常驻运行，供计划任务在登录后自启。
  */
 
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_PORT } from '../shared/defaults.js';
+import { parseLocalServicePref } from '../shared/local-service.js';
 
 /** 是否以无头服务端模式启动（严格匹配 `--server`） */
 export function isServerMode(argv: string[]): boolean {
@@ -40,4 +43,41 @@ export function resolveServerDataDir(env: NodeJS.ProcessEnv, userDataDir: string
 /** 无头服务端日志文件：`<userData>/logs/server.log` */
 export function serverLogPath(userDataDir: string): string {
   return path.join(userDataDir, 'logs', 'server.log');
+}
+
+/** 本机服务开关偏好文件（桌面客户端与 `--server` 共用；关闭后自启的服务器会直接退出） */
+export function localServicePrefPath(userDataDir: string): string {
+  return path.join(userDataDir, 'local-service.json');
+}
+
+/** 读取本机服务开关偏好：缺省开启（文件缺失 / 损坏也按开启处理） */
+export function readLocalServiceEnabled(userDataDir: string): boolean {
+  try {
+    return parseLocalServicePref(fs.readFileSync(localServicePrefPath(userDataDir), 'utf8'));
+  } catch {
+    return true;
+  }
+}
+
+/** 本机服务关闭 token 文件（桌面客户端与 `--server` 共用，避免无权限杀进程） */
+export function localServiceTokenPath(userDataDir: string): string {
+  return path.join(userDataDir, 'local-service-token');
+}
+
+/** 读取 / 生成关闭 token：首次生成 32+ 位随机串并落盘，后续两个进程复用同一个 */
+export function ensureLocalServiceToken(userDataDir: string): string {
+  try {
+    const saved = fs.readFileSync(localServiceTokenPath(userDataDir), 'utf8').trim();
+    if (saved.length >= 16) return saved;
+  } catch {
+    /* 首次运行或文件损坏：重新生成 */
+  }
+  const token = crypto.randomBytes(24).toString('hex');
+  try {
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.writeFileSync(localServiceTokenPath(userDataDir), token, { encoding: 'utf8', mode: 0o600 });
+  } catch {
+    /* 写入失败时仍返回本次 token（仅本进程可关闭，不影响服务运行） */
+  }
+  return token;
 }

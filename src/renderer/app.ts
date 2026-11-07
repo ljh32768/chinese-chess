@@ -52,6 +52,7 @@ import {
 } from '../shared/endgame.js';
 import { describeMove } from '../shared/notation.js';
 import { coveredCount } from '../shared/jieqi.js';
+import { LocalServiceStatus } from '../shared/local-service.js';
 import { DiscoveredServer, discoverSubnet, probeServer } from './discover.js';
 import {
   DEFAULT_PORT,
@@ -251,6 +252,8 @@ const overText = (mate: CheckmateInfo | null) => `${resultText()} · ${mate ? ma
 function show(id: string): void {
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
   $(id).classList.add('active');
+  // 进入首页时刷新本机服务状态（桌面客户端才有按钮；浏览器页面不查询）
+  if (id === 'screen-home' && isDesktopClient(window.location.search)) void refreshLocalService();
 }
 
 let toastTimer = 0;
@@ -1768,6 +1771,79 @@ function backToIndex(): void {
   showHomePanel('index');
 }
 
+// -------------------------------------------------------------- 本机服务开关（桌面客户端）
+
+/** 本机服务状态（null 表示尚未查询到；仅 Electron 页面显示入口） */
+let localServiceStatus: LocalServiceStatus | null = null;
+let localServiceBusy = false;
+let localServiceFetching = false;
+
+/** 渲染「本机服务」开关：金色 = 开启，暗色 = 关闭；查询中 / 操作中禁用 */
+function renderLocalService(): void {
+  const chip = $<HTMLButtonElement>('local-service-chip');
+  const st = localServiceStatus;
+  if (!st) {
+    chip.hidden = true;
+    return;
+  }
+  chip.hidden = !st.supported;
+  chip.classList.toggle('on', st.enabled);
+  chip.disabled = localServiceBusy;
+  chip.setAttribute('aria-pressed', st.enabled ? 'true' : 'false');
+  $('local-service-state').textContent = st.enabled ? (st.running ? '已开启' : '未运行') : '已关闭';
+  const base = `本机服务（端口 ${st.port}）：${
+    st.enabled ? (st.running ? '已开启' : '已开启，未运行') : '已关闭'
+  }`;
+  const title = st.message ? `${base} · ${st.message}` : base;
+  chip.title = title;
+  chip.setAttribute('aria-label', `${title}，点击${st.enabled ? '关闭' : '开启'}`);
+}
+
+/** 查询本机服务状态（桌面客户端的外壳服务提供 /api/local-service） */
+async function refreshLocalService(): Promise<void> {
+  if (!isDesktopClient(window.location.search) || localServiceFetching) return;
+  localServiceFetching = true;
+  try {
+    const res = await fetch('/api/local-service', { cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    localServiceStatus = (await res.json()) as LocalServiceStatus;
+  } catch {
+    localServiceStatus = null;
+  } finally {
+    localServiceFetching = false;
+    renderLocalService();
+  }
+}
+
+/** 点击开关：开启 / 关闭本机服务（关闭时计划任务一并禁用，登录不再自启） */
+async function toggleLocalService(): Promise<void> {
+  if (localServiceBusy || !localServiceStatus) return;
+  const target = !localServiceStatus.enabled;
+  localServiceBusy = true;
+  renderLocalService();
+  try {
+    const res = await fetch('/api/local-service', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: target }),
+    });
+    const data = (await res.json()) as LocalServiceStatus & { error?: string };
+    if (!res.ok) throw new Error(data.error ?? `操作失败（HTTP ${res.status}）`);
+    localServiceStatus = data;
+    toast(data.message ?? (data.enabled ? '本机服务已开启' : '本机服务已关闭'));
+    // 本机服务重新开启：若当前服务器就是它，后台静默重连（关闭时连接会由服务端断开）
+    if (data.enabled && data.running && S.server?.host === '127.0.0.1' && S.server.port === data.port) {
+      void connectQuietly();
+    }
+  } catch (e) {
+    toast(e instanceof Error ? e.message : '本机服务操作失败');
+    void refreshLocalService();
+  } finally {
+    localServiceBusy = false;
+    renderLocalService();
+  }
+}
+
 /** 创建双人对战房间（口令可选，留空即任何人可加入；房间玩法在等待页选择） */
 async function createRoom(): Promise<void> {
   if (!needLoginForOnline()) return;
@@ -3069,6 +3145,7 @@ function bindEvents(): void {
   $('btn-server-list').addEventListener('click', () => void refreshServerList());
   $('btn-server-enter').addEventListener('click', () => void enterFromServerScreen());
   $('server-chip').addEventListener('click', () => void openServersScreen());
+  $('local-service-chip').addEventListener('click', () => void toggleLocalService());
   $('acct-chip').addEventListener('click', openAccountPanel);
   $('server-addr').addEventListener('keydown', (e) => {
     if ((e as KeyboardEvent).key === 'Enter') $('btn-server-connect').click();
@@ -3275,6 +3352,8 @@ async function init(): Promise<void> {
 
   // 服务器：浏览器访问时锁定为当前访问地址；桌面客户端由启动参数预填
   S.serverLocked = !isDesktopClient(window.location.search);
+  // 本机服务开关只在桌面客户端显示（浏览器页面没有本机进程控制能力）
+  $('local-service-chip').hidden = S.serverLocked;
   S.server = S.serverLocked
     ? pageServer(window.location.hostname, window.location.port, window.location.protocol)
     : (parseAddress(pageParams.get('server') ?? '', DEFAULT_PORT) ?? {

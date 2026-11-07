@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { DEFAULT_PORT } from '../shared/defaults.js';
+import { LocalServiceController } from '../shared/local-service.js';
 import { ClientMessage, OnlinePlayer, Role, ServerMessage, decode } from '../shared/protocol.js';
 import { EnginePort, normalizeLevel } from '../shared/engine.js';
 import { GameRecord, Move, PlayerRef, RoomMode, RoomSummary, Side } from '../shared/types.js';
@@ -140,6 +141,16 @@ export interface GameServerOptions {
   dataDir?: string | null;
   /** AI 引擎；缺省按 `createEngine()` 自动选择（优先皮卡鱼，不可用时纯 TS） */
   engine?: EnginePort;
+  /** 本机服务开关（仅桌面客户端外壳服务提供；远端服务器不传，接口返回 404） */
+  localService?: LocalServiceController;
+  /** 本机服务关闭（仅 `--server` 注入；桌面客户端凭本机 token 请求优雅退出） */
+  shutdown?: LocalShutdownControl;
+}
+
+/** 无头服务端的「本机关闭」控制：token 由桌面客户端与 `--server` 共用（落 userData） */
+export interface LocalShutdownControl {
+  token: string;
+  run: () => void;
 }
 
 export class GameServer {
@@ -154,7 +165,11 @@ export class GameServer {
   private aiDepth: number;
   /** AI 引擎（皮卡鱼优先；引擎不可用时为纯 TS） */
   private readonly engine: EnginePort;
-  private readonly opts: Required<Omit<GameServerOptions, 'engine'>>;
+  private readonly opts: Required<Omit<GameServerOptions, 'engine' | 'localService' | 'shutdown'>>;
+  /** 本机服务控制器（仅桌面客户端外壳服务有值） */
+  private readonly localService: LocalServiceController | null;
+  /** 本机关闭控制（仅无头 `--server` 有值） */
+  private readonly shutdown: LocalShutdownControl | null;
 
   constructor(opts: GameServerOptions = {}) {
     this.opts = {
@@ -173,6 +188,8 @@ export class GameServer {
     };
     this.aiDepth = this.opts.aiDepth;
     this.engine = opts.engine ?? createEngine();
+    this.localService = opts.localService ?? null;
+    this.shutdown = opts.shutdown ?? null;
     this.accounts = new AccountStore(this.opts.dataDir);
     this.history = new HistoryStore(this.opts.dataDir);
   }
@@ -258,6 +275,18 @@ export class GameServer {
         void this.handleAuth(pathname.endsWith('register'), req, res);
         return;
       }
+      if (pathname === '/api/local-service/shutdown') {
+        void this.handleLocalShutdown(req, res).catch((err) =>
+          this.sendJson(res, 500, { error: String(err) }),
+        );
+        return;
+      }
+      if (pathname === '/api/local-service') {
+        void this.handleLocalService(req, res).catch((err) =>
+          this.sendJson(res, 500, { error: String(err) }),
+        );
+        return;
+      }
       if (pathname === '/api/server-info') {
         return this.sendJson(res, 200, {
           ip: getLanIp(),
@@ -332,6 +361,53 @@ export class GameServer {
       to: result.move.to,
       source: result.source,
     });
+  }
+
+  /**
+   * 本机服务开关（仅桌面客户端外壳服务）：GET 查询状态；POST `{ enabled }` 启停。
+   * 远端 / CLI 服务器未注入控制器，统一返回 404（客户端也只在 Electron 页面显示入口）。
+   */
+  private async handleLocalService(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const controller = this.localService;
+    if (!controller) return this.sendJson(res, 404, { error: 'not found' });
+    if (req.method === 'GET') return this.sendJson(res, 200, await controller.status());
+    if (req.method !== 'POST') return this.sendJson(res, 405, { error: '仅支持 GET / POST' });
+    let body: { enabled?: unknown };
+    try {
+      body = JSON.parse((await readBody(req)) || '{}') as typeof body;
+    } catch {
+      return this.sendJson(res, 400, { error: '请求体格式不正确' });
+    }
+    if (typeof body.enabled !== 'boolean') {
+      return this.sendJson(res, 400, { error: 'enabled 须为布尔值' });
+    }
+    return this.sendJson(res, 200, await controller.setEnabled(body.enabled));
+  }
+
+  /**
+   * 本机服务关闭（仅无头 `--server`）：只接受**本机回环**请求 + 正确 token。
+   * token 由桌面客户端与 `--server` 共用（落 `<userData>/local-service-token`），
+   * 让客户端无需管理员权限即可停掉计划任务启动的服务进程。
+   */
+  private async handleLocalShutdown(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const control = this.shutdown;
+    if (!control) return this.sendJson(res, 404, { error: 'not found' });
+    if (req.method !== 'POST') return this.sendJson(res, 405, { error: '仅支持 POST' });
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      return this.sendJson(res, 403, { error: '仅允许本机请求' });
+    }
+    let body: { token?: unknown };
+    try {
+      body = JSON.parse((await readBody(req)) || '{}') as typeof body;
+    } catch {
+      return this.sendJson(res, 400, { error: '请求体格式不正确' });
+    }
+    if (typeof body.token !== 'string' || !tokenMatches(body.token, control.token)) {
+      return this.sendJson(res, 403, { error: 'token 不正确' });
+    }
+    this.sendJson(res, 200, { ok: true });
+    // 先让响应写出，再优雅退出（落盘 + 断开连接）
+    setTimeout(() => control.run(), 50);
   }
 
   /** 复盘 AI 推荐：`?id=&index=&depth=` → `AiHint | { none: true }` */
@@ -745,6 +821,18 @@ function readBody(req: http.IncomingMessage, limit = 4096): Promise<string> {
   });
 }
 
+/** 是否本机回环地址（IPv4 / IPv6 / IPv4-mapped IPv6） */
+function isLoopbackAddress(addr: string | undefined): boolean {
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+/** 等长比较 token（避免长度差异导致 timingSafeEqual 抛错） */
+function tokenMatches(given: string, expected: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 /** 目标路径必须位于 root 内：防 `../` 穿越，也防「dist-evil」类同前缀兄弟目录误判 */
 function isInsideRoot(root: string, target: string): boolean {
   const rel = path.relative(root, target);
@@ -767,15 +855,16 @@ export async function listenWithFallback(
   preferred: number,
   forcePreferred = false,
   dataDir?: string | null,
+  shutdown?: LocalShutdownControl,
 ): Promise<ListenResult> {
-  const first = new GameServer({ port: preferred, dataDir });
+  const first = new GameServer({ port: preferred, dataDir, shutdown });
   try {
     return { server: first, port: await first.listen(), fallback: false };
   } catch (err) {
     if (forcePreferred || (err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
   }
   logInfo(`端口 ${preferred} 被占用，已回退随机端口`);
-  const fallbackServer = new GameServer({ port: 0, dataDir });
+  const fallbackServer = new GameServer({ port: 0, dataDir, shutdown });
   return { server: fallbackServer, port: await fallbackServer.listen(), fallback: true };
 }
 

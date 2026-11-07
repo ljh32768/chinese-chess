@@ -9,7 +9,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_PORT } from '../src/shared/defaults.js';
 import {
+  ensureLocalServiceToken,
   isServerMode,
+  localServicePrefPath,
+  localServiceTokenPath,
+  readLocalServiceEnabled,
   resolveServerDataDir,
   resolveServerPort,
   serverLogPath,
@@ -70,6 +74,42 @@ describe('无头服务端日志路径 serverLogPath', () => {
   it('固定在 userData/logs/server.log', () => {
     const userData = path.resolve('C:/Users/test/AppData/Roaming/LanChess');
     expect(serverLogPath(userData)).toBe(path.join(userData, 'logs', 'server.log'));
+  });
+});
+
+describe('本机服务偏好与关闭 token（客户端与 --server 共用）', () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  function tempDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lanchess-service-'));
+    dirs.push(dir);
+    return dir;
+  }
+
+  it('偏好缺省开启；写入 enabled=false 后读取为关闭', () => {
+    const dir = tempDir();
+    expect(localServicePrefPath(dir)).toBe(path.join(dir, 'local-service.json'));
+    expect(readLocalServiceEnabled(dir)).toBe(true);
+
+    fs.writeFileSync(localServicePrefPath(dir), JSON.stringify({ enabled: false }));
+    expect(readLocalServiceEnabled(dir)).toBe(false);
+
+    // 损坏的文件按开启处理
+    fs.writeFileSync(localServicePrefPath(dir), '{');
+    expect(readLocalServiceEnabled(dir)).toBe(true);
+  });
+
+  it('关闭 token 首次生成后落盘，并在同一 userData 内复用', () => {
+    const dir = tempDir();
+    const first = ensureLocalServiceToken(dir);
+    expect(first.length).toBeGreaterThanOrEqual(32);
+    expect(fs.readFileSync(localServiceTokenPath(dir), 'utf8')).toBe(first);
+    expect(ensureLocalServiceToken(dir)).toBe(first);
   });
 });
 

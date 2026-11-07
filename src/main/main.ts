@@ -20,12 +20,22 @@ import path from 'node:path';
 import { DEFAULT_PORT } from '../shared/defaults.js';
 import { logInfo, setLogFile } from '../server/log.js';
 import { GameServer, getLanIp, listenWithFallback } from '../server/server.js';
-import { isServerMode, resolveServerDataDir, resolveServerPort, serverLogPath } from './server-mode.js';
+import { LocalServiceManager } from './local-service.js';
+import {
+  ensureLocalServiceToken,
+  isServerMode,
+  readLocalServiceEnabled,
+  resolveServerDataDir,
+  resolveServerPort,
+  serverLogPath,
+} from './server-mode.js';
 
 const DEFAULT_SERVER = `127.0.0.1:${DEFAULT_PORT}`;
 
 /** 本机外壳服务（只提供页面与静态资源；不参与对局） */
 let shellServer: GameServer | null = null;
+/** 本机服务开关（主界面右上角「本机服务」；仅客户端形态） */
+let localService: LocalServiceManager | null = null;
 
 function targetServer(): string {
   return (process.env.LANSCHESS_SERVER ?? '').trim() || DEFAULT_SERVER;
@@ -33,9 +43,18 @@ function targetServer(): string {
 
 /** 起本机外壳服务：仅回环地址 + 随机端口，避免与真实服务器抢占端口或被局域网发现 */
 async function startShellServer(): Promise<number> {
-  const server = new GameServer({ port: 0, host: '127.0.0.1', dataDir: null });
+  const manager = new LocalServiceManager();
+  localService = manager;
+  const server = new GameServer({
+    port: 0,
+    host: '127.0.0.1',
+    dataDir: null,
+    localService: manager,
+  });
   const port = await server.listen();
   shellServer = server;
+  // 首屏（登录 / 首页）可能需要立刻读状态：启动补齐放到后台，查询会经串行队列等待它完成
+  void manager.init();
   return port;
 }
 
@@ -81,6 +100,13 @@ async function startHeadlessServer(): Promise<void> {
   const userData = app.getPath('userData');
   const logFile = serverLogPath(userData);
   setLogFile(logFile);
+  // 桌面客户端「本机服务」关闭时：登录自启的计划任务仍会拉起本进程，这里直接退出
+  if (!readLocalServiceEnabled(userData)) {
+    logInfo('本机服务已关闭（local-service.json enabled=false），本次自启不启动服务器');
+    app.exit(0);
+    return;
+  }
+  const shutdownToken = ensureLocalServiceToken(userData);
   const dataDir = resolveServerDataDir(process.env, userData);
   const port = resolveServerPort(process.env);
   logInfo(`无头服务端启动：端口 ${port}，数据目录 ${dataDir ?? '仅内存'}，日志 ${logFile}`);
@@ -94,7 +120,10 @@ async function startHeadlessServer(): Promise<void> {
   });
 
   try {
-    const started = await listenWithFallback(port, true, dataDir);
+    const started = await listenWithFallback(port, true, dataDir, {
+      token: shutdownToken,
+      run: () => shutdownHeadless(0),
+    });
     headlessServer = started.server;
     // 就绪信息已由 GameServer.listen() 写入日志；这里只给开发时的控制台留一行
     console.log(`[局域网象棋] 服务器已启动：http://${getLanIp()}:${started.port}`);
@@ -116,7 +145,11 @@ if (isServerMode(process.argv)) {
 
   app.on('window-all-closed', () => {
     const s = shellServer;
+    const l = localService;
     shellServer = null;
-    void (s ? s.close() : Promise.resolve()).finally(() => app.quit());
+    localService = null;
+    void Promise.all([s ? s.close() : Promise.resolve(), l ? l.close() : Promise.resolve()]).finally(() =>
+      app.quit(),
+    );
   });
 }

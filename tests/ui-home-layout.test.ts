@@ -1007,3 +1007,62 @@ describe('v3.15 登录首屏、用户头像与整体放大', () => {
     expect(MAIN).toContain('width: 1360');
   });
 });
+
+// ---------------------------------------------------------------- v3.30 本机服务开关
+
+describe('v3.30 本机服务开关', () => {
+  const SERVICE = read('src/main/local-service.ts');
+  const SERVER = read('src/server/server.ts');
+
+  it('首页右上角新增「本机服务」开关（仅桌面客户端显示，默认开启）', () => {
+    expect(HTML).toContain('id="local-service-chip"');
+    expect(HTML).toContain('id="local-service-state"');
+    expect(HTML).toContain('class="chip chip-service"');
+    expect(HTML).toContain('class="svc-switch"');
+    expect(HTML).toMatch(/id="local-service-chip"[^>]*hidden/);
+    expect(HTML).toContain('本机服务');
+    expect(APP).toContain('function refreshLocalService(');
+    expect(APP).toContain('function toggleLocalService(');
+    expect(APP).toContain("fetch('/api/local-service'");
+    expect(APP).toContain('localServiceStatus = (await res.json()) as LocalServiceStatus');
+    expect(APP).toContain("$('local-service-chip').hidden = S.serverLocked;");
+    expect(APP).toContain(
+      "$('local-service-chip').addEventListener('click', () => void toggleLocalService());",
+    );
+    // 样式：金色开启 / 暗色关闭的拨动开关
+    expect(decl('.chip-service', 'display')).toBe('inline-flex');
+    expect(px('.chip-service .svc-switch', 'width')).toBe(28);
+    expect(decl('.chip-service.on .svc-switch', 'background')).toContain('rgba(52, 120, 48');
+  });
+
+  it('主进程：有安装包计划任务时启停任务，关闭时同时停服并记录偏好；无任务时内置托管', () => {
+    expect(SERVICE).toContain('LOCAL_SERVICE_TASK_NAME');
+    expect(SERVICE).toContain("runProcess('schtasks.exe'");
+    expect(SERVICE).toContain("'/Query'");
+    expect(SERVICE).toContain("'/Run'");
+    expect(SERVICE).toContain("'/End'");
+    // 关闭优先走本机 shutdown 接口（无需管理员权限改计划任务）
+    expect(SERVICE).toContain('requestShutdown');
+    expect(SERVICE).toContain('/api/local-service/shutdown');
+    expect(SERVICE).toContain('readLocalServiceEnabled');
+    expect(SERVICE).toContain('ensureLocalServiceToken');
+    expect(SERVICE).not.toContain("'/DISABLE'");
+    expect(SERVICE).not.toContain("'/ENABLE'");
+    expect(SERVICE).toContain('function probeService');
+    expect(SERVICE).toContain("mode === 'external'");
+    expect(SERVICE).toContain('resolveServerDataDir');
+    expect(SERVICE).toContain('class LocalServiceManager');
+    expect(SERVICE).toContain('async ensureBuiltin');
+    // 无头 --server 启动时读取关闭偏好（登录自启的任务进程会直接退出）
+    expect(MAIN).toContain('readLocalServiceEnabled');
+    expect(MAIN).toContain('ensureLocalServiceToken');
+    expect(MAIN).toContain('token: shutdownToken');
+    // 外壳服务注入开关控制器；远端 / CLI 服务器默认不暴露
+    expect(SERVER).toContain('localService?: LocalServiceController');
+    expect(SERVER).toContain('shutdown?: LocalShutdownControl');
+    expect(SERVER).toContain("pathname === '/api/local-service'");
+    expect(SERVER).toContain("pathname === '/api/local-service/shutdown'");
+    expect(MAIN).toContain('localService: manager');
+    expect(MAIN).toContain('manager.init()');
+  });
+});
