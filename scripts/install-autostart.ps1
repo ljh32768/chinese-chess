@@ -74,6 +74,11 @@ function Find-LanChessExe {
 $exe = Find-LanChessExe -Hint $ExePath
 $installDir = Split-Path -Parent $exe
 
+# Reinstall / upgrade: stop the previous instance first so the new one can bind the port.
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+
 $action = New-ScheduledTaskAction -Execute $exe -Argument '--server' -WorkingDirectory $installDir
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $settings = New-ScheduledTaskSettingsSet `

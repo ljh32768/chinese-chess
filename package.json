@@ -38,6 +38,14 @@
       {
         "from": "Reference/Pikafish皮卡鱼20260925/pikafish.nnue",
         "to": "dist/engine/pikafish.nnue"
+      },
+      {
+        "from": "scripts/install-autostart.ps1",
+        "to": "install-autostart.ps1"
+      },
+      {
+        "from": "scripts/uninstall-autostart.ps1",
+        "to": "uninstall-autostart.ps1"
       }
     ],
     "win": {
@@ -53,8 +61,10 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "局域网象棋"
+      "shortcutName": "局域网象棋",
+      "include": "scripts/installer.nsh"
     }
   },
   "dependencies": {
