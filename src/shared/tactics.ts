@@ -35,6 +35,8 @@
  *    闪击的**被威胁棋子只算车 / 马 / 炮**（士 / 象 / 兵与将帅不算，也不画闪电）。
  *    「闪将 / 闪击」的让线须**真的离开该线**：走动的子走子后仍停在这条连线上（继续充当炮架 / 挡子，
  *    如炮架向前吃子后炮改打后面的子）不算让线，不算闪将 / 闪击（`restsOnLine()`）。
+ *    「闪将」的将军还须是**本步新造**（走子前对方将帅并未被照）且**能合法吃到**将帅
+ *    （`canCapture()`：checker 被牵制时看似照将、真吃过去却会送将，属于伪将军，不判闪将）。
  */
 
 import { cloneBoard, findKing, isAttacked, legalMoves, pieceMoves, sideHasAnyMove } from './rules.js';
@@ -480,14 +482,19 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       });
     } else {
       // 闪将：只将军、未同时捉大子——存在一个「非走动的子」的 checker 因让线而成将（checker 限车 / 炮）；
-      // 走动的子须**真的离开该线**（走子后仍停在线上当炮架只是「换架抽子」，不算闪将）
-      const discovered = attackersOf(after, oppKing, me).some(
-        (c) =>
-          !samePos(c, move.to) &&
-          isLinePiece(after, c) &&
-          openedLine(c, oppKing, move.from) &&
-          !restsOnLine(c, oppKing, move.to),
-      );
+      // 走动的子须**真的离开该线**（走子后仍停在线上当炮架只是「换架抽子」，不算闪将）。
+      // 该将军还须是**本步新造**（走子前对方将帅并未被照）且**能合法吃到**将帅——
+      // checker 被牵制时虽然「照」到将帅，真吃过去却会送将，属于伪将军，不算闪将。
+      const discovered =
+        !attackersOf(before, oppKing, me).length &&
+        attackersOf(after, oppKing, me).some(
+          (c) =>
+            !samePos(c, move.to) &&
+            isLinePiece(after, c) &&
+            openedLine(c, oppKing, move.from) &&
+            !restsOnLine(c, oppKing, move.to) &&
+            canCapture(after, c, oppKing),
+        );
       if (discovered) hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
     }
   } else {

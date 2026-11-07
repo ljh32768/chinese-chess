@@ -293,6 +293,17 @@ describe('闪将（discovered-check）', () => {
     expect(hits).toHaveLength(1);
     expect(hits[0].kind).toBe('discovered-check');
   });
+
+  it('checker 被牵制、实际吃不到将帅（伪将军）→ 不判闪将', () => {
+    const b = emptyBoard();
+    put(b, 9, 4, 'K', 'r');
+    put(b, 0, 3, 'K', 'b');
+    put(b, 9, 3, 'R', 'r'); // 让线后「照」到黑将的红车
+    put(b, 9, 0, 'R', 'b'); // 沿 9 行牵制红车（离开 9 行会暴露红帅）
+    put(b, 5, 3, 'N', 'r'); // 让开 3 列的红马
+    // 红马跳到 (3,2)：红车照到 (0,3) 的黑将，但真吃过去要离开 9 行、红帅被黑车照 → 伪将军
+    expect(run(b, [5, 3], [3, 2])).toHaveLength(0);
+  });
 });
 
 describe('闪击（discovered-attack）', () => {
