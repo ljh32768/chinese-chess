@@ -11,9 +11,9 @@
  * 三八线、中路、肋道、底线等）；残局子力背景用于「海底捞月」（限车炮对单车）。
  *
  * 顺序要点：马后炮 / 重炮 / 天地炮 / 闷宫等炮架结构最具体（天地炮排在闷宫之前——真天地炮常同时符合
- * 闷宫的单炮士架条件，但它还要求第二门炮镇中路参与牵制），铁门栓 → 夹车炮为车炮体系由专到泛；「海底捞月」需先于「对面笑」（其封口正是照面）；
- * 侧面虎需先于「列马车」——车贴将照将且马恰在卒位时两种判据同时成立，此时应取侧面虎；「列马车」再先于钓鱼马 /
- * 卧槽马（其马常落在三·八位）；双车错 / 闷杀 / 双将 / 对面笑属泛指结构靠后；清单外的
+ * 闷宫的单炮士架条件，但它还要求第二门炮镇中路参与牵制），铁门栓 → 夹车炮为车炮体系由专到泛；「海底捞月」需先于「对面笑」（其封口正是照面）；「列马车」需先于钓鱼马 /
+ * 卧槽马（其马常落在三·八位，但列马车是更具体的固定定式：马在钓鱼马位 + 将（帅）在底线五路 + 车在底线贴将且在马口下）；
+ * 双车错 / 闷杀 / 双将 / 对面笑属泛指结构靠后；清单外的
  * 「大刀剜心 / 双马饮泉 / 挂角马」作为附加条目压在其后，避免抢占主杀法。
  * 「困毙（欠行）」未被将军，不参与杀法匹配；仅导出 `KUNBI_PATTERN` 供终局展示（绝杀字样 / 杀法框）。
  * v3.8 起展示名（`label`）与杀法名一致，不再追加「杀」字（如「马后炮」而非「马后炮杀」）。
@@ -117,16 +117,11 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     definition: '车炮对单车的残局取胜法：炮借将（帅）为架沉底攻击对方单车，车贴帅成杀。',
   },
   {
-    id: 'cemianhu',
-    name: '侧面虎',
-    label: '侧面虎',
-    definition: '马占对方三、七路卒（兵）位从侧控制将门，由同侧车等子力将死；又称「高钓马」。',
-  },
-  {
     id: 'liemache',
     name: '列马车',
     label: '列马车',
-    definition: '车马配合：马控将（帅）逃路、车紧贴将（帅）一侧照将，且车在马口保护下（将不敢吃车）。',
+    definition:
+      '马占钓鱼马位（对方三·八 / 七·八位）、将（帅）在底线五路，车沿底线贴将照将且车在马口保护下（将不敢吃车）。',
   },
   {
     id: 'wocaoma',
@@ -139,6 +134,12 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     name: '钓鱼马',
     label: '钓鱼马',
     definition: '马占对方三·八或七·八位（卒林线附近）封锁将门，再由车等子力将杀；马是控位子。',
+  },
+  {
+    id: 'cemianhu',
+    name: '侧面虎',
+    label: '侧面虎',
+    definition: '马占对方三、七路卒（兵）位从侧控制将门，由同侧车等子力将死；又称「高钓马」。',
   },
   {
     id: 'bajiaoma',
@@ -531,36 +532,25 @@ const MATCHERS: Match[] = [
       );
     },
   },
-  // 侧面虎（高钓马）：马在卒林线三 / 七路侧控将门，由同侧车等子力将死。
-  // 须排在「列马车」之前——车贴将照将且马正好落在卒位时，两种判据同时成立，
-  // 但马占侧面虎位才是这一构图的定式名（否则贴将的侧面虎会被「列马车」抢占）。
-  {
-    pattern: PATTERN.cemianhu,
-    match: (ctx) => {
-      const rookInvolved = piecesOf(ctx.board, ctx.an.winner, 'R').some(
-        ({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos),
-      );
-      if (!rookInvolved) return false;
-      return piecesOf(ctx.board, ctx.an.winner, 'N').some(
-        ({ pos }) => isCemianhuSquare(pos, ctx.an.mated) && coversEscape(ctx, pos),
-      );
-    },
-  },
-  // 列马车（立马车 / 勒马车）：马控将、车贴帅照将，车在马口保护下（将不敢吃车）
+  // 列马车（立马车 / 勒马车）：固定定式——马在钓鱼马位（对方三·八 / 七·八位）、将（帅）在底线五路，
+  // 车沿底线贴将照将且车在马口保护下（将不敢吃车）。马落在其它位置（如三 / 七路卒位）时不构成列马车。
   {
     pattern: PATTERN.liemache,
     match: (ctx) => {
-      const rooks = piecesOf(ctx.board, ctx.an.winner, 'R');
+      const k = ctx.an.king;
+      if (k[0] !== baseRow(ctx.an.mated) || k[1] !== 4) return false; // 将（帅）在底线五路
       const horses = piecesOf(ctx.board, ctx.an.winner, 'N');
-      for (const r of rooks) {
-        if (!isChecker(ctx, r.pos)) continue;
-        const d = Math.abs(r.pos[0] - ctx.an.king[0]) + Math.abs(r.pos[1] - ctx.an.king[1]);
-        if (d !== 1) continue; // 车紧贴将（帅）一侧照将
-        for (const n of horses) {
-          if (guardsSquare(ctx.board, n.pos, r.pos) && coversEscape(ctx, n.pos)) return true;
-        }
-      }
-      return false;
+      return piecesOf(ctx.board, ctx.an.winner, 'R').some((r) => {
+        if (!isChecker(ctx, r.pos)) return false;
+        if (r.pos[0] !== baseRow(ctx.an.mated)) return false; // 车在底线
+        if (Math.abs(r.pos[1] - k[1]) !== 1) return false; // 车与将（帅）在底线相邻（贴将）
+        return horses.some(
+          (n) =>
+            isDiaoyumaSquare(n.pos, ctx.an.mated) &&
+            guardsSquare(ctx.board, n.pos, r.pos) &&
+            coversEscape(ctx, n.pos),
+        );
+      });
     },
   },
   // 卧槽马：马在对方下二路象前的「卧槽」位（三 / 七路底线附近），控将门一侧
@@ -578,6 +568,19 @@ const MATCHERS: Match[] = [
       piecesOf(ctx.board, ctx.an.winner, 'N').some(
         ({ pos }) => isDiaoyumaSquare(pos, ctx.an.mated) && !isChecker(ctx, pos) && coversEscape(ctx, pos),
       ),
+  },
+  // 侧面虎（高钓马）：马在卒林线三 / 七路侧控将门，由同侧车等子力将死
+  {
+    pattern: PATTERN.cemianhu,
+    match: (ctx) => {
+      const rookInvolved = piecesOf(ctx.board, ctx.an.winner, 'R').some(
+        ({ pos }) => isChecker(ctx, pos) || coversEscape(ctx, pos),
+      );
+      if (!rookInvolved) return false;
+      return piecesOf(ctx.board, ctx.an.winner, 'N').some(
+        ({ pos }) => isCemianhuSquare(pos, ctx.an.mated) && coversEscape(ctx, pos),
+      );
+    },
   },
   // 八脚马（八角马 / 定将马）：马占对方九宫士角，将（帅）在斜对的另一个宫角（隔宫心相望），
   // 马正好控住将（帅）的两条退路，再由其它子力将死（如红马在 (0,3)、黑将在 (2,5)、红车沿二路照将）
