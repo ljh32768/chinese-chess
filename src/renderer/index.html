@@ -530,10 +530,15 @@
           <div class="replay-hint" id="replay-hint">点击「AI推荐」查看推荐着法</div>
           <div class="replay-hint-bar">
             <input type="button" id="btn-replay-hint" value="AI推荐">
-            <input type="button" id="btn-replay-line" value="后续变化">
             <input type="button" id="btn-replay-try" value="试下">
           </div>
           <div class="replay-line" id="replay-line" hidden></div>
+          <!-- AI 推荐 / 试下共用的步数导航：左右箭头逐步，AI 推荐每满 5 手再续算 5 手，绝杀后右箭头置灰 -->
+          <div class="replay-step-nav" id="replay-step-nav" hidden>
+            <input type="button" id="btn-replay-step-prev" value="◀" aria-label="上一步">
+            <span class="replay-step-pos" id="replay-step-pos">第 0 / 0 手</span>
+            <input type="button" id="btn-replay-step-next" value="▶" aria-label="下一步">
+          </div>
           <div class="replay-hint-bar" id="replay-try-bar" hidden>
             <input type="button" id="btn-replay-try-undo" value="悔一步">
             <input type="button" id="btn-replay-try-reset" value="重来">

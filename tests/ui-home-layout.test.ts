@@ -618,10 +618,25 @@ describe('v2.9 被吃掉的棋子显示：棋盘两侧灰色缩略图（取代�
     expect(px('.cap-strip', 'width')).toBeGreaterThanOrEqual(px('.cap-piece', 'width'));
   });
 
-  it('app.ts：用棋子素材渲染吃子条，不再输出文字', () => {
+  it('吃子多时不再排成长条：同种棋子只摆一枚，右上角角标显示个数', () => {
+    expect(decl('.cap-item', 'position')).toBe('relative');
+    expect(decl('.cap-count', 'position')).toBe('absolute');
+    expect(decl('.cap-count', 'top')).toBeDefined();
+    expect(decl('.cap-count', 'right')).toBeDefined();
+    expect(decl('.cap-count', 'border-radius')).toBe('999px');
+    // 吃子条纵向排布、按种类归并，个数超过 1 才画角标
+    expect(decl('.cap-strip', 'flex-direction')).toBe('column');
+  });
+
+  it('app.ts：用棋子素材渲染吃子条（按种类归并 + 个数角标），不再输出文字', () => {
     expect(APP).toContain('function fillCapStrip(');
     expect(APP).toContain('assetUrl(skin()');
     expect(APP).toContain('PIECE_IMG[');
+    expect(APP).toContain('function capturedGroups(');
+    expect(APP).toContain('function capturedGroups(types: PieceType[])');
+    expect(APP).toContain("badge.className = 'cap-count'");
+    expect(APP).toContain('badge.textContent = `×${count}`');
+    expect(APP).toContain('if (count > 1)');
     expect(APP).not.toContain('PIECE_NAME');
   });
 });
@@ -665,12 +680,15 @@ describe('吃子提示（绿色可吃 / 红色有险）', () => {
 describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', () => {
   const REVIEW = readFileSync(path.join(ROOT, 'src', 'renderer', 'review.ts'), 'utf8');
 
-  it('AI 推荐面板：推荐按钮 + 后续变化 + 试下按钮，以及变化 / 试下着法列表', () => {
+  it('AI 推荐面板：推荐按钮 + 试下按钮 + 左右箭头步数导航，以及变化 / 试下着法列表', () => {
     for (const id of [
       'btn-replay-hint',
-      'btn-replay-line',
       'btn-replay-try',
       'replay-line',
+      'replay-step-nav',
+      'btn-replay-step-prev',
+      'btn-replay-step-next',
+      'replay-step-pos',
       'replay-try-bar',
       'btn-replay-try-undo',
       'btn-replay-try-reset',
@@ -681,15 +699,22 @@ describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', 
     expect(HTML).toContain('点击「AI推荐」查看推荐着法');
   });
 
-  it('按钮行为：AI推荐点开才请求（未点不请求）、点棋盘蓝色落点看后续变化、试下自由走子', () => {
+  it('按钮行为：AI推荐点开才请求（未点不请求）、先算 5 手、点蓝色落点看变化第一步、试下自由走子', () => {
     // 打开复盘不再自动请求推荐
     expect(REVIEW).not.toContain('void fetchHint()');
     expect(REVIEW).toContain("$('btn-replay-hint').addEventListener('click', () => void toggleHint())");
-    expect(REVIEW).toContain('/api/ai/hint?id=');
     expect(REVIEW).toContain('/api/ai/line?id=');
-    // 点落点（蓝色棋子）→ 查看后续变化
+    expect(REVIEW).toContain('plies=${LINE_CHUNK}');
+    // 续算：已算出的整段变化作为 prefix 回传，只补算新增 5 手
+    expect(REVIEW).toContain('function extendLine(');
+    expect(REVIEW).toContain('encodeLinePrefix(');
+    expect(REVIEW).toContain('prefix=${encodeURIComponent(prefix)}');
+    // 走到 5 的倍数（已在已算末端）时自动续算 5 手
+    expect(REVIEW).toContain('function maybeExtendLine()');
+    expect(REVIEW).toContain('if (lineStep % LINE_CHUNK !== 0) return;');
+    // 点落点（蓝色棋子）→ 看变化第一步
     expect(REVIEW).toContain('pos[0] === hint.to[0] && pos[1] === hint.to[1]');
-    expect(REVIEW).toContain('function showLine(');
+    expect(REVIEW).toContain('previewLine(1)');
   });
 
   it('试下：选中己方子 → 点合法落点走子，可悔一步 / 重来 / 退出，均不改动记录', () => {
@@ -699,6 +724,11 @@ describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', 
     expect(REVIEW).toContain('function trialReset(');
     expect(REVIEW).toContain('function exitTrial(');
     expect(REVIEW).toContain("$('btn-replay-try-undo').addEventListener('click', trialUndo)");
+    // 试下同样用左右箭头按手数步进
+    expect(REVIEW).toContain('function trialStepBy(');
+    expect(REVIEW).toContain(
+      "$('btn-replay-step-prev').addEventListener('click', () => (trial ? trialStepBy(-1) : linePrev()))",
+    );
   });
 
   it('面板文案与按钮态跟随状态：推荐中 / 变化预览 / 试下中', () => {
@@ -706,8 +736,11 @@ describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', 
     expect(REVIEW).toContain('变化预览：第 ');
     expect(REVIEW).toContain('试下中（');
     expect(REVIEW).toContain("hintBtn.value = hintState === 'shown' ? '收起推荐' : 'AI推荐'");
-    expect(REVIEW).toContain("lineBtn.value = line && lineStep > 0 ? '回到当前' : '后续变化'");
     expect(REVIEW).toContain("tryBtn.value = inTrial ? '退出试下' : '试下'");
+    // 右箭头：绝杀（lineDone）走到末端后置灰
+    expect(REVIEW).toContain(
+      "next.disabled = lineState === 'loading' || (lineDone && lineStep >= line.length)",
+    );
   });
 
   it('棋盘推荐标记为「箭头 + 蓝色落点」（与木质暖色对比），并点击可看后续变化', () => {
@@ -723,10 +756,15 @@ describe('v2.11 复盘 AI 推荐：按钮点开显示 / 后续变化 / 试下', 
     expect(decl('.replay-hint-bar input.on', 'background')).toBe('var(--surface-3-hover)');
     expect(decl('.replay-line-row', 'border-radius')).toBe('var(--radius-sm)');
     expect(decl('.replay-line-row.on', 'border-color')).toBe('var(--accent)');
+    // 步数导航与推荐按钮同款，且禁用态置灰
+    expect(decl('.replay-step-nav input', 'border-radius')).toBe('var(--radius-sm)');
+    expect(decl('.replay-step-nav input:disabled', 'cursor')).toBe('not-allowed');
+    expect(decl('.replay-step-pos', 'text-align')).toBe('center');
     const focusRule = RULES.find((r) => r.selectors.includes('.replay-hint-bar input:focus-visible'));
     expect(focusRule).toBeTruthy();
     expect(focusRule!.decls).toContain('--focus-ring');
     expect(focusRule!.selectors).toContain('.replay-line-row:focus-visible');
+    expect(focusRule!.selectors).toContain('.replay-step-nav input:focus-visible');
   });
 });
 
@@ -913,6 +951,8 @@ describe('v3.15 登录首屏、用户头像与整体放大', () => {
       'min(calc((100vh - 190px) * 0.9017), 660px, calc(100vw - 48px))',
     );
     expect(decl('.panel', 'flex')).toBe('0 1 320px');
+    // 对局侧栏不再顶到棋盘上沿：在棋盒高度内纵向居中
+    expect(decl('#screen-game .panel', 'align-self')).toBe('center');
     expect(px('.cap-piece', 'width')).toBeGreaterThan(40);
     expect(px('.board-tactics', 'font-size')).toBe(34);
     expect(px('.banner-name', 'font-size')).toBe(64);

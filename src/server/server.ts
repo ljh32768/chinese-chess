@@ -38,6 +38,18 @@ function parseFirstMove(raw: string | null): Move | null {
   return { from: [parts[0], parts[1]], to: [parts[2], parts[3]] };
 }
 
+/**
+ * 解析复盘「后续变化」续算的已算着法 `?prefix=fr,fc,tr,tc|fr,fc,tr,tc...`。
+ * 客户端每走到 5 的倍数时带已算出的整段变化回来，服务端只补算新增的 5 手；非法条目忽略。
+ */
+function parseMoveList(raw: string | null): Move[] {
+  if (!raw) return [];
+  return raw
+    .split('|')
+    .map((part) => parseFirstMove(part))
+    .filter((m): m is Move => !!m);
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -331,7 +343,7 @@ export class GameServer {
     return this.sendJson(res, 200, hint ?? { none: true });
   }
 
-  /** 复盘 AI 后续变化：`?id=&index=&plies=&depth=&first=` → `AiLine | { none: true }` */
+  /** 复盘 AI 后续变化：`?id=&index=&plies=&depth=&first=&prefix=` → `AiLine | { none: true }` */
   private async handleAiLine(url: URL, res: http.ServerResponse): Promise<void> {
     const record = this.history.get(url.searchParams.get('id') ?? '');
     if (!record) return this.sendJson(res, 404, { error: '记录不存在' });
@@ -339,7 +351,8 @@ export class GameServer {
     const plies = Number(url.searchParams.get('plies') ?? '4');
     const level = normalizeLevel(url.searchParams.get('depth'));
     const first = parseFirstMove(url.searchParams.get('first'));
-    const line = await lineFor(record, index, plies, level, this.engine, first);
+    const prefix = parseMoveList(url.searchParams.get('prefix'));
+    const line = await lineFor(record, index, plies, level, this.engine, first, prefix);
     return this.sendJson(res, 200, line ?? { none: true });
   }
 

@@ -5,8 +5,11 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  encodeLinePrefix,
   formatTime,
   historyUrl,
+  lineChunkTarget,
+  lineEndsGame,
   mateOf,
   recordLine,
   replayBoard,
@@ -16,7 +19,7 @@ import {
   withMoves,
 } from '../src/renderer/review.js';
 import { initBoard } from '../src/shared/rules.js';
-import { GameRecord, GameRecordSummary, Move, PlayerRef } from '../src/shared/types.js';
+import { GameRecord, GameRecordSummary, MAX_AI_LINE_PLIES, Move, PlayerRef } from '../src/shared/types.js';
 import { MATE_LINE } from './mate-line.js';
 
 /** 三步着法：红车进一、黑卒进一、红炮平中 */
@@ -102,6 +105,33 @@ describe('后续变化 / 试下共用的局面推演 withMoves', () => {
     expect(withMoves(base, MOVES, -1)).toEqual(base);
     expect(withMoves(base, MOVES, Number.NaN)).toEqual(base);
     expect(withMoves(base, MOVES, 99)[7][4]).toEqual({ t: 'C', s: 'r' });
+  });
+});
+
+describe('AI 推荐变化：分段计算与终局判定', () => {
+  it('每次续算 5 手（5 → 10 → 15 …），到上限后不再增加', () => {
+    expect(lineChunkTarget(0)).toBe(5);
+    expect(lineChunkTarget(5)).toBe(10);
+    expect(lineChunkTarget(10)).toBe(15);
+    // 非有限数按 0 处理（避免 NaN 传进请求）
+    expect(lineChunkTarget(Number.NaN)).toBe(5);
+    // 上限：MAX_AI_LINE_PLIES（30）之后不再增加
+    expect(lineChunkTarget(MAX_AI_LINE_PLIES)).toBe(MAX_AI_LINE_PLIES);
+    expect(lineChunkTarget(MAX_AI_LINE_PLIES + 5)).toBe(MAX_AI_LINE_PLIES);
+  });
+
+  it('变化终点判定：走完已算着法后下一方无着可走（绝杀 / 困毙）即到终点', () => {
+    // 完整 37 步将死线：走完后黑方被将死 → 终点
+    expect(lineEndsGame(initBoard(), MATE_LINE, 'r')).toBe(true);
+    // 少走最后一步（36 手）时红方仍有着可走 → 未到终点
+    expect(lineEndsGame(initBoard(), MATE_LINE.slice(0, 36), 'r')).toBe(false);
+    // 空变化不算终点
+    expect(lineEndsGame(initBoard(), [], 'r')).toBe(false);
+  });
+
+  it('已算变化编码为 prefix 查询串（续算时原样回传给服务端）', () => {
+    expect(encodeLinePrefix(MOVES)).toBe('9,0,8,0|3,0,4,0|7,1,7,4');
+    expect(encodeLinePrefix([])).toBe('');
   });
 });
 

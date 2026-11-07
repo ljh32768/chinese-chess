@@ -872,6 +872,27 @@ describe('服务器 · 对局回顾与 AI 推荐', () => {
     expect(line.moves[0].to).toEqual(hint.to);
   }, 15000);
 
+  it('AI 后续变化：传入 prefix 时沿用已算出的整段变化（只补算新增手数）', async () => {
+    const { base } = await playAndFinish();
+    const list = (await (await fetch(`${base}/api/history`)).json()) as { games: { id: string }[] };
+    const id = list.games[0].id;
+
+    // 先算 3 手；再把整段变化作为 prefix 续算到 5 手
+    const first = (await (await fetch(`${base}/api/ai/line?id=${id}&index=0&plies=3`)).json()) as {
+      moves: { side: string; from: Pos; to: Pos; text: string }[];
+    };
+    expect(first.moves.length).toBeGreaterThanOrEqual(1);
+    const prefix = first.moves.map((m) => `${m.from[0]},${m.from[1]},${m.to[0]},${m.to[1]}`).join('|');
+    const next = (await (
+      await fetch(`${base}/api/ai/line?id=${id}&index=0&plies=5&prefix=${encodeURIComponent(prefix)}`)
+    ).json()) as { moves: { from: Pos; to: Pos }[] };
+    // 已算出的着法原样保留（不会因重算而改变），只在其后补足到 5 手
+    expect(next.moves.length).toBeGreaterThanOrEqual(first.moves.length);
+    expect(next.moves.slice(0, first.moves.length).map((m) => [m.from, m.to])).toEqual(
+      first.moves.map((m) => [m.from, m.to]),
+    );
+  }, 15000);
+
   it('对局未结束时不写入记录', async () => {
     const s = await startServer();
     await setupGame(s);

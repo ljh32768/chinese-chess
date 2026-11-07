@@ -226,23 +226,25 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 [tests/banner.test.ts](../../tests/banner.test.ts)（**将军固定「将军」/ 绝杀大字直接显示具体杀法名（缺省退回「绝杀」）/ 不改动传入参数**）、
 [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（`#banner-name` 纯文字结构（无 `banner-card` / `banner-slash` / `banner-sub`）/ 2.5s 渐入渐出 / 无黑底无圆框 / 楷体加粗与 `data-kind` 白红配色 / 减弱动效仍可见 / `app.ts` 接线：点击抬起、取消落回、走子从抬起态平移）。
 
-### 3.5.6 v2.9 被吃掉的棋子展示（棋盘两侧缩略图；v3.3 放大并保留红黑原色）
+### 3.5.6 v2.9 被吃掉的棋子展示（棋盘两侧缩略图；v3.3 放大并保留红黑原色；v3.16 同种合并 + 个数角标）
 
 把「吃子」从侧栏的**文字列表**改为棋盘**两侧的棋子缩略图**：删除侧栏文字面板，被吃掉的子以素材缩略图
-摆到棋盘左右两侧。v3.3 起缩略图**放大**（26px → 34px）并**保留红 / 黑原色**（去掉去色 / 压暗），
-数据改由权威状态机下发的 `capturedByRed/Black` 驱动。
+摆到棋盘左右两侧。v3.3 起缩略图**放大**（26px → 34px，v3.15 再放大到 42px）并**保留红 / 黑原色**（去掉去色 / 压暗），
+数据改由权威状态机下发的 `capturedByRed/Black` 驱动。**v3.16 起同种棋子只摆一枚、右上角角标显示个数（`×N`）**，
+吃子再多也不会把两侧的条越排越长。
 
 | 项 | 规格 |
 |---|---|
 | 数据 | v3.3 起改用 [game.ts `snapshot()`](../../src/shared/game.ts) 下发的 `capturedByRed/Black`（[room.ts `applyAndBroadcast()`](../../src/server/room.ts) 走子广播同步携带）——标准 / 揭棋 / 残局 / 人机一律包含；渲染层直接采用，**不再**按着法序列从标准开局推导（`notation.ts capturedPieces(history)` 保留为通用工具，残局自定义开局下会推出并不存在的「死子」故不再使用）；侧栏原「红方吃子 / 黑方吃子」文字面板删除 |
 | 结构 | `index.html` 对局页 `.chess-box > .board-row`（三栏 flex 居中）：左 `.cap-strip#cap-red`（红方所吃 = 黑子）+ 中间 `.board-stage`（画布 + 提示条）+ 右 `.cap-strip#cap-black`（黑方所吃 = 红子） |
-| 渲染 | `app.ts renderCaptured()` → `fillCapStrip()`：按 `assetUrl(skin(), side + '_' + PIECE_IMG[t])` 生成 `<img class="cap-piece">`，保留红 / 黑原色；以「皮肤 + 棋子序列」为签名，未变则跳过重建避免闪烁；揭棋用快照记录的吃子（含暗子真实身份）。素材映射 `PIECE_IMG` 由 `board.ts` 导出复用 |
-| 放大与原色 | `.cap-piece { width: 34px }`（v3.3 由 26px 放大），**不再** `filter: grayscale(1) opacity(0.55)`——被吃掉的子按素材呈现红 / 黑原色 |
-| 布局 | `.cap-strip { align-self: stretch; flex-direction: column; flex-wrap: wrap; justify-content: center }`：随棋盘高度拉伸并纵向居中；条宽 40px、缩略图 34px。空条仍占位（左右对称，棋盘保持居中） |
-| 无障碍 | 吃子条 `aria-hidden="true"`、缩略图 `alt=""`：与盘面重复的纯装饰信息，不进入可访问性树 |
+| 渲染 | `app.ts renderCaptured()` → `fillCapStrip()`：**先按棋子种类归并（`capturedGroups()`，保留首次出现顺序）**，每种只生成一个 `<span class="cap-item">`（内部 `<img class="cap-piece">` + 个数 `> 1` 时右上角 `<span class="cap-count">×N</span>`），素材按 `assetUrl(skin(), side + '_' + PIECE_IMG[t])` 取，保留红 / 黑原色；以「皮肤 + 棋子序列」为签名，未变则跳过重建避免闪烁；揭棋用快照记录的吃子（含暗子真实身份）。素材映射 `PIECE_IMG` 由 `board.ts` 导出复用 |
+| 放大与原色 | `.cap-piece { width: 42px; height: 42px; object-fit: contain }`（v3.15 由 34px 放大），**不再** `filter: grayscale(1) opacity(0.55)`——被吃掉的子按素材呈现红 / 黑原色 |
+| 个数角标 | `.cap-item { position: relative }` + `.cap-count { position: absolute; top: -5px; right: -6px; min-width: 17px; height: 17px; border-radius: 999px; background: #241608; color: #ffe3b0; border: 1px solid rgba(255,207,122,.55) }`；个数为 1 时不显示角标（单枚已由缩略图本身表达） |
+| 布局 | `.cap-strip { align-self: stretch; flex-direction: column; flex-wrap: wrap; justify-content: center }`：随棋盘高度拉伸并纵向居中；条宽 50px、缩略图 42px。空条仍占位（左右对称，棋盘保持居中）。归并后最多 7 种棋子，条高约 7 × 49px，不再随吃子数量增长 |
+| 无障碍 | 吃子条 `aria-hidden="true"`、缩略图 `alt=""`、角标 `pointer-events: none`：与盘面重复的纯装饰信息，不进入可访问性树 |
 
 验收（自动化）：[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（侧栏文字面板与其样式已删除、
-两侧吃子条结构顺序与三栏居中、缩略图放大且不再置灰、`app.ts` 用素材渲染且不再有文字映射）。
+两侧吃子条结构顺序与三栏居中、缩略图放大且不再置灰、`app.ts` 用素材渲染且不再有文字映射、**同种归并 + `×N` 角标与 `.cap-item` / `.cap-count` 样式**）。
 
 ### 3.5.7 v2.10 战术闪电与开局提示（将军 / 绝杀大字与将颤抖）
 
@@ -283,7 +285,8 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 整体放大 | `--ui-scale` 1.25 → **1.4**；`.app` 最大宽 1180 → **1360**（`--app-max`）；`.panel-lg` 620 → **760**（`--panel-max`）、`.review_box` → **920**（`--review-max`）；对局侧栏 `.panel` 268 → **320px**（`min-width: 280px`）；吃子条 40 → 50px、缩略图 34 → **42px**；状态框 14.5 → 15.5px；`body` 字号 14 → **16px** |
 | 棋盘放大 | 画布不再锁定原生 523×580：`.chess-box canvas` 宽 = `min(calc((100vh - 200px) * 0.9017), 680px, calc(100vw - 48px))`（复盘 / 通用），对局页 = `min(calc((100vh - 190px) * 0.9017), 660px, ...)`；编辑器 = `min(calc((100vh - 330px) * 0.9017), 640px, ...)`。`board.ts` 新增 `renderPixelRatio(cssWidth, skinWidth, dpr)`（上限 3×），`renderBoard()` 按 CSS 显示宽 × 设备像素比设置画布内部尺寸并 `setTransform`，放大后不发虚；点击换算仍走 `canvasPoint()` |
 | 应用图标 | 浏览器 `<link rel="icon">` / `apple-touch-icon`、Electron `BrowserWindow.icon`（`dist/renderer/assets/img/symbol.png`）、electron-builder `build.win.icon`（`Reference/picture/symbol.png`）统一使用 `symbol.png`；Electron 窗口 1120×840 → **1360×960**（最小 900×700） |
-| 验收 | [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 新增「v3.15 登录首屏、用户头像与整体放大」：图标路径与窗口尺寸、登录 / 注册首屏与 `init` 流转、表单 / 选项卡 / 密码显隐、用户页头像与退出登录、头像默认值、放大后的棋盘 / 面板 / 侧栏尺寸；[tests/board.test.ts](../../tests/board.test.ts) 新增 `renderPixelRatio` 倍率与上限用例 |
+| 对局侧栏居中（v3.16） | `.game-layout` 仍 `align-items: flex-start`；**`#screen-game .panel { align-self: center }`**——对局页侧栏不再与棋盘上沿（含上方战术提示行）齐平，而是在棋盒高度内纵向居中；窄屏（≤900px）侧栏改为整行铺满时不受影响 |
+| 验收 | [tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts) 新增「v3.15 登录首屏、用户头像与整体放大」：图标路径与窗口尺寸、登录 / 注册首屏与 `init` 流转、表单 / 选项卡 / 密码显隐、用户页头像与退出登录、头像默认值、放大后的棋盘 / 面板 / 侧栏尺寸；[tests/board.test.ts](../../tests/board.test.ts) 新增 `renderPixelRatio` 倍率与上限用例；**v3.16 增加 `#screen-game .panel { align-self: center }` 断言** |
 
 ### 3.6 走子交互（app.ts `onCell`）
 
@@ -304,7 +307,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 悬停预高亮 | `render()` 在「对局中且轮到自己」时传入 `interactiveSide`；`mousemove` 命中交叉点后写入 `S.hover` 并重绘，绘制计划对己方棋子 / 合法落点追加金色环 |
 | 光标 | 悬停在可选中棋子或合法落点上时 `canvas.style.cursor = 'pointer'`，其余为默认；`mouseleave` 清空悬停；触摸设备不触发 mousemove，不受影响 |
 | ESC | 有弹层时关闭弹层；复盘页 → 回顾列表；回顾列表 → 首页；否则调用 `clearSelection()` 取消棋盘选中 |
-| 方向键 | 复盘页激活时 ← / → 等效「上一步 / 下一步」（一次一步） |
+| 方向键 | 复盘页激活时 ← / → 按当前形态生效：**试下中 → 试走着法逐步；AI 推荐显示中 → 推荐变化逐步；否则 → 对局记录上一步 / 下一步**（一次一步，v3.16 起） |
 | 右键 | 棋盘 `contextmenu` 阻止默认菜单并取消选中 |
 | 遮罩点击 | 点击 `modal` 遮罩空白处关闭弹层（等效「取消」） |
 | 请求等待态 | `offerDraw` / `requestRestart` 发出后置 `pending` 并在 `req-hint` 显示等待文案，已有 `pending` 时防重复发送；收到响应或快照同步时清空 |

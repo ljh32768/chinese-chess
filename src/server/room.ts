@@ -20,6 +20,7 @@ import {
   GameVariant,
   GuessChoice,
   GuessResult,
+  MAX_AI_LINE_PLIES,
   Move,
   PlayerRef,
   Pos,
@@ -984,6 +985,7 @@ export async function hintFor(
  * 一手都推不出（如已终局）返回 null。
  * `first` 为复盘已显示的「推荐」着法：给出且合法时直接作为首手，保证推荐与后续变化首手一致
  * （皮卡鱼按思考时限取着法，两次独立查询可能不同，故必须复用）。
+ * `prefix` 为客户端已算出的整段变化：续算时原样保留，只让引擎补足剩余手数（每次追加 5 手）。
  */
 export async function lineFor(
   record: GameRecord,
@@ -992,17 +994,27 @@ export async function lineFor(
   level: EngineLevel,
   engine: EnginePort,
   first?: Move | null,
+  prefix?: Move[] | null,
 ): Promise<AiLine | null> {
   const n = Math.max(0, Math.min(Number.isFinite(index) ? Math.floor(index) : 0, record.moves.length));
   const board = initBoard();
   for (let i = 0; i < n; i++) makeMove(board, record.moves[i].from, record.moves[i].to);
   const start: Side = n % 2 === 0 ? 'r' : 'b';
-  const count = Number.isFinite(plies) ? Math.min(8, Math.max(1, Math.floor(plies))) : 4;
+  const count = Number.isFinite(plies) ? Math.min(MAX_AI_LINE_PLIES, Math.max(1, Math.floor(plies))) : 4;
 
   let side = start;
   const moves: AiLineMove[] = [];
-  // 首手优先复用复盘「推荐」着法（保证与提示箭头 / 文案一致）
-  if (first && validateMove(board, first.from, first.to, side) === null) {
+  // 续算：沿用客户端已显示的整段变化（逐手复核，非法即在此截断）
+  if (prefix?.length) {
+    for (const mv of prefix) {
+      if (moves.length >= count) break;
+      if (validateMove(board, mv.from, mv.to, side) !== null) break;
+      moves.push({ side, from: mv.from, to: mv.to, text: describeMove(board, mv.from, mv.to) });
+      makeMove(board, mv.from, mv.to);
+      side = side === 'r' ? 'b' : 'r';
+    }
+  } else if (first && validateMove(board, first.from, first.to, side) === null) {
+    // 首手优先复用复盘「推荐」着法（保证与提示箭头 / 文案一致）
     moves.push({ side, from: first.from, to: first.to, text: describeMove(board, first.from, first.to) });
     makeMove(board, first.from, first.to);
     side = side === 'r' ? 'b' : 'r';

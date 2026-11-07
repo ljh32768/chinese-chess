@@ -706,14 +706,28 @@ describe('残局挑战：界面接线', () => {
     }
     for (const id of ['eg-box', 'eg-info']) expect(HTML).toContain(`id="${id}"`);
     expect(APP).toContain("$('actions-play').hidden = over || S.spectator || !!eg");
-    expect(APP).toContain("$('actions-endgame').hidden = !eg || over");
+    expect(APP).toContain("$('actions-endgame').hidden = !eg");
+    // 残局出结果后也不再切到「再来一局 / 返回首页」操作行
+    expect(APP).toContain("$('actions-over').hidden = !over || S.spectator || !!eg");
+  });
+
+  it('残局通关 / 失败后沿用残局操作行：不弹结果卡，悔棋与提示置灰', () => {
+    // 旧的「挑战成功 / 失败」结果弹层已移除（不再出现「再来一次 / 返回首页」）
+    expect(APP).not.toContain('function showEndgameResult()');
+    expect(APP).not.toContain("label: won ? '再来一次' : '重　来'");
+    expect(APP).toContain('const egDone = !!eg?.result;');
+    expect(APP).toContain("$<HTMLButtonElement>('btn-eg-undo').disabled = egDone");
+    expect(APP).toContain("$<HTMLButtonElement>('btn-eg-hint').disabled = egDone");
+    // 结果改在状态框 + 轻提示里报出
+    expect(APP).toContain('挑战成功：「${eg.puzzle.name}」');
+    expect(APP).toContain('挑战失败：「${eg.puzzle.name}」');
   });
 
   it('残局页面「下一关」按钮：题库还有下一局才显示，点击进入下一局', () => {
     expect(APP).toContain('function endgameNext()');
     expect(APP).toContain('const next = nextPuzzle(eg.puzzle.id)');
     expect(APP).toContain("$('btn-eg-next').addEventListener('click', endgameNext)");
-    // 最后一关隐藏（结果弹层另有「下一关」）
+    // 最后一关隐藏（结果后仍沿用该操作行，故同样不可用）
     expect(APP).toContain("$<HTMLButtonElement>('btn-eg-next').hidden = !eg || !nextPuzzle(eg.puzzle.id)");
     expect(APP).toContain('已经是最后一关了');
   });
@@ -825,16 +839,10 @@ describe('残局挑战：界面接线', () => {
   });
 
   it('多步残局：未出结果时必须继续调度 AI 应招（否则玩家走完一步就卡住）', () => {
-    const body = APP.slice(
-      APP.indexOf('function endgameEvaluate()'),
-      APP.indexOf('function showEndgameResult()'),
-    );
+    const body = APP.slice(APP.indexOf('function endgameEvaluate()'), APP.indexOf('function endgameNext()'));
     expect(body).toContain('scheduleLocalAi()');
     // 只在「尚未终局」的分支里继续对局
-    const elseBranch = body.slice(
-      body.indexOf('} else {'),
-      body.indexOf('render();\n  showEndgameResult();'),
-    );
+    const elseBranch = body.slice(body.indexOf('} else {'), body.indexOf('render();\n  // 只在状态框'));
     expect(elseBranch).toContain('scheduleLocalAi()');
     expect(elseBranch).toContain('return;');
   });
@@ -847,10 +855,7 @@ describe('残局挑战：界面接线', () => {
   });
 
   it('残局不限步数：将死即胜，不再按步数判负，并展示最优步数', () => {
-    const body = APP.slice(
-      APP.indexOf('function endgameEvaluate()'),
-      APP.indexOf('function showEndgameResult()'),
-    );
+    const body = APP.slice(APP.indexOf('function endgameEvaluate()'), APP.indexOf('function endgameNext()'));
     // 只按终局判定，不再有「超出步数」这一失败原因
     expect(body).not.toContain('超出步数');
     expect(body).toContain("if (S.status === 'over')");

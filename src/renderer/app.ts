@@ -768,14 +768,18 @@ function updatePanel(): void {
   $('p-bottom-name').textContent = S.spectator ? sideName(S.side) : `${sideName(S.side)} · 你`;
 
   const active = S.status === 'playing';
-  // 残局挑战：出结果（成功 / 失败）后按终局处理（操作切换为「再来一局 / 返回首页」）
+  // 残局挑战：出结果后继续沿用残局操作行（不再切换到「再来一局 / 返回首页」）
   const eg = S.endgame;
   const over = S.status === 'over' || !!eg?.result;
   // 操作组：观战者隐藏对局操作（只读），残局用独立操作行，对局中与结束态互斥切换
   $('actions-play').hidden = over || S.spectator || !!eg;
-  $('actions-endgame').hidden = !eg || over;
-  $('actions-over').hidden = !over || S.spectator;
+  $('actions-endgame').hidden = !eg;
+  $('actions-over').hidden = !over || S.spectator || !!eg;
   $('actions-spectate').hidden = !S.spectator;
+  // 残局已出结果（成功 / 失败）后不再可悔棋 / 提示，但「下一关 / 重来 / 离开」照常可用
+  const egDone = !!eg?.result;
+  $<HTMLButtonElement>('btn-eg-undo').disabled = egDone;
+  $<HTMLButtonElement>('btn-eg-hint').disabled = egDone;
   // 吃子提示：仅对局进行中且非观战时可用（开启态用金色实底强调）
   const hintBtn = $<HTMLInputElement>('btn-hint');
   hintBtn.hidden = !active || S.spectator;
@@ -846,7 +850,7 @@ function updatePanel(): void {
       `<div>已用：${eg.used} 步</div>` +
       `<div class="eg-intro">${eg.puzzle.intro}</div>`;
   }
-  // 残局「下一关」：题库中还有下一局时可用，最后一关隐藏（结果弹层另有「下一关」）
+  // 残局「下一关」：题库中还有下一局时可用，最后一关隐藏（结果后仍可用）
   $<HTMLButtonElement>('btn-eg-next').hidden = !eg || !nextPuzzle(eg.puzzle.id);
 
   // 终局杀法：将死时展示识别出的具体杀法名与解说（识别不到经典杀法时保持隐藏）
@@ -885,20 +889,36 @@ function renderCaptured(): void {
   fillCapStrip($('cap-black'), S.capBlack, 'r');
 }
 
-/** 把一组被吃棋子渲染为素材缩略图（保留红 / 黑原色）；内容（皮肤 + 棋子序列）未变则跳过重建，避免闪烁 */
+/** 把一组被吃棋子渲染为素材缩略图（保留红 / 黑原色）；同种棋子只出现一次，右上角标个数 */
 function fillCapStrip(el: HTMLElement, types: PieceType[], side: Side): void {
   const sig = `${S.skin}:${types.join('')}`;
   if (el.dataset.sig === sig) return;
   el.dataset.sig = sig;
   el.replaceChildren(
-    ...types.map((t) => {
+    ...capturedGroups(types).map(([t, count]) => {
+      const item = document.createElement('span');
+      item.className = 'cap-item';
       const img = document.createElement('img');
       img.className = 'cap-piece';
       img.alt = '';
       img.src = assetUrl(skin(), `${side}_${PIECE_IMG[t]}`);
-      return img;
+      item.appendChild(img);
+      if (count > 1) {
+        const badge = document.createElement('span');
+        badge.className = 'cap-count';
+        badge.textContent = `×${count}`;
+        item.appendChild(badge);
+      }
+      return item;
     }),
   );
+}
+
+/** 按棋子种类归并（保留首次出现顺序），避免吃子多时把棋盘两侧拉得过长 */
+function capturedGroups(types: PieceType[]): Array<[PieceType, number]> {
+  const groups = new Map<PieceType, number>();
+  for (const t of types) groups.set(t, (groups.get(t) ?? 0) + 1);
+  return [...groups.entries()];
 }
 
 function applySnapshot(s: GameSnapshot, opts: { keepAnim?: boolean } = {}): void {
@@ -2208,29 +2228,12 @@ function endgameEvaluate(): void {
     return;
   }
   render();
-  showEndgameResult();
-}
-
-/** 残局结果弹层：成功可「下一关」（并给出是否达成最优步数），失败可「重来」 */
-function showEndgameResult(): void {
-  const eg = S.endgame;
-  if (!eg) return;
-  const won = eg.result === 'win';
-  const next = won ? nextPuzzle(eg.puzzle.id) : null;
-  const optimal = eg.used === eg.puzzle.goalMoves;
-  showModal({
-    title: won ? '挑战成功' : '挑战失败',
-    sub: won
-      ? `「${eg.puzzle.name}」${eg.reason} · 用时 ${eg.used} 步（最优 ${eg.puzzle.goalMoves} 步${
-          optimal ? ' · 已达成最优' : ''
-        }）`
-      : `「${eg.puzzle.name}」${eg.reason}（最优 ${eg.puzzle.goalMoves} 步）`,
-    buttons: [
-      ...(next ? [{ label: `下一关：${next.name}`, primary: true, onClick: () => startPuzzle(next) }] : []),
-      { label: won ? '再来一次' : '重　来', primary: !next, onClick: restartPuzzle },
-      { label: '返回首页', onClick: leaveToHome },
-    ],
-  });
+  // 只在状态框 / 轻提示里报结果：不弹「再来一局 / 返回首页」结果卡，通关后的按钮与未通关时一致
+  toast(
+    eg.result === 'win'
+      ? `挑战成功：「${eg.puzzle.name}」${eg.reason} · 用时 ${eg.used} 步（最优 ${eg.puzzle.goalMoves} 步）`
+      : `挑战失败：「${eg.puzzle.name}」${eg.reason}（最优 ${eg.puzzle.goalMoves} 步）`,
+  );
 }
 
 /** 残局「下一关」：直接进入题库中的下一局（已是最后一关则提示） */

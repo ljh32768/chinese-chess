@@ -79,6 +79,12 @@ export interface GameSnapshot {
 export const ROWS = 10;
 export const COLS = 9;
 
+/**
+ * 复盘 AI 后续变化单次请求的手数上限。
+ * 界面上「AI推荐」先算 5 手，之后每走到 5 的倍数再续算 5 手；上限避免一次请求过重。
+ */
+export const MAX_AI_LINE_PLIES = 30;
+
 /** 对局结束原因 */
 export type GameOverReason =
   | '将死'

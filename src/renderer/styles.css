@@ -920,6 +920,7 @@ body::before {
 .review_row:focus-visible,
 #btn-hint:focus-visible,
 .replay-hint-bar input:focus-visible,
+.replay-step-nav input:focus-visible,
 .replay-line-row:focus-visible,
 .panel-lg input:focus-visible,
 .panel-lg select:focus-visible {
@@ -988,14 +989,33 @@ body::before {
   flex-wrap: wrap;
   align-content: center;
   justify-content: center;
-  gap: 5px;
+  gap: 7px;
   width: 50px;
 }
+/* 同种吃子只摆一枚（避免吃子多时越排越长），右上角数字角标标出个数 */
+.cap-item { position: relative; display: block; width: 42px; height: 42px; }
 /* 被吃子放大展示，并保留红 / 黑原色（不再置灰） */
 .cap-piece {
   display: block;
   width: 42px;
-  height: auto;
+  height: 42px;
+  object-fit: contain;
+}
+.cap-count {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 3px;
+  font: 700 11px/17px "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: #ffe3b0;
+  text-align: center;
+  background: #241608;
+  border: 1px solid rgba(255, 207, 122, 0.55);
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
 }
 
 /* ---------- 棋盘正中提示：将军 / 绝杀（纯文字大字，无黑底无圆框；楷体加粗），显示 2.5s 渐入渐出 ---------- */
@@ -1115,6 +1135,8 @@ body::before {
   gap: 12px;
   text-align: left;
 }
+/* 对局页侧栏：不再顶到棋盘上沿（上方还有战术提示行），在棋盒高度内纵向居中 */
+#screen-game .panel { align-self: center; }
 /* 玩家行：左侧红/黑细色条区分阵营，走棋方整行加亮；行首为用户头像 */
 .player-row {
   display: flex;
@@ -1311,9 +1333,10 @@ body::before {
 .replay-step { color: var(--text); line-height: 1.7; word-break: break-all; }
 .replay-hint { color: var(--gold-bright); line-height: 1.7; word-break: break-all; }
 
-/* AI 推荐操作行：AI推荐 / 后续变化 / 试下（与 bn_box 同款木质按钮） */
+/* AI 推荐操作行：AI推荐 / 试下（与 bn_box 同款木质按钮） */
 .replay-hint-bar { display: flex; gap: 6px; margin-top: 8px; }
-.replay-hint-bar input {
+.replay-hint-bar input,
+.replay-step-nav input {
   flex: 1;
   min-width: 0;
   padding: 6px 2px;
@@ -1326,9 +1349,12 @@ body::before {
   cursor: pointer;
   transition: filter 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.replay-hint-bar input:hover { filter: brightness(1.06); transform: translateY(-1px); }
-.replay-hint-bar input:active { transform: translateY(0) scale(0.98); }
-.replay-hint-bar input:disabled {
+.replay-hint-bar input:hover,
+.replay-step-nav input:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.replay-hint-bar input:active,
+.replay-step-nav input:active { transform: translateY(0) scale(0.98); }
+.replay-hint-bar input:disabled,
+.replay-step-nav input:disabled {
   color: #8f7d63;
   background: #d9c8a8;
   border-color: #a5967a;
@@ -1342,6 +1368,21 @@ body::before {
   color: var(--text);
   background: var(--surface-3-hover);
   border-color: var(--accent);
+}
+/* AI 推荐 / 试下共用的步数导航：左右箭头 + 当前位置 */
+.replay-step-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.replay-step-nav input { flex: 0 0 46px; }
+.replay-step-pos {
+  flex: 1;
+  min-width: 0;
+  font: 400 12px/1.5 inherit;
+  color: var(--text-dim);
+  text-align: center;
 }
 /* 后续变化 / 试下 着法列表（行可点：预览到该手） */
 .replay-line {
