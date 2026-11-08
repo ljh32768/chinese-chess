@@ -412,6 +412,17 @@ function coversEscape(ctx: Ctx, pos: Pos): boolean {
 }
 
 /**
+ * 抽走 pos 处的棋子后，被将死方是否重新获得合法着法——即该子对成杀是否**必需**。
+ * 用以排除「恰好站在这类杀法点位上、实际只是陪衬」的棋子：如双车错局面里顺手控门的马，
+ * 其封住的逃路本已被照将的车封死，抽走它仍是将死，就不该按马（侧面虎 / 钓鱼马等）命名。
+ */
+function isIndispensable(ctx: Ctx, pos: Pos): boolean {
+  const nb = cloneBoard(ctx.board);
+  nb[pos[0]][pos[1]] = null;
+  return sideHasAnyMove(nb, ctx.an.mated);
+}
+
+/**
  * 天地炮的核心「牵制」：炮与将（帅）同线且中间**恰有两枚棋子**——
  * 这两枚子任一移开，另一枚就会成为炮架、让这门炮照将，故二者都被钉死（多为对方的士、象）。
  */
@@ -566,23 +577,31 @@ const MATCHERS: Match[] = [
       });
     },
   },
-  // 卧槽马：马在对方下二路象前的「卧槽」位（三 / 七路底线附近），控将门一侧
+  // 卧槽马：马在对方下二路象前的「卧槽」位（三 / 七路底线附近），控将门一侧（马须为成杀所必需）
   {
     pattern: PATTERN.wocaoma,
     match: (ctx) =>
       piecesOf(ctx.board, ctx.an.winner, 'N').some(
-        ({ pos }) => isWocaomaSquare(pos, ctx.an.mated) && (isChecker(ctx, pos) || coversEscape(ctx, pos)),
+        ({ pos }) =>
+          isWocaomaSquare(pos, ctx.an.mated) &&
+          (isChecker(ctx, pos) || coversEscape(ctx, pos)) &&
+          isIndispensable(ctx, pos),
       ),
   },
-  // 钓鱼马：马占三·八 / 七·八位封锁将门，由其它子力将杀（马是控位子，不直接将军）
+  // 钓鱼马：马占三·八 / 七·八位封锁将门，由其它子力将杀（马是控位子，不直接将军，且须为成杀所必需）
   {
     pattern: PATTERN.diaoyuma,
     match: (ctx) =>
       piecesOf(ctx.board, ctx.an.winner, 'N').some(
-        ({ pos }) => isDiaoyumaSquare(pos, ctx.an.mated) && !isChecker(ctx, pos) && coversEscape(ctx, pos),
+        ({ pos }) =>
+          isDiaoyumaSquare(pos, ctx.an.mated) &&
+          !isChecker(ctx, pos) &&
+          coversEscape(ctx, pos) &&
+          isIndispensable(ctx, pos),
       ),
   },
-  // 侧面虎（高钓马）：马在卒林线三 / 七路侧控将门，由同侧车等子力将死
+  // 侧面虎（高钓马）：马在卒林线三 / 七路侧控将门，由同侧车等子力将死；
+  // 马须真正控住将门（抽走马即非将死），否则只是站在该点位上的陪衬子（如双车错里顺手控门的马）
   {
     pattern: PATTERN.cemianhu,
     match: (ctx) => {
@@ -591,7 +610,8 @@ const MATCHERS: Match[] = [
       );
       if (!rookInvolved) return false;
       return piecesOf(ctx.board, ctx.an.winner, 'N').some(
-        ({ pos }) => isCemianhuSquare(pos, ctx.an.mated) && coversEscape(ctx, pos),
+        ({ pos }) =>
+          isCemianhuSquare(pos, ctx.an.mated) && coversEscape(ctx, pos) && isIndispensable(ctx, pos),
       );
     },
   },
@@ -603,7 +623,7 @@ const MATCHERS: Match[] = [
       piecesOf(ctx.board, ctx.an.winner, 'N').some(({ pos }) => {
         if (!isShijiaoSquare(pos, ctx.an.mated)) return false;
         if (Math.abs(pos[0] - ctx.an.king[0]) !== 2 || Math.abs(pos[1] - ctx.an.king[1]) !== 2) return false; // 斜对宫角
-        return !isChecker(ctx, pos) && coversEscape(ctx, pos);
+        return !isChecker(ctx, pos) && coversEscape(ctx, pos) && isIndispensable(ctx, pos);
       }),
   },
   // 双车错：双车分占两条不同的横线 / 纵线，交错将军

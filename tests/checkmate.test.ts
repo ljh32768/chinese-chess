@@ -41,6 +41,36 @@ function expectMate(items: Spec[], mated: Side, id: string): void {
 }
 
 describe('杀法识别：每种杀法一个终局局面', () => {
+  it('反例（用户截图）：双车错局面里马恰占三路卒位，但只是陪衬，不得判侧面虎', () => {
+    // 截图局面还原：黑将 (2,5)、黑马 (2,7)/(7,6)，红车 (1,0)/(2,2)、红马 (3,2)、红帅 (7,3)
+    // 红马 (3,2) 确实在「三路卒原位」，但它封住的 (2,4) 本已被照将的红车封死，
+    // 抽走马仍是将死 —— 该杀法是双车错，不是侧面虎
+    const items: Spec[] = [
+      [2, 5, 'bK'],
+      [2, 7, 'bN'],
+      [7, 6, 'bN'],
+      [1, 0, 'rR'],
+      [2, 2, 'rR'],
+      [3, 2, 'rN'],
+      [7, 3, 'rK'],
+    ];
+    expectMate(items, 'b', 'shuangchecuo');
+    expect(classifyCheckmate(boardOf(items), 'b').alsoMatched).not.toContain('侧面虎');
+  });
+
+  it('反例：双车错局面里马恰占钓鱼马位，但只是陪衬，不得判钓鱼马', () => {
+    const items: Spec[] = [
+      [0, 4, 'bK'],
+      [9, 4, 'rK'],
+      [1, 0, 'rR'],
+      [0, 8, 'rR'],
+      [5, 4, 'rP'],
+      [2, 2, 'rN'],
+    ];
+    expectMate(items, 'b', 'shuangchecuo');
+    expect(classifyCheckmate(boardOf(items), 'b').alsoMatched).not.toContain('钓鱼马');
+  });
+
   it('马后炮：炮借己方马为炮架将军，且该马控将（马前炮后）', () => {
     expectMate(
       [
