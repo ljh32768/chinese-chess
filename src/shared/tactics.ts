@@ -28,7 +28,10 @@
  *    ② 传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将。
  *    闪将的让线须**真的离开该线**（`restsOnLine()`：走子后仍停留在车 / 炮与目标的连线上、
  *    继续充当炮架 / 挡子不算让线），②的将军须**本步新造**且 **能合法吃到**将帅（`canCapture()`）。
- *    只由移开的子直接将军、又没有抽到大子时，不做战术提示（将军本身由正中大字表达）。
+ *    **照将须由真棋子造成**——后方攻击子只认车 / 炮，帅 / 将照面（`isAttacked()` 的照面规则）不算照将，
+ *    兵 / 士 / 象也不能充当让线攻击子（v3.32）。
+ *    只由移开的子直接将军（动子自己也将军的双将情形归 ①，②须「移开的子本人不将军」）、
+ *    又没有抽到大子时，不做战术提示（将军本身由正中大字表达）。
  *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
  *    ② **移开的这枚子自身也带威胁**（走子后捉到、且走子前我方并未攻击的大子）。两条件缺一不可——
  *    只让线、移开的子自身不捉子（如躲子 / 闲走）不判闪击。
@@ -489,6 +492,9 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
   // 所有正在照将的子（将军抽以「将军的子本人」是否同时咬到大子为口径；闪将看谁在将军）
   const checkers = oppKing ? attackersOf(after, oppKing, me) : [];
   const moverChecks = checkers.some((c) => samePos(c, move.to));
+  // 照将须由**真棋子**造成：帅 / 将照面（`isAttacked()` 的照面规则）不算「后方攻击子」，
+  // 只照面而无子力照将时不进战术的照将分支（v3.32；将帅照面本身由规则层的「将军」负责）
+  if (givesCheck && !checkers.length) return [];
 
   // 「两者必然失去其一」验证要逐个模拟对方的每一种合法应着（较贵），只在实际需要时算一次
   let replies: Reply[] | null = null;
@@ -533,10 +539,12 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       const p = after[victim[0]][victim[1]];
       if (p && unavoidablyLost(winsOnce(), victim)) victims.push({ pos: victim, piece: p });
     }
-    // 闪将②：传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将；
-    // 走动的子须**真的离开该线**（走子后仍停在线上当炮架只是「换架抽子」），且将军须**本步新造**、
-    // checker **能合法吃到**将帅（被牵制时看似照将、真吃过去却会送将，属于伪将军）。
+    // 闪将②：传统让线闪将——移开的子本人**不将军**，由让线露出的车 / 炮成将（后方攻击子只认车 / 炮，
+    // 帅 / 将、兵、士、象都不是让线攻击子）；走动的子须**真的离开该线**（走子后仍停在线上当炮架只是
+    // 「换架抽子」），且将军须**本步新造**、checker **能合法吃到**将帅（被牵制时看似照将、真吃过去却会
+    // 送将，属于伪将军）。动子自己也将军（双将）时归闪将①，本步未抽到大子则不做战术提示（v3.32）。
     const discovered =
+      !moverChecks &&
       !attackersOf(before, oppKing, me).length &&
       checkers.some(
         (c) =>
