@@ -408,20 +408,25 @@ describe('v2.4 视觉与交互精修', () => {
 });
 
 describe('v2.4 终局杀法展示', () => {
-  it('对局侧栏含杀法框（杀法名 / 解说 / 同时构成），显隐由 app.ts 控制', () => {
-    for (const id of ['kill-box', 'kill-name', 'kill-def', 'kill-also']) {
+  it('对局侧栏含杀法框（只展示主杀法名 / 解说，不展示「同时构成」）', () => {
+    for (const id of ['kill-box', 'kill-name', 'kill-def']) {
       expect(HTML).toContain(`id="${id}"`);
     }
+    expect(HTML).not.toContain('kill-also');
     expect(APP).toContain("const killBox = $('kill-box')");
     expect(APP).toContain('killBox.hidden = !mate');
     expect(APP).toContain('function mateInfo()');
+    // 界面不再展示同时成立的其他杀法（DOM 与写入逻辑均已移除）
+    expect(APP).not.toContain('kill-also');
   });
 
-  it('复盘页含「终局杀法」面板（按记录着法即时识别）', () => {
-    for (const id of ['replay-mate-box', 'replay-mate-name', 'replay-mate-def', 'replay-mate-also']) {
+  it('复盘页含「终局杀法」面板（按记录着法即时识别，不展示同时成立）', () => {
+    for (const id of ['replay-mate-box', 'replay-mate-name', 'replay-mate-def']) {
       expect(HTML).toContain(`id="${id}"`);
     }
+    expect(HTML).not.toContain('replay-mate-also');
     expect(HTML).toContain('终局杀法');
+    expect(read('src/renderer/review.ts')).not.toContain('replay-mate-also');
   });
 
   it('杀法框沿用 v2.4 设计令牌（与状态框同款面板、单一强调金）', () => {
@@ -429,11 +434,8 @@ describe('v2.4 终局杀法展示', () => {
     expect(decl('.kill-box', 'border-radius')).toBe('var(--radius-sm)');
     expect(decl('.kill-name', 'color')).toBe('var(--gold)');
     expect(decl('.kill-def', 'color')).toBe('var(--text-dim)');
-    expect(decl('.kill-also', 'color')).toBe('var(--text-mute)');
     // 黑方致胜时杀法名换用冷色，与状态框的 win-black 呼应
     expect(decl('.kill-box.win-black .kill-name', 'color')).toBe('#bcd2e8');
-    // 空的「同时构成」不占位
-    expect(decl('.kill-also:empty', 'display')).toBe('none');
   });
 
   it('小屏（<=900px）下杀法框与状态框同列铺满', () => {
@@ -485,7 +487,7 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     expect(kf).toContain('100% { opacity: 0');
   });
 
-  it('正中大字无黑底 / 无圆框，楷体加粗；将军白字、绝杀红字（绝杀字号略小以便放下杀法名）', () => {
+  it('正中大字无黑底 / 无圆框，楷体加粗；将白字、绝杀红字；字号加大', () => {
     // 无背景、无边框、无圆角
     expect(decl('.banner-name', 'background')).toBeUndefined();
     expect(decl('.banner-name', 'border')).toBeUndefined();
@@ -497,7 +499,9 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     expect(decl('.banner-name', 'font-weight')).toBe('900');
     expect(decl(".banner-name[data-kind='check']", 'color')).toBe('#fff3d6');
     expect(decl(".banner-name[data-kind='mate']", 'color')).toBe('#ff3b30');
-    expect(decl(".banner-name[data-kind='mate']", 'font-size')).toBe('52px');
+    // v3.40：将 / 绝杀字号整体调大（基准 64px → 88px、绝杀 52px → 72px）
+    expect(decl('.banner-name', 'font-size')).toBe('88px');
+    expect(decl(".banner-name[data-kind='mate']", 'font-size')).toBe('72px');
   });
 
   it('战术提示改为黑色方框，字体与正中大字同款楷体加粗', () => {
@@ -515,7 +519,7 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     }
   });
 
-  it('app.ts：走子动画按 rAF 推进、提示按局面触发并在 2.5s 后隐藏；绝杀大字取杀法名', () => {
+  it('app.ts：走子动画按 rAF 推进、提示按局面触发并在 2.5s 后隐藏；绝杀先显示杀法名再接「绝杀」', () => {
     expect(APP).toContain('const MOVE_ANIM_MS');
     expect(APP).toContain('function animateMove(');
     expect(APP).toContain('requestAnimationFrame');
@@ -526,6 +530,11 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     expect(APP).toContain("bannerContent('mate', { label })");
     expect(APP).toContain('const label = mate ? mate.pattern.label');
     expect(APP).toContain('name.dataset.kind = c.kind');
+    // v3.40：非困毙时先显示杀法特判、显示结束后再接「绝杀」；困毙只显示「困毙」
+    expect(APP).toContain('function showMateBanner(');
+    expect(APP).toContain('bannerChainTimer');
+    expect(APP).toContain("S.reason === '困毙'");
+    expect(APP).toContain('showMateBanner(label)');
     // 联机走子（move_applied / game_over）与本地走子都接上动画与提示
     expect(APP).toContain('animateMove(msg.from, msg.to, hasLiftAt(msg.from))');
     expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
@@ -1001,7 +1010,7 @@ describe('v3.15 登录首屏、用户头像与整体放大', () => {
     expect(decl('#screen-game .panel', 'align-self')).toBe('center');
     expect(px('.cap-piece', 'width')).toBeGreaterThan(40);
     expect(px('.board-tactics', 'font-size')).toBe(34);
-    expect(px('.banner-name', 'font-size')).toBe(64);
+    expect(px('.banner-name', 'font-size')).toBe(88);
     expect(decl('body', 'font')).toContain('16px');
     expect(decl('.editor-main #eg-board', 'width')).toContain('640px');
     expect(MAIN).toContain('width: 1360');

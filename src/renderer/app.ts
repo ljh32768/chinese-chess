@@ -244,8 +244,9 @@ function mateInfo(): CheckmateInfo | null {
   return info?.recognized ? info : null;
 }
 
-/** 终局状态文案：识别到杀法时用杀法名替代泛指的「将死」 */
-const overText = (mate: CheckmateInfo | null) => `${resultText()} · ${mate ? mate.pattern.label : S.reason}`;
+/** 终局状态文案：识别到杀法时用杀法名替代泛指的「绝杀」（「将死」一律按「绝杀」展示） */
+const overText = (mate: CheckmateInfo | null) =>
+  `${resultText()} · ${mate ? mate.pattern.label : S.reason === '将死' ? '绝杀' : S.reason}`;
 
 // -------------------------------------------------------------- 基础 UI
 
@@ -278,15 +279,18 @@ function maybeVaryHint(seq: number, hint: boolean): void {
 
 // -------------------------------------------------------------- 正中提示条（将军 / 绝杀）
 
-/** 提示条显示时长（毫秒）：渐入 → 保持 → 渐出（较 v2.10 延长，便于看清将军 / 绝杀） */
+/** 提示条显示时长（毫秒）：渐入 → 保持 → 渐出（较 v2.10 延长，便于看清「将」/ 绝杀） */
 const BANNER_MS = 2500;
 let bannerTimer = 0;
+/** 「特判 → 绝杀」的接续定时器：杀法特判显示结束后再接「绝杀」 */
+let bannerChainTimer = 0;
 /** 上一帧提示条的局势键与时间：联机走子会连收 move_applied + game_over，按此去重 */
 let lastBannerKey = '';
 let lastBannerAt = 0;
 
-/** 在棋盘正中显示将军 / 绝杀大字（纯文字、无底色无圆框），2.5s 后渐出消失 */
+/** 在棋盘正中显示「将」/ 绝杀大字（纯文字、无底色无圆框），2.5s 后渐出消失 */
 function showBanner(c: BannerContent): void {
+  window.clearTimeout(bannerChainTimer);
   const el = $('board-banner');
   const name = $('banner-name');
   name.dataset.kind = c.kind;
@@ -302,6 +306,19 @@ function showBanner(c: BannerContent): void {
   }, BANNER_MS);
 }
 
+/**
+ * 绝杀提示：非困毙时先显示杀法特判（如「侧面虎」），特判显示结束后再接「绝杀」；
+ * 未命中任何特判时直接显示「绝杀」（由 showBanner 的缺省名兜底）。
+ */
+function showMateBanner(label: string | null): void {
+  if (!label) {
+    showBanner(bannerContent('mate'));
+    return;
+  }
+  showBanner(bannerContent('mate', { label }));
+  bannerChainTimer = window.setTimeout(() => showBanner(bannerContent('mate')), BANNER_MS + 200);
+}
+
 /** 同一局势（seq + 类型）在短时间内重复触发时只显示一次 */
 function showBannerOnce(key: string, run: () => void): void {
   const now = performance.now();
@@ -312,17 +329,20 @@ function showBannerOnce(key: string, run: () => void): void {
 }
 
 /**
- * 按当前局面决定是否弹提示：「将死」→ 绝杀（大字直接显示杀法名）；「将军」→ 将军。
+ * 按当前局面决定是否弹提示：「将死」→ 先杀法特判、随后接「绝杀」；「困毙」→ 只显示「困毙」；「将军」→「将」。
  * 在每次走子后调用（联机 move_applied / game_over、本地人机与残局）。
  */
 function maybeBanner(): void {
   if (!$('screen-game').classList.contains('active')) return;
   const winner = S.winner;
-  if (S.status === 'over' && winner && (S.reason === '将死' || S.reason === '困毙')) {
+  if (S.status === 'over' && winner && S.reason === '困毙') {
+    showBannerOnce(`mate:kunbi:${S.moveSeq}`, () => showBanner(bannerContent('mate', { label: '困毙' })));
+  } else if (S.status === 'over' && winner && S.reason === '将死') {
+    // 非困毙：命中特判先显示杀法名，特判显示完再接「绝杀」；未命中特判直接显示「绝杀」
     const mate = mateInfo();
     const id = mate?.pattern.id ?? 'generic';
-    const label = mate ? mate.pattern.label : S.reason === '困毙' ? '困毙' : '将死';
-    showBannerOnce(`mate:${id}:${S.moveSeq}`, () => showBanner(bannerContent('mate', { label })));
+    const label = mate ? mate.pattern.label : null;
+    showBannerOnce(`mate:${id}:${S.moveSeq}`, () => showMateBanner(label));
   } else if (S.status === 'playing' && S.check) {
     showBannerOnce(`check:${S.turn}:${S.moveSeq}`, () => showBanner(bannerContent('check')));
   }
@@ -858,7 +878,7 @@ function updatePanel(): void {
   // 残局「下一关」：题库中还有下一局时可用，最后一关隐藏（结果后仍可用）
   $<HTMLButtonElement>('btn-eg-next').hidden = !eg || !nextPuzzle(eg.puzzle.id);
 
-  // 终局杀法：将死时展示识别出的具体杀法名与解说（识别不到经典杀法时保持隐藏）
+  // 终局杀法：将死时只展示识别出的主杀法名与解说（不展示「同时构成」，识别不到经典杀法时保持隐藏）
   const killBox = $('kill-box');
   killBox.hidden = !mate;
   if (mate) {
@@ -866,7 +886,6 @@ function updatePanel(): void {
     killBox.classList.toggle('win-black', S.winner === 'b');
     $('kill-name').textContent = mate.pattern.label;
     $('kill-def').textContent = mate.pattern.definition;
-    $('kill-also').textContent = mate.alsoMatched.length ? `同时构成：${mate.alsoMatched.join('、')}` : '';
   }
 
   // 请求等待状态（和棋 / 重开 / 悔棋发出后）

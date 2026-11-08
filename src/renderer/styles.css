@@ -1149,7 +1149,7 @@ body::before {
   display: block;
   padding: 0 12px;
   font-family: var(--font-chess);
-  font-size: 64px;
+  font-size: 88px;
   font-weight: 900;
   line-height: 1.05;
   letter-spacing: 8px;
@@ -1161,9 +1161,9 @@ body::before {
   color: #fff3d6;
   text-shadow: 0 0 2px #1c0f06, 0 4px 14px rgba(0, 0, 0, 0.8);
 }
-/* 绝杀：大字直接是具体杀法名（如「马后炮杀」「大刀剜心杀」），红字略收字号保证完整显示 */
+/* 绝杀：大字先显示具体杀法名（如「马后炮」「大刀剜心」），随后接「绝杀」；红字略收字号保证完整显示 */
 .banner-name[data-kind='mate'] {
-  font-size: 52px;
+  font-size: 72px;
   color: #ff3b30;
   text-shadow: 0 0 18px rgba(255, 59, 48, 0.8), 0 3px 12px rgba(0, 0, 0, 0.85);
 }
@@ -1289,7 +1289,7 @@ body::before {
   border-radius: var(--radius-sm);
 }
 
-/* 终局杀法（将死时展示具体杀法名 / 解说 / 同时构成的其它杀法）：
+/* 终局杀法（将死时只展示主杀法名 / 解说，不再展示同时成立的其它杀法）：
    与状态框同款面板 + 左侧金色发丝，作为终局信息的补充说明，样式沿用 v2.4 设计令牌 */
 .kill-box {
   padding: 10px 12px;
@@ -1302,8 +1302,6 @@ body::before {
 .kill-name { font-size: 15px; font-weight: 700; letter-spacing: 2px; color: var(--gold); }
 .kill-box.win-black .kill-name { color: #bcd2e8; }
 .kill-def { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--text-dim); word-break: break-all; }
-.kill-also { margin-top: 4px; font-size: 11px; letter-spacing: 1px; color: var(--text-mute); }
-.kill-also:empty { display: none; }
 
 .panel-box {
   padding: 12px 14px;
@@ -1850,8 +1848,8 @@ body::before {
   /* 小屏棋子栏收一档，两排棋子不至于换行溢出 */
   .eg-piece { width: 36px; height: 36px; }
   /* 小屏棋盘也小：正中大字与上方提示条整体收一档，避免盖住整个盘面 */
-  .banner-name { font-size: 42px; letter-spacing: 5px; }
-  .banner-name[data-kind='mate'] { font-size: 34px; }
+  .banner-name { font-size: 62px; letter-spacing: 5px; }
+  .banner-name[data-kind='mate'] { font-size: 50px; }
   .board-tactics-slot { min-height: 46px; }
   .board-tactics { padding: 6px 20px; font-size: 22px; letter-spacing: 4px; }
 }

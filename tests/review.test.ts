@@ -141,17 +141,17 @@ describe('回顾列表文案', () => {
     expect(formatTime(new Date(2026, 0, 9, 5, 7).getTime())).toBe('01-09 05:07');
   });
 
-  it('结果文案区分红胜 / 黑胜 / 和棋与结束原因', () => {
-    expect(resultText({ winner: 'r', reason: '将死' })).toBe('红胜（将死）');
+  it('结果文案区分红胜 / 黑胜 / 和棋与结束原因（「将死」展示为「绝杀」）', () => {
+    expect(resultText({ winner: 'r', reason: '将死' })).toBe('红胜（绝杀）');
     expect(resultText({ winner: 'b', reason: '超时判负' })).toBe('黑胜（超时判负）');
     expect(resultText({ winner: null, reason: '同意和棋' })).toBe('和棋（同意和棋）');
   });
 
-  it('结果文案优先展示识别出的杀法（将死不再只显示「将死」）', () => {
+  it('结果文案优先展示识别出的杀法（将死不再只显示泛指文案）', () => {
     expect(resultText({ winner: 'r', reason: '将死', killMethod: '马后炮' })).toBe('红胜（马后炮）');
     expect(resultText({ winner: 'b', reason: '将死', killMethod: '双车错' })).toBe('黑胜（双车错）');
-    // 无杀法字段（旧记录 / 非将死）时退回结束原因
-    expect(resultText({ winner: 'r', reason: '将死' })).toBe('红胜（将死）');
+    // 无杀法字段（旧记录 / 未命中特判）时按「绝杀」展示
+    expect(resultText({ winner: 'r', reason: '将死' })).toBe('红胜（绝杀）');
     expect(resultText({ winner: 'b', reason: '认输' })).toBe('黑胜（认输）');
   });
 

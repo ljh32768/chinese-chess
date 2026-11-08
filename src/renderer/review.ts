@@ -89,12 +89,13 @@ export function formatTime(ts: number): string {
 }
 
 /**
- * 结果文案：红胜（马后炮杀） / 和棋（同意和棋）。
- * 「将死」时优先用记录中识别出的杀法名（旧记录无此字段时退回「将死」）。
+ * 结果文案：红胜（马后炮） / 和棋（同意和棋）。
+ * 「将死」时优先用记录中识别出的杀法名，其余「将死」一律按「绝杀」展示。
  */
 export function resultText(rec: { winner: Side | null; reason: string; killMethod?: string }): string {
   const who = rec.winner === 'r' ? '红胜' : rec.winner === 'b' ? '黑胜' : '和棋';
-  return `${who}（${rec.killMethod ?? rec.reason}）`;
+  const reason = rec.reason === '将死' ? '绝杀' : rec.reason;
+  return `${who}（${rec.killMethod ?? reason}）`;
 }
 
 /**
@@ -430,15 +431,12 @@ export function initReview(deps: ReviewDeps): ReviewController {
       guess +
       `<div>时间：${line.time}</div><div>结果：${line.result}</div><div>共 ${record.moveCount} 步</div>`;
 
-    // 终局杀法：将死时展示具体杀法名与解说（识别不到经典杀法时隐藏）
+    // 终局杀法：将死时只展示识别出的主杀法名与解说（不展示「同时构成」，识别不到经典杀法时隐藏）
     const mate = mateOf(record);
     $('replay-mate-box').hidden = !mate;
     if (mate) {
       $('replay-mate-name').textContent = mate.pattern.label;
       $('replay-mate-def').textContent = mate.pattern.definition;
-      $('replay-mate-also').textContent = mate.alsoMatched.length
-        ? `同时构成：${mate.alsoMatched.join('、')}`
-        : '';
     }
 
     const stepText =

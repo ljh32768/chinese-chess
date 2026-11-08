@@ -466,7 +466,7 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
-  it('未匹配经典杀法时兜底为「将死」，且 recognized 为 false', () => {
+  it('未匹配经典杀法时兜底为「绝杀」，且 recognized 为 false', () => {
     const board = boardOf([
       [0, 4, 'bK'],
       [9, 3, 'rK'],
@@ -476,7 +476,7 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     expect(judgeAfterMove(board, 'b')?.reason).toBe('将死');
     const info = classifyCheckmate(board, 'b');
     expect(info.pattern.id).toBe('generic');
-    expect(info.pattern.label).toBe('将死');
+    expect(info.pattern.label).toBe('绝杀');
     expect(info.recognized).toBe(false);
   });
 

@@ -48,19 +48,19 @@ export interface CheckmatePattern {
 
 /** 杀法识别结果 */
 export interface CheckmateInfo {
-  /** 识别到的杀法（未识别到具体杀法时为兜底条目「将死」） */
+  /** 识别到的杀法（未识别到具体杀法时为兜底条目「绝杀」） */
   pattern: CheckmatePattern;
-  /** 同时成立的其他杀法名（不含主杀法，按优先级排列） */
+  /** 同时成立的其他杀法名（不含主杀法，按优先级排列；仅供数据层使用，界面只展示主杀法） */
   alsoMatched: string[];
-  /** 是否识别到具体杀法（false 表示只判定为「将死」） */
+  /** 是否识别到具体杀法（false 表示只判定为「绝杀」） */
   recognized: boolean;
 }
 
 /** 兜底条目：未匹配到经典杀法 */
 const GENERIC: CheckmatePattern = {
   id: 'generic',
-  name: '将死',
-  label: '将死',
+  name: '绝杀',
+  label: '绝杀',
   definition: '将（帅）被将军且无法解将；本局未匹配到经典杀法名。',
 };
 

@@ -1,16 +1,17 @@
 /**
- * 棋盘正中提示（将军 / 绝杀纯文字大字）的内容测试。
- * v3.7 起提示不再有黑色圆底 / 圆框与副标题：将军固定「将军」，绝杀直接显示具体杀法名。
+ * 棋盘正中提示（将 / 绝杀纯文字大字）的内容测试。
+ * v3.7 起提示不再有黑色圆底 / 圆框与副标题；v3.40 起被将军固定单字「将」，
+ * 绝杀先显示具体杀法名、特判显示结束后再接「绝杀」。
  */
 
 import { describe, expect, it } from 'vitest';
 import { bannerContent } from '../src/renderer/banner.js';
 
 describe('提示内容 bannerContent', () => {
-  it('将军：固定大字「将军」', () => {
+  it('将：被将军时固定大字「将」', () => {
     const c = bannerContent('check');
     expect(c.kind).toBe('check');
-    expect(c.name).toBe('将军');
+    expect(c.name).toBe('将');
   });
 
   it('绝杀：大字直接显示具体杀法名（纯名称，不带「杀」字）', () => {
