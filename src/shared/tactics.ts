@@ -43,7 +43,9 @@
  *    **v3.31「有根」口径**：被威胁的子「有根」（受对方保护）时不算「赢到子」——
  *    ① **串打**按用户口径 **前、后两枚都须无根**（任一枚有根，对方都能用等值交换守住它 /
  *       先弃后取两全，不是真串打）；
- *    ② **捉双 / 将军抽 / 闪击（含闪将的后方让线威胁）**沿用**吃子提示的获利口径**
+ *    ② **捉双**同样要求**每一枚被捉子都无根**（v3.34 用户口径：有根的目标即便小换大，
+ *       也只是「兑子」而非白赚，对方可反吃 / 等价交换守住）；
+ *    ③ **将军抽 / 闪击（含闪将的后方让线威胁）**沿用**吃子提示的获利口径**
  *       （`worthEating()`：无根白吃，或小换大净赚 ≥1 分——马 4 换有根炮 4.5 不算）。
  *    「有根」与吃子提示共用同一套 `isDefended()`（见本文件第一节）。
  */
@@ -598,11 +600,12 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       }
     }
 
-    // 捉双 = 走动的单枚子同时攻击 ≥2 枚「值得捉」的敌子（不含将），且每一枚都**值得吃**
-    // （v3.31：无根或小换大净赚 ≥1，与吃子提示同一口径——有根且等价的目标不算被捉到）
+    // 捉双 = 走动的单枚子同时攻击 ≥2 枚「值得捉」的敌子（不含将），且每一枚都**无根**（v3.34 用户口径）：
+    // 与串打同一套 `rootlessTarget()`——有根的目标对方可以反吃 / 等价交换守住，属于「兑子」而非「捉双」；
+    // 不再沿用「小换大」的获利口径（否则「马同时捉两枚有根车」这类伪捉双会被误报）
     const valuable = piecesOf(after, opp).filter(
       ({ pos, piece }) =>
-        isWorth(piece.t) && canCapture(after, move.to, pos) && worthEating(after, opp, pos, move.to),
+        isWorth(piece.t) && canCapture(after, move.to, pos) && rootlessTarget(after, opp, pos, move.to),
     );
     if (valuable.length >= 2) {
       hits.push({ kind: 'fork', label: '捉双', actors: [move.to], threats: valuable.map((f) => f.pos) });
