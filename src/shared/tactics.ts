@@ -33,12 +33,16 @@
  *    ② **移开的这枚子自身也带威胁**（走子后捉到、且走子前我方并未攻击的大子）。两条件缺一不可——
  *    只让线、移开的子自身不捉子（如躲子 / 闲走）不判闪击。
  *    「串打」= 走动的车 / 炮沿**同一条射线**攻击前、后两枚值得捉的敌子；
- *    「捉双」= 走动的**单枚子**同时攻击 ≥2 枚值得捉的敌子（两者都只要求「能合法吃到」的图案口径）。
+ *    「捉双」= 走动的**单枚子**同时攻击 ≥2 枚值得捉的敌子。
  *    以上攻击都须**能合法吃到**（`canCapture()`，按 `legalMoves` 过滤送将 / 照面）——
- *    被牵制时「够得着却吃不过去」的伪攻击不算威胁；**不要求获利**（有根 / 等价交换也算）。
- *    v3.25 起**不再额外要求「对方必然失去其一」**（对方反吃攻击子、或把被威胁子走开，
- *    都不影响走子当步给出的图案提示）；**吃子提示**的绿 / 红环仍按获利口径
- *    （无根白吃 / 明显小换大——净赚 ≥1 分，见 `profitableTargets`）。
+ *    被牵制时「够得着却吃不过去」的伪攻击不算威胁；v3.25 起**不再额外要求
+ *    「对方必然失去其一」**（对方反吃攻击子、或把被威胁子走开，都不影响走子当步给出的图案提示）。
+ *    **v3.31「有根」口径**：被威胁的子「有根」（受对方保护）时不算「赢到子」——
+ *    ① **串打**按用户口径 **前、后两枚都须无根**（任一枚有根，对方都能用等值交换守住它 /
+ *       先弃后取两全，不是真串打）；
+ *    ② **捉双 / 将军抽 / 闪击（含闪将的后方让线威胁）**沿用**吃子提示的获利口径**
+ *       （`worthEating()`：无根白吃，或小换大净赚 ≥1 分——马 4 换有根炮 4.5 不算）。
+ *    「有根」与吃子提示共用同一套 `isDefended()`（见本文件第一节）。
  */
 
 import { cloneBoard, findKing, isAttacked, legalMoves, pieceMoves, sideHasAnyMove } from './rules.js';
@@ -252,6 +256,27 @@ function canCapture(board: Board, from: Pos, target: Pos): boolean {
   return legalMoves(board, from[0], from[1]).some(([r, c]) => r === target[0] && c === target[1]);
 }
 
+/**
+ * 目标是否「无根」：攻击子（`byPos`）吃掉目标、落于目标格后，对方**没有任何子能反吃**。
+ * 直接复用吃子提示的 `isDefended()`——战术里的「有根」与棋盘上绿 / 红环是**同一套**口径（v3.31）。
+ */
+function rootlessTarget(board: Board, opp: Side, at: Pos, byPos: Pos): boolean {
+  return !isDefended(board, opp, at, byPos);
+}
+
+/**
+ * 目标是否「值得吃」（v3.31）：无根白吃，或**小换大净赚 ≥ `MIN_PROFIT`（1 分）**。
+ * 与吃子提示的绿环同一口径——有根且几乎等值的交换（马 4 换有根炮 4.5）不算「赢到子」，
+ * 因此串打 / 捉双 / 将军抽 / 闪击都不应把这类「只是够得着」的子当作被赢到的子。
+ */
+function worthEating(board: Board, opp: Side, at: Pos, byPos: Pos): boolean {
+  const target = board[at[0]]?.[at[1]];
+  const attacker = board[byPos[0]]?.[byPos[1]];
+  if (!target || !attacker) return false;
+  if (!isDefended(board, opp, at, byPos)) return true;
+  return VALUE[target.t] - VALUE[attacker.t] >= MIN_PROFIT;
+}
+
 /** 同行 / 同列两点之间的格子；不同线返回空数组 */
 function betweenCells(a: Pos, b: Pos): Pos[] {
   const res: Pos[] = [];
@@ -373,7 +398,8 @@ function behindKingVictim(board: Board, checker: Pos, king: Pos, opp: Side): Pos
 /**
  * 「让线」后由**非走动的直线子力**（车 / 炮）**新威胁**到的敌方大子：
  * 要求 `after` 有攻击、`before` 无攻击（本步新造）、被让线的子**真的离开该线**（`restsOnLine()`），
- * 且攻击子**能合法吃到**该子（`canCapture()`：被牵制等伪攻击不算）。
+ * 且攻击子**能合法吃到**该子（`canCapture()`：被牵制等伪攻击不算），
+ * 并且该子**值得吃**（`worthEating()`：无根或小换大净赚 ≥1 分，v3.31——有根且等价的目标不算被赢到）。
  * 闪击（双向双威胁）与闪将（移开的子将军 + 后台子力捉大子）共用此口径。
  */
 function revealedThreats(
@@ -397,7 +423,7 @@ function revealedThreats(
         !restsOnLine(a, pos, move.to) &&
         canCapture(after, a, pos),
     );
-    if (actor) {
+    if (actor && worthEating(after, opp, pos, actor)) {
       threats.push(pos);
       actors.push(actor);
     }
@@ -485,11 +511,17 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
     //（对方反吃攻击子 / 把被攻击子走开也不影响提示：只按走子当步形成的图案判定）。
     const winsBeforeSet = winsBeforeOnce();
     const capturable = capturableKeys(after, me);
+    // v3.31：被抽子须**值得吃**（无根或小换大净赚 ≥1，与吃子提示同一口径）——
+    // 有根且几乎等值的目标（如「马抽有根炮」）对方反吃即可两全，不算「抽」
+    let profitable: Set<string> | null = null;
+    const profitableOnce = (): Set<string> =>
+      profitable ?? (profitable = new Set(profitableTargets(after, me).map(key)));
     const victims: Array<{ pos: Pos; piece: Piece }> = [];
     for (const { pos, piece } of piecesOf(after, opp)) {
       if (!isWorth(piece.t)) continue;
       if (!capturable.has(key(pos))) continue; // 须能合法吃到（过滤送将 / 照面）
       if (winsBeforeSet.has(key(pos))) continue; // 走子前已可吃到 → 非本步新威胁
+      if (!profitableOnce().has(key(pos))) continue; // 有根且不划算 → 不是「抽」
       victims.push({ pos, piece });
     }
     // ② 被照之将同线后方的大子（将移开后即落入照将直线子的攻击口——经典抽将）；
@@ -542,22 +574,27 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
     }
   } else {
-    // 串打 = 走动的车 / 炮沿同一条射线攻击前、后两枚值得捉的敌子（图案口径，v3.25）：
+    // 串打 = 走动的车 / 炮沿同一条射线攻击前、后两枚值得捉的敌子，且**两枚都无根**（v3.31 用户口径）：
     // 车打前子（后子被前子挡住）、炮打后子（前子正是炮架）——攻击子至少要能合法吃到其中一枚
-    // （`canCapture()`，过滤送将 / 照面）；**不再要求「对方必然失去其一」**——
-    // 对方反吃攻击子、或把前子退到攻击子口上仍会被吃等应着，都不影响这步按图案给出提示。
+    // （`canCapture()`，过滤送将 / 照面）；**只要前 / 后有一枚有根**，对方就能用等值交换守住它
+    // （前子有根可原地兑子、后子有根可吃过之后反吃），不是真串打，不再提示。
     if (moved.t === 'R' || moved.t === 'C') {
       const ray = skewerRays(after, move.to, moved.t, opp).find(
-        ([front, back]) => canCapture(after, move.to, front) || canCapture(after, move.to, back),
+        ([front, back]) =>
+          (canCapture(after, move.to, front) || canCapture(after, move.to, back)) &&
+          rootlessTarget(after, opp, front, move.to) &&
+          rootlessTarget(after, opp, back, move.to),
       );
       if (ray) {
         hits.push({ kind: 'skewer', label: '串打', actors: [move.to], threats: ray });
       }
     }
 
-    // 捉双 = 走动的单枚子同时攻击两枚及以上「值得捉」的敌子（不含将），且都能合法吃到（图案口径）
+    // 捉双 = 走动的单枚子同时攻击 ≥2 枚「值得捉」的敌子（不含将），且每一枚都**值得吃**
+    // （v3.31：无根或小换大净赚 ≥1，与吃子提示同一口径——有根且等价的目标不算被捉到）
     const valuable = piecesOf(after, opp).filter(
-      ({ pos, piece }) => isWorth(piece.t) && canCapture(after, move.to, pos),
+      ({ pos, piece }) =>
+        isWorth(piece.t) && canCapture(after, move.to, pos) && worthEating(after, opp, pos, move.to),
     );
     if (valuable.length >= 2) {
       hits.push({ kind: 'fork', label: '捉双', actors: [move.to], threats: valuable.map((f) => f.pos) });
@@ -569,11 +606,15 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
     // 闪击 = **双向**双威胁：让线后后方子力显露的攻击之外，「移开的棋子」自身也必须带威胁
     // （走子后捉到、且走子前我方并未攻击的大子）。只让线、移开的子自身什么也不捉（如躲子 / 闲走）
     // 只是单纯让线，不构成闪击。（「将」由闪将分支负责；「献子」等无法静态判定的从略。）
-    // 移开的子也须**能合法吃到**——被牵制时它看起来够得着目标，实际吃过去会送将，不算威胁。
+    // 移开的子也须**能合法吃到**——被牵制时它看起来够得着目标，实际吃过去会送将，不算威胁；
+    // 且被捉的子须**值得吃**（v3.31：无根或小换大净赚 ≥1，有根且等价的交换不算被赢到）。
     const moverThreats = threats.length
       ? piecesOf(after, opp).filter(
           ({ pos, piece }) =>
-            isWorth(piece.t) && canCapture(after, move.to, pos) && attackersOf(before, pos, me).length === 0,
+            isWorth(piece.t) &&
+            canCapture(after, move.to, pos) &&
+            attackersOf(before, pos, me).length === 0 &&
+            worthEating(after, opp, pos, move.to),
         )
       : [];
     if (moverThreats.length) {
