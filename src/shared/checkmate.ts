@@ -8,7 +8,7 @@
  * 判定依据《象棋杀法与局面状态严格判定》，顺序遵循「具体结构优先于泛指结构」，并参考
  * 严格要求建议：先看是否正在被将军（本模块只在「将死」时调用，故恒为被将军）；再看将军
  * 来源数量与子力组合（区分双将、重炮、马后炮等）；最后看关键位置条件（士角、卧槽、
- * 三八线、中路、肋道、底线等）；残局子力背景用于「海底捞月」（限车炮对单车）。
+ * 三八线、中路、肋道、底线等）；「海底捞月」按用户口径看底线兵横向照将与将（帅）正前方自堵。
  *
  * 顺序要点：马后炮 / 重炮 / 天地炮 / 闷宫等炮架结构最具体（天地炮排在闷宫之前——真天地炮常同时符合
  * 闷宫的单炮士架条件，但它还要求第二门炮镇中路参与牵制），铁门栓 → 夹车炮为车炮体系由专到泛；「海底捞月」需先于「对面笑」（其封口正是照面）；「列马车」需先于钓鱼马 /
@@ -123,7 +123,8 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     id: 'haidilaoyue',
     name: '海底捞月',
     label: '海底捞月',
-    definition: '车炮对单车的残局取胜法：炮借将（帅）为架沉底攻击对方单车，车贴帅成杀。',
+    definition:
+      '兵（卒）走到底线将军，且将（帅）正前方那一格被对方自己的棋子挡住（自堵退路）而成杀；与铁门栓同时成立时优先铁门栓。',
   },
   {
     id: 'liemache',
@@ -546,25 +547,21 @@ const MATCHERS: Match[] = [
       );
     },
   },
-  // 海底捞月（残局专用）：车炮对单车，炮借将架沉底、车贴帅成杀
+  // 海底捞月（用户口径）：兵（卒）走到底线将军，且将（帅）正前方（朝对方那一格）被**对方自己的棋子**
+  // 挡住，将（帅）无路可退而成杀。与铁门栓重叠时按顺序取更具体的铁门栓（铁门栓排在本条之前）。
   {
     pattern: PATTERN.haidilaoyue,
     match: (ctx) => {
-      const winNonKing = piecesOf(ctx.board, ctx.an.winner).filter(({ piece }) => piece.t !== 'K');
-      const matedNonKing = piecesOf(ctx.board, ctx.an.mated).filter(({ piece }) => piece.t !== 'K');
-      if (winNonKing.length !== 2) return false;
-      if (
-        winNonKing
-          .map(({ piece }) => piece.t)
-          .sort()
-          .join('') !== 'CR'
-      )
-        return false; // 车 + 炮
-      if (matedNonKing.length !== 1 || matedNonKing[0].piece.t !== 'R') return false; // 单车
-      const myKing = findKing(ctx.board, ctx.an.winner);
-      if (!myKing || myKing[1] !== 4) return false; // 己方帅（将）占中
-      return piecesOf(ctx.board, ctx.an.winner, 'C').some(
-        ({ pos }) => pos[0] === baseRow(ctx.an.mated) && (isChecker(ctx, pos) || coversEscape(ctx, pos)),
+      const k = ctx.an.king;
+      const base = baseRow(ctx.an.mated);
+      if (k[0] !== base) return false; // 将（帅）在自己的底线（只有底线兵才能横向照将）
+      const step = ctx.an.mated === 'b' ? 1 : -1; // 将（帅）正前方（朝对方一侧）
+      const front: Pos = [k[0] + step, k[1]];
+      if (!inPalace(front[0], front[1], ctx.an.mated)) return false;
+      const blocker = ctx.board[front[0]]?.[front[1]];
+      if (!blocker || blocker.s !== ctx.an.mated) return false; // 前方那格被对方自己的棋子挡住
+      return piecesOf(ctx.board, ctx.an.winner, 'P').some(
+        ({ pos }) => pos[0] === base && Math.abs(pos[1] - k[1]) === 1 && isChecker(ctx, pos),
       );
     },
   },

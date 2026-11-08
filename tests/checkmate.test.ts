@@ -222,18 +222,66 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     );
   });
 
-  it('海底捞月：车炮对单车残局，炮沉底借架、车贴帅成杀', () => {
+  it('海底捞月：兵（卒）走到底线照将，且将（帅）正前方一格被对方自己的棋子挡住', () => {
+    // 红兵 (0,5) 沉底横向照将；黑将 (0,4) 的退路 (0,3) 被自家士堵住、正前方 (1,4) 被自家车挡住
+    // （车吃不到 (0,5) 的兵，挪开也不解将）；吃兵又会与红帅 (9,5) 照面 → 将死
+    const items: Spec[] = [
+      [0, 4, 'bK'],
+      [0, 3, 'bA'],
+      [1, 4, 'bR'],
+      [9, 5, 'rK'],
+      [0, 5, 'rP'],
+    ];
+    expectMate(items, 'b', 'haidilaoyue');
+    expect(classifyCheckmate(boardOf(items), 'b').alsoMatched).not.toContain('铁门栓');
+  });
+
+  it('海底捞月：红方被将死的镜像（黑卒沉底、红帅正前方被自家棋子挡住）', () => {
     expectMate(
       [
-        [0, 4, 'bK'],
-        [0, 2, 'bR'],
         [9, 4, 'rK'],
-        [1, 4, 'rR'],
-        [0, 0, 'rC'],
+        [9, 5, 'rA'],
+        [8, 4, 'rR'],
+        [0, 3, 'bK'],
+        [9, 3, 'bP'],
       ],
-      'b',
+      'r',
       'haidilaoyue',
     );
+  });
+
+  it('反例：兵沉底照将但正前方被「我方」棋子挡住时，不算海底捞月', () => {
+    // (1,4) 是红马（我方子力、由红车保护），并非对方自己的棋子 → 不满足自堵退路的条件
+    const items: Spec[] = [
+      [0, 4, 'bK'],
+      [0, 3, 'bA'],
+      [9, 5, 'rK'],
+      [0, 5, 'rP'],
+      [1, 4, 'rN'],
+      [1, 5, 'rR'],
+    ];
+    const judge = judgeAfterMove(boardOf(items), 'b');
+    expect(judge?.reason).toBe('将死');
+    const info = classifyCheckmate(boardOf(items), 'b');
+    expect(info.pattern.id).not.toBe('haidilaoyue');
+    expect(info.recognized).toBe(false); // 未命中具名杀法，走兜底「绝杀」
+  });
+
+  it('海底捞月与铁门栓互斥：铁门栓定式（照将子为车、底线另一侧为将的士）不判海底捞月', () => {
+    // 收紧后的铁门栓要求「底线另一侧是将（帅）的士」，与「底线兵照将」占同一格，
+    // 两者无法同时成立；`MATCHERS` 仍把铁门栓排在海底捞月之前，保证优先级不倒置
+    const items: Spec[] = [
+      [0, 4, 'bK'],
+      [0, 3, 'bA'],
+      [1, 4, 'bA'],
+      [0, 2, 'bB'],
+      [2, 4, 'bB'],
+      [9, 5, 'rK'],
+      [0, 5, 'rR'],
+      [3, 4, 'rC'],
+    ];
+    expectMate(items, 'b', 'tiemenshuan');
+    expect(classifyCheckmate(boardOf(items), 'b').alsoMatched).not.toContain('海底捞月');
   });
 
   it('列马车：马在钓鱼马位、将在底线五路、车在底线贴将照将且在马口保护下', () => {
