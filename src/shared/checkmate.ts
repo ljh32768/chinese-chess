@@ -22,7 +22,16 @@
  * 红方视角的「对方三、七路」= 列 2 / 6；黑方视角同理。
  */
 
-import { boardAfterMove, cloneBoard, findKing, inPalace, initBoard, makeMove, pieceMoves } from './rules.js';
+import {
+  boardAfterMove,
+  cloneBoard,
+  findKing,
+  inPalace,
+  initBoard,
+  makeMove,
+  pieceMoves,
+  sideHasAnyMove,
+} from './rules.js';
 import { Board, Move, Piece, PieceType, Pos, Side } from './types.js';
 
 /** 单条杀法条目 */
@@ -454,7 +463,7 @@ const MATCHERS: Match[] = [
       return mid.some((m) => deep.some((d) => !samePos(m.pos, d.pos) && active(m) && active(d)));
     },
   },
-  // 闷宫：单炮借对方士为炮架将军，将（帅）的自家堵子全是士
+  // 闷宫：单炮借对方士为炮架将军，将（帅）被自家士堵死
   {
     pattern: PATTERN.mengong,
     match: (ctx) => {
@@ -462,13 +471,17 @@ const MATCHERS: Match[] = [
       if (!c) return false;
       const screen = cannonScreen(ctx.board, c.pos, ctx.an.king);
       if (screen?.piece.s !== ctx.an.mated || screen.piece.t !== 'A') return false;
-      // 「单炮」口径：另一门炮若也参与（照将 / 牵制同线防守子 / 封住逃路），
-      // 就属于双炮的天地炮等杀法（如中炮牵制黑象使其不能吃底线炮），不再算闷宫
-      const otherCannonBusy = piecesOf(ctx.board, ctx.an.winner, 'C').some(
-        ({ pos }) =>
-          !samePos(pos, c.pos) && (isChecker(ctx, pos) || coversEscape(ctx, pos) || pinsKingLine(ctx, pos)),
-      );
-      if (otherCannonBusy) return false;
+      // 「单炮」口径：只有另一门炮是**成杀所必需**（抽走它以后被将死方就有合法着法解将）时，
+      // 才属于双炮配合的天地炮等杀法，不再算闷宫。若它的作用与照将的炮重复（如两门炮都封住
+      // 同一个逃路点，抽走它仍是将死），它并不参与杀法，仍按闷宫判定（v3.33 用户截图：
+      // 底炮借仕照将、另一门炮封的逃路其实已被照将的炮自己封住）。
+      const otherCannonNeeded = piecesOf(ctx.board, ctx.an.winner, 'C').some(({ pos }) => {
+        if (samePos(pos, c.pos)) return false;
+        const nb = cloneBoard(ctx.board);
+        nb[pos[0]][pos[1]] = null;
+        return sideHasAnyMove(nb, ctx.an.mated);
+      });
+      if (otherCannonNeeded) return false;
       const own = ctx.an.escapes.filter((e) => e.blocked === 'own');
       return own.length >= 1 && own.every((e) => e.piece?.t === 'A');
     },
