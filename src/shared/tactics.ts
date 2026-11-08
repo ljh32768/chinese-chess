@@ -30,6 +30,9 @@
  *    继续充当炮架 / 挡子不算让线），②的将军须**本步新造**且 **能合法吃到**将帅（`canCapture()`）。
  *    **照将须由真棋子造成**——后方攻击子只认车 / 炮，帅 / 将照面（`isAttacked()` 的照面规则）不算照将，
  *    兵 / 士 / 象也不能充当让线攻击子（v3.32）。
+ *    炮还须**让开炮口**（v3.35）：移开的子须原在**炮架与将之间**（挡住了炮的射程），走子后才露出炮照将；
+ *    若移开的子夹在**炮与炮架之间**，走子只是把挡子从 2 枚减到 1 枚（炮终于够着自己的炮架），
+ *    属于补足炮架后的**普通将军**，不算闪将。
  *    只由移开的子直接将军（动子自己也将军的双将情形归 ①，②须「移开的子本人不将军」）、
  *    又没有抽到大子时，不做战术提示（将军本身由正中大字表达）。
  *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
@@ -320,6 +323,21 @@ function isLinePiece(board: Board, pos: Pos): boolean {
   return !!p && (p.t === 'R' || p.t === 'C');
 }
 
+/**
+ * 炮的「让线」须是**让开炮口**（v3.35 用户口径）。
+ *
+ * 炮照将时，炮与将之间必定恰好剩一枚炮架。若移开的子原先夹在**炮与炮架之间**，
+ * 走子只是把这条线上的挡子从 2 枚减到 1 枚（炮终于够得着自己的炮架），
+ * 属于「补足炮架」后的**普通将军**，不算闪将；
+ * 只有移开的子原在**炮架与将之间**（挡住了炮的射程），走子后炮才打到将，才是让线闪将。
+ * 判据：走子后剩下的炮架须位于**炮与移开子原格之间**（即移开子在炮架靠将的一侧）。
+ */
+function cannonRevealedCheck(after: Board, cannon: Pos, king: Pos, moveFrom: Pos): boolean {
+  const screen = betweenCells(cannon, king).find((p) => after[p[0]][p[1]]);
+  if (!screen) return false;
+  return betweenCells(cannon, moveFrom).some((p) => samePos(p, screen));
+}
+
 /** 对方的一步合法应着（`board` 为应着后的局面，`from` / `to` 为该步） */
 interface Reply {
   board: Board;
@@ -545,17 +563,23 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
     // 帅 / 将、兵、士、象都不是让线攻击子）；走动的子须**真的离开该线**（走子后仍停在线上当炮架只是
     // 「换架抽子」），且将军须**本步新造**、checker **能合法吃到**将帅（被牵制时看似照将、真吃过去却会
     // 送将，属于伪将军）。动子自己也将军（双将）时归闪将①，本步未抽到大子则不做战术提示（v3.32）。
+    // 炮还须是「让开炮口」：移开的子挡在炮架与将之间、走开后炮才打到将；若移开的子夹在**炮与炮架之间**，
+    // 走子只是补足炮架（挡子 2 → 1）→ 普通将军，不算闪将（v3.35 用户截图）。
     const discovered =
       !moverChecks &&
       !attackersOf(before, oppKing, me).length &&
-      checkers.some(
-        (c) =>
-          !samePos(c, move.to) &&
-          isLinePiece(after, c) &&
-          openedLine(c, oppKing, move.from) &&
-          !restsOnLine(c, oppKing, move.to) &&
-          canCapture(after, c, oppKing),
-      );
+      checkers.some((c) => {
+        if (
+          samePos(c, move.to) ||
+          !isLinePiece(after, c) ||
+          !openedLine(c, oppKing, move.from) ||
+          restsOnLine(c, oppKing, move.to) ||
+          !canCapture(after, c, oppKing)
+        )
+          return false;
+        const checker = after[c[0]][c[1]];
+        return checker?.t !== 'C' || cannonRevealedCheck(after, c, oppKing, move.from);
+      });
     const seen = new Set<string>();
     const lost = victims.filter(({ pos }) => {
       const k = key(pos);
