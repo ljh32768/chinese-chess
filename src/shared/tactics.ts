@@ -25,19 +25,16 @@
  *    **被抽子须是这一步新造的威胁**——走子前我方就已能合法吃到的子与这步将军无关，不算「抽」；
  *    但「将后同线」的抽子（`behindKingVictim()`）须以**本步新造照将**为前提：即使该子走子前已被我方别的子
  *    攻击着，「将被迫离开该线」后由照将直线子抽到的子仍是这一步创造的威胁（v3.36 用户截图）。
- *    **闪将**（闪开的子让线、将军由藏在后面的子发出）分两种：
- *    ① 移开的子本人将军 + **藏在后面的子**因让线**新捉到大子**（动的子将军且后方子力同时攻击大子）；
- *    ② 传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将。
- *    闪将的让线须**真的离开该线**（`restsOnLine()`：走子后仍停留在车 / 炮与目标的连线上、
- *    继续充当炮架 / 挡子不算让线），②的将军须**本步新造**且 **能合法吃到**将帅（`canCapture()`）。
- *    **照将须由真棋子造成**——后方攻击子只认车 / 炮，帅 / 将照面（`isAttacked()` 的照面规则）不算照将，
- *    兵 / 士 / 象也不能充当让线攻击子（v3.32）。
- *    炮还须**让开炮口**（v3.35）：移开的子须原在**炮架与将之间**（挡住了炮的射程），走子后才露出炮照将；
- *    若移开的子夹在**炮与炮架之间**，走子只是把挡子从 2 枚减到 1 枚（炮终于够着自己的炮架），
- *    属于补足炮架后的**普通将军**，不算闪将。
- *    只由移开的子直接将军（动子自己也将军的双将情形归 ①，②须「移开的子本人不将军」）、
- *    又没有抽到大子时，不做战术提示（将军本身由正中大字表达）。
- *    「闪击」= **双向双威胁**：挡路子移开后，① 后方强子（车 / 炮）的攻击线显露、新威胁到敌方子；
+ *    **闪将**（v3.37 用户口径）= **移开的这枚棋子本人将军** + 被让开的**后方子力新打到对方车 / 马 / 炮**：
+ *    ① 后方的车 / 炮因让线显露攻击（`openedLine()` + `restsOnLine()`，须真的离开该线）；
+ *    ② 后方的马因让开马腿显露攻击（移开的子原来正蹩着马腿）。
+ *    **移开的子本人不将军、只由让线露出的车 / 炮照将，只是一步普通将军**（v3.32 / v3.35 用户截图），
+ *    不做战术提示——闪将的后方子力必须是**打到大子**（车 / 马 / 炮），单纯照将不算。
+ *    后方攻击子只认**车 / 炮 / 马**（帅 / 将照面、兵、士、象都不能充当后台攻击子，v3.32 / v3.37）；
+ *    被威胁的目标须**本步新造**（`attackersOf(before)` 无攻击）、**能合法吃到**（`canCapture()`）
+ *    且**值得吃**（`worthEating()`，v3.31 有根且等价交换不算）。
+ *    只照将而没抽到大子时不做战术提示（将军本身由正中大字表达）。
+ *    「闪击」= **双向双威胁**：挡路子移开后，① 后方子力（车 / 炮 / 马）的攻击显露、新威胁到敌方子；
  *    ② **移开的这枚子自身也带威胁**（走子后捉到、且走子前我方并未攻击的大子）。两条件缺一不可——
  *    只让线、移开的子自身不捉子（如躲子 / 闲走）不判闪击。
  *    「串打」= 走动的车 / 炮沿**同一条射线**攻击前、后两枚值得捉的敌子；
@@ -326,18 +323,27 @@ function isLinePiece(board: Board, pos: Pos): boolean {
 }
 
 /**
- * 炮的「让线」须是**让开炮口**（v3.35 用户口径）。
+ * 走子是否让出了 `actor` 对 `target` 的攻击（「让线」/「让马腿」）。
  *
- * 炮照将时，炮与将之间必定恰好剩一枚炮架。若移开的子原先夹在**炮与炮架之间**，
- * 走子只是把这条线上的挡子从 2 枚减到 1 枚（炮终于够得着自己的炮架），
- * 属于「补足炮架」后的**普通将军**，不算闪将；
- * 只有移开的子原在**炮架与将之间**（挡住了炮的射程），走子后炮才打到将，才是让线闪将。
- * 判据：走子后剩下的炮架须位于**炮与移开子原格之间**（即移开子在炮架靠将的一侧）。
+ * 闪将 / 闪击的后方攻击子只认**车 / 炮 / 马**（v3.37 用户口径）：
+ * - 车 / 炮：移开的子原来在该线上（`openedLine()`），且走子后**真的离开**（`restsOnLine()`）；
+ * - 马：移开的子原来正蹩着马腿（马腿指马到目标长轴方向上的相邻格），走子后马腿松开；
+ * - 兵 / 士 / 象 / 将帅：攻击不会因别的子走开而出现，不能充当后方攻击子。
  */
-function cannonRevealedCheck(after: Board, cannon: Pos, king: Pos, moveFrom: Pos): boolean {
-  const screen = betweenCells(cannon, king).find((p) => after[p[0]][p[1]]);
-  if (!screen) return false;
-  return betweenCells(cannon, moveFrom).some((p) => samePos(p, screen));
+function revealsAttack(after: Board, actor: Pos, target: Pos, moveFrom: Pos, moveTo: Pos): boolean {
+  const p = after[actor[0]]?.[actor[1]];
+  if (!p) return false;
+  if (p.t === 'N') {
+    // 让马腿：移开的子须原在马腿格上（马到目标的长轴相邻格）
+    const dr = target[0] - actor[0];
+    const dc = target[1] - actor[1];
+    if (Math.abs(dr) === 2 && Math.abs(dc) === 1) {
+      return samePos(moveFrom, [actor[0] + Math.sign(dr), actor[1]]);
+    }
+    return samePos(moveFrom, [actor[0], actor[1] + Math.sign(dc)]);
+  }
+  if (p.t !== 'R' && p.t !== 'C') return false;
+  return openedLine(actor, target, moveFrom) && !restsOnLine(actor, target, moveTo);
 }
 
 /** 对方的一步合法应着（`board` 为应着后的局面，`from` / `to` 为该步） */
@@ -442,11 +448,7 @@ function revealedThreats(
     if (attackersOf(before, pos, me).length) continue; // 须为「新攻击」
     const actor = attackersOf(after, pos, me).find(
       (a) =>
-        !samePos(a, move.to) &&
-        isLinePiece(after, a) &&
-        openedLine(a, pos, move.from) &&
-        !restsOnLine(a, pos, move.to) &&
-        canCapture(after, a, pos),
+        !samePos(a, move.to) && revealsAttack(after, a, pos, move.from, move.to) && canCapture(after, a, pos),
     );
     if (actor && worthEating(after, opp, pos, actor)) {
       threats.push(pos);
@@ -532,7 +534,9 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
 
   // 严格判定顺序：先看是否照将——照将走「闪将 / 将军抽」分支，否则走「串打 / 捉双 / 闪击」分支。
   if (givesCheck && oppKing) {
-    // 闪将①：移开的子本人将军 + **藏在后面的子**因让线**新捉到大子**（动的子将军且后方子力同时攻击大子）。
+    // 闪将（v3.37 用户口径）= 移开的子本人将军 + 被让开的**后方子力**（车 / 炮让线、马让马腿）
+    // 新打到对方的大子（车 / 马 / 炮）。移开的子不将军、只由后方车 / 炮照将时，只是普通将军，
+    // 不做战术提示（`revealedThreats()` 要求攻击为「本步新造 + 能合法吃到 + 值得吃」）。
     const hidden = moverChecks ? revealedThreats(before, after, move, me) : { threats: [], actors: [] };
     // 将军抽 = **将军的同时还在攻击大子**（图案口径，v3.25）：本步新造、且我方**能合法吃到**的敌方大子
     // （车 / 马 / 炮）——攻击者可为将军的子、走动的子或其它子；**不再要求「对方必然失去其一」**
@@ -566,27 +570,6 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
       const p = after[victim[0]][victim[1]];
       if (p && unavoidablyLost(winsOnce(), victim)) victims.push({ pos: victim, piece: p });
     }
-    // 闪将②：传统让线闪将——移开的子本人**不将军**，由让线露出的车 / 炮成将（后方攻击子只认车 / 炮，
-    // 帅 / 将、兵、士、象都不是让线攻击子）；走动的子须**真的离开该线**（走子后仍停在线上当炮架只是
-    // 「换架抽子」），且将军须**本步新造**、checker **能合法吃到**将帅（被牵制时看似照将、真吃过去却会
-    // 送将，属于伪将军）。动子自己也将军（双将）时归闪将①，本步未抽到大子则不做战术提示（v3.32）。
-    // 炮还须是「让开炮口」：移开的子挡在炮架与将之间、走开后炮才打到将；若移开的子夹在**炮与炮架之间**，
-    // 走子只是补足炮架（挡子 2 → 1）→ 普通将军，不算闪将（v3.35 用户截图）。
-    const discovered =
-      !moverChecks &&
-      !attackersOf(before, oppKing, me).length &&
-      checkers.some((c) => {
-        if (
-          samePos(c, move.to) ||
-          !isLinePiece(after, c) ||
-          !openedLine(c, oppKing, move.from) ||
-          restsOnLine(c, oppKing, move.to) ||
-          !canCapture(after, c, oppKing)
-        )
-          return false;
-        const checker = after[c[0]][c[1]];
-        return checker?.t !== 'C' || cannonRevealedCheck(after, c, oppKing, move.from);
-      });
     const seen = new Set<string>();
     const lost = victims.filter(({ pos }) => {
       const k = key(pos);
@@ -611,8 +594,6 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
         actors: [move.to],
         threats: lost.map((c) => c.pos),
       });
-    } else if (discovered) {
-      hits.push({ kind: 'discovered-check', label: '闪将', actors: [], threats: [oppKing] });
     }
   } else {
     // 串打 = 走动的车 / 炮沿同一条射线攻击前、后两枚值得捉的敌子，且**两枚都无根**（v3.31 用户口径）：
