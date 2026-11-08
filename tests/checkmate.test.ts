@@ -150,25 +150,25 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     expect(classifyCheckmate(boardOf(items), 'r').alsoMatched).toEqual([]);
   });
 
-  it('铁门栓：中炮镇住将门纵线，车 / 兵贴帅攻击', () => {
-    expectMate(
-      [
-        [0, 4, 'bK'],
-        [0, 3, 'bA'],
-        [0, 5, 'bA'],
-        [9, 4, 'rK'],
-        [1, 4, 'rR'],
-        [4, 4, 'rC'],
-        [2, 2, 'rN'],
-      ],
-      'b',
-      'tiemenshuan',
-    );
+  it('反例：车在将正前方（肋道）贴帅，不在将后方，不算铁门栓', () => {
+    // 红车 (1,4) 贴在黑将 (0,4) 的正前方（非底线、也非将的后侧）；红炮 (4,4) 借车为架同时照将，
+    // 另一红车 (1,0) 保护贴帅车 → 双将，而不是铁门栓
+    const items: Spec[] = [
+      [0, 4, 'bK'],
+      [0, 3, 'bA'],
+      [0, 5, 'bA'],
+      [9, 4, 'rK'],
+      [1, 4, 'rR'],
+      [4, 4, 'rC'],
+      [1, 0, 'rR'],
+    ];
+    expectMate(items, 'b', 'shuangjiang');
+    expect(classifyCheckmate(boardOf(items), 'b').alsoMatched).not.toContain('铁门栓');
   });
 
   it('铁门栓：中炮牵制士象、车从底线贴帅照将（用户截图局面，不是对面笑）', () => {
     // 红炮 (3,4) 镇中路，与黑将之间隔着黑象 (2,4) + 黑士 (1,4)：任一移开即照将——
-    // 黑士因此不能吃贴帅的红车 (0,5)；黑将的逃路都被自家士堵住，红帅在 5 路照面护车。
+    // 黑士因此不能吃贴帅的红车 (0,5)；黑将的逃路 (0,3) 被自家士堵住，红帅在 5 路照面护车
     const items: Spec[] = [
       [0, 4, 'bK'],
       [0, 3, 'bA'],
@@ -182,6 +182,72 @@ describe('杀法识别：每种杀法一个终局局面', () => {
     expectMate(items, 'b', 'tiemenshuan');
     // 照面只护住贴帅的车、双方将（帅）本不在同一纵线 → 不再把「对面笑」列为同时构成
     expect(classifyCheckmate(boardOf(items), 'b').alsoMatched).not.toContain('对面笑');
+  });
+
+  it('铁门栓定式：底象可无（抽走 (0,2) 的象仍判铁门栓）', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [0, 3, 'bA'],
+        [1, 4, 'bA'],
+        [2, 4, 'bB'],
+        [9, 5, 'rK'],
+        [0, 5, 'rR'],
+        [3, 4, 'rC'],
+      ],
+      'b',
+      'tiemenshuan',
+    );
+  });
+
+  it('铁门栓定式：左右对称（车贴将左侧、底士在右侧）同样成立', () => {
+    expectMate(
+      [
+        [0, 4, 'bK'],
+        [0, 5, 'bA'],
+        [1, 4, 'bA'],
+        [0, 6, 'bB'],
+        [2, 4, 'bB'],
+        [9, 3, 'rK'],
+        [0, 3, 'rR'],
+        [3, 4, 'rC'],
+      ],
+      'b',
+      'tiemenshuan',
+    );
+  });
+
+  it('铁门栓定式：红方被将死的镜像（车贴红帅底线、黑炮镇中牵制）', () => {
+    expectMate(
+      [
+        [9, 4, 'rK'],
+        [9, 5, 'rA'],
+        [8, 4, 'rA'],
+        [7, 4, 'rB'],
+        [9, 6, 'rB'],
+        [0, 3, 'bK'],
+        [9, 3, 'bR'],
+        [6, 4, 'bC'],
+      ],
+      'r',
+      'tiemenshuan',
+    );
+  });
+
+  it('反例：照将子换成兵（卒）不再算铁门栓（车固定为车）', () => {
+    // 与上方定式同构，只把底线照将的车 (0,5) 换成红兵 → 按「海底捞月」判定，不得判铁门栓
+    const items: Spec[] = [
+      [0, 4, 'bK'],
+      [0, 3, 'bA'],
+      [1, 4, 'bA'],
+      [0, 2, 'bB'],
+      [2, 4, 'bB'],
+      [9, 5, 'rK'],
+      [0, 5, 'rP'],
+      [3, 4, 'rC'],
+    ];
+    expectMate(items, 'b', 'haidilaoyue');
+    expect(classifyCheckmate(boardOf(items), 'b').alsoMatched).not.toContain('铁门栓');
   });
 
   it('天地炮：一炮沉底线照将、一炮镇中路牵制士象（用户截图局面）', () => {
@@ -597,19 +663,19 @@ describe('杀法库与辅助函数', () => {
     expect(ids.indexOf('generic')).toBe(ids.length - 1);
   });
 
-  it('同时成立的杀法记入 alsoMatched（铁门栓同时是双将）', () => {
+  it('同时成立的杀法记入 alsoMatched（双车错同时是双将）', () => {
     const board = boardOf([
       [0, 4, 'bK'],
       [0, 3, 'bA'],
-      [0, 5, 'bA'],
       [9, 4, 'rK'],
-      [1, 4, 'rR'],
-      [4, 4, 'rC'],
+      [0, 8, 'rR'],
+      [2, 4, 'rR'],
+      [1, 3, 'rN'],
     ]);
     const info = classifyCheckmate(board, 'b');
-    expect(info.pattern.name).toBe('铁门栓');
+    expect(info.pattern.name).toBe('双车错');
     expect(info.alsoMatched).toContain('双将');
-    expect(info.alsoMatched).not.toContain('铁门栓');
+    expect(info.alsoMatched).not.toContain('双车错');
   });
 
   it('capturedPieceAt：按着法序列推导最后一步吃子（吃卒 / 无吃子）', () => {

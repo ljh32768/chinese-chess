@@ -111,7 +111,7 @@ export const CHECKMATE_PATTERNS: CheckmatePattern[] = [
     name: '铁门栓',
     label: '铁门栓',
     definition:
-      '炮镇中路（将（帅）所在纵线）牵制士象，车或兵（卒）从底线或肋道贴帅（与将（帅）正交相邻）将军，把宫门栓死；也称「铁门闩」。',
+      '定式：将（帅）在己方底线五路，车与将同线（底线）紧贴将的后侧照将；中炮借中象、中士叠架镇住将门（中士被牵制），底线另一侧与宫心各由自家士堵死。底象可无，左右对称',
   },
   {
     id: 'jiachepao',
@@ -510,18 +510,34 @@ const MATCHERS: Match[] = [
       return own.length >= 1 && own.every((e) => e.piece?.t === 'A');
     },
   },
-  // 铁门栓：炮镇中路（将（帅）所在纵线，牵制士象），车 / 兵（卒）从底线或肋道**贴帅**（与将（帅）正交相邻）将军，
-  // 把宫门「栓死」。旧判据要求将军子正好在将门（正前一格）或与将同纵线，漏掉了车贴帅一侧（底线 / 肋道）的典型构图。
+  // 铁门栓（用户定式，v3.42）：将（帅）在己方底线五路；车（固定为车，不再接受兵 / 卒）与将同处
+  // 底线横线、紧贴将侧（位于将的后方一侧，不认将正前方肋道的贴帅），且正是照将的子；
+  // 中路「炮—象—士—将」叠架牵制（对方中炮借对方中象 + 中士为架镇住将门），
+  // 将的另一侧（底线）与正前方（宫心）各由自家士堵死。底象可无，左右对称两种都接受。
   {
     pattern: PATTERN.tiemenshuan,
     match: (ctx) => {
       const k = ctx.an.king;
-      const midCannon = piecesOf(ctx.board, ctx.an.winner, 'C').some(({ pos }) => pos[1] === k[1]);
-      if (!midCannon) return false;
-      return ctx.an.checkers.some(
-        (c) =>
-          (c.piece.t === 'R' || c.piece.t === 'P') &&
-          Math.abs(c.pos[0] - k[0]) + Math.abs(c.pos[1] - k[1]) === 1,
+      const base = baseRow(ctx.an.mated);
+      const step = ctx.an.mated === 'b' ? 1 : -1; // 将（帅）朝向对方的一侧
+      if (k[0] !== base || k[1] !== 4) return false; // 将在己方底线五路
+      // 车：与将同线（同一横线 = 底线），位于将侧后（紧贴将、非正前方），且正在照将
+      const rook = ctx.an.checkers.find(
+        ({ pos, piece }) => piece.t === 'R' && pos[0] === base && (pos[1] === 3 || pos[1] === 5),
+      );
+      if (!rook) return false;
+      // 底线另一侧（与车相对）由自家士堵死
+      const sidePiece = ctx.board[base][8 - rook.pos[1]];
+      if (!sidePiece || sidePiece.s !== ctx.an.mated || sidePiece.t !== 'A') return false;
+      // 将正前方（宫心）由自家士堵死
+      const centerPiece = ctx.board[base + step][4];
+      if (!centerPiece || centerPiece.s !== ctx.an.mated || centerPiece.t !== 'A') return false;
+      // 中象贴在宫心士前一格
+      const elephant = ctx.board[base + 2 * step]?.[4];
+      if (!elephant || elephant.s !== ctx.an.mated || elephant.t !== 'B') return false;
+      // 对方中炮隔着「士 + 象」两子镇住将门（任一子挪开即照将，故中士被牵制不能吃车）
+      return piecesOf(ctx.board, ctx.an.winner, 'C').some(
+        ({ pos }) => pos[1] === 4 && between(ctx.board, pos, k).length === 2,
       );
     },
   },
