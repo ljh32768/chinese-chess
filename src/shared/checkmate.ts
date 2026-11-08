@@ -411,15 +411,27 @@ function coversEscape(ctx: Ctx, pos: Pos): boolean {
   });
 }
 
+/** pos 处子力能否攻击到 target 格（target 允许已有子力） */
+function attacksSquare(board: Board, pos: Pos, target: Pos): boolean {
+  return pieceMoves(board, pos[0], pos[1]).some(([rr, cc]) => rr === target[0] && cc === target[1]);
+}
+
 /**
- * 抽走 pos 处的棋子后，被将死方是否重新获得合法着法——即该子对成杀是否**必需**。
- * 用以排除「恰好站在这类杀法点位上、实际只是陪衬」的棋子：如双车错局面里顺手控门的马，
- * 其封住的逃路本已被照将的车封死，抽走它仍是将死，就不该按马（侧面虎 / 钓鱼马等）命名。
+ * 某子是否**独自**拿下了将（帅）的至少一个逃路（按「将已走到该格」的局面判定）。
+ *
+ * 与 `coversEscape` 的差别只在「独自」：该逃路不能再被己方其它子力控制——
+ * 马控住的那一格恰好就是照将车自己封住的格子时，马只是站在该点位上的陪衬，不算参与杀法；
+ * 只要马独自拿下任一逃路，就属于结构上真正参与。这里**不做「抽走该子即非将死」的必要性检验**
+ * （那种检验会因「照面封口」等附带机制误伤真正的马类杀法，见 v3.39 用户截图回归）。
  */
-function isIndispensable(ctx: Ctx, pos: Pos): boolean {
-  const nb = cloneBoard(ctx.board);
-  nb[pos[0]][pos[1]] = null;
-  return sideHasAnyMove(nb, ctx.an.mated);
+function solelyCoversEscape(ctx: Ctx, pos: Pos): boolean {
+  return ctx.an.escapes.some((e) => {
+    if (samePos(e.pos, pos)) return false;
+    const nb = boardAfterMove(ctx.board, ctx.an.king, e.pos);
+    if (!nb[pos[0]]?.[pos[1]]) return false;
+    if (!attacksSquare(nb, pos, e.pos)) return false;
+    return !piecesOf(nb, ctx.an.winner).some(({ pos: p }) => !samePos(p, pos) && attacksSquare(nb, p, e.pos));
+  });
 }
 
 /**
@@ -577,31 +589,26 @@ const MATCHERS: Match[] = [
       });
     },
   },
-  // 卧槽马：马在对方下二路象前的「卧槽」位（三 / 七路底线附近），控将门一侧（马须为成杀所必需）
+  // 卧槽马：马在对方下二路象前的「卧槽」位（三 / 七路底线附近），控将门一侧（须独自控位或自身照将）
   {
     pattern: PATTERN.wocaoma,
     match: (ctx) =>
       piecesOf(ctx.board, ctx.an.winner, 'N').some(
         ({ pos }) =>
-          isWocaomaSquare(pos, ctx.an.mated) &&
-          (isChecker(ctx, pos) || coversEscape(ctx, pos)) &&
-          isIndispensable(ctx, pos),
+          isWocaomaSquare(pos, ctx.an.mated) && (isChecker(ctx, pos) || solelyCoversEscape(ctx, pos)),
       ),
   },
-  // 钓鱼马：马占三·八 / 七·八位封锁将门，由其它子力将杀（马是控位子，不直接将军，且须为成杀所必需）
+  // 钓鱼马：马占三·八 / 七·八位封锁将门，由其它子力将杀（马是控位子，不直接将军，且须独自控位）
   {
     pattern: PATTERN.diaoyuma,
     match: (ctx) =>
       piecesOf(ctx.board, ctx.an.winner, 'N').some(
         ({ pos }) =>
-          isDiaoyumaSquare(pos, ctx.an.mated) &&
-          !isChecker(ctx, pos) &&
-          coversEscape(ctx, pos) &&
-          isIndispensable(ctx, pos),
+          isDiaoyumaSquare(pos, ctx.an.mated) && !isChecker(ctx, pos) && solelyCoversEscape(ctx, pos),
       ),
   },
   // 侧面虎（高钓马）：马在卒林线三 / 七路侧控将门，由同侧车等子力将死；
-  // 马须真正控住将门（抽走马即非将死），否则只是站在该点位上的陪衬子（如双车错里顺手控门的马）
+  // 马须独自拿下至少一个逃路，否则只是站在该点位上的陪衬子（如双车错里马控的格子已被照将车封死）
   {
     pattern: PATTERN.cemianhu,
     match: (ctx) => {
@@ -610,8 +617,7 @@ const MATCHERS: Match[] = [
       );
       if (!rookInvolved) return false;
       return piecesOf(ctx.board, ctx.an.winner, 'N').some(
-        ({ pos }) =>
-          isCemianhuSquare(pos, ctx.an.mated) && coversEscape(ctx, pos) && isIndispensable(ctx, pos),
+        ({ pos }) => isCemianhuSquare(pos, ctx.an.mated) && solelyCoversEscape(ctx, pos),
       );
     },
   },
@@ -623,7 +629,7 @@ const MATCHERS: Match[] = [
       piecesOf(ctx.board, ctx.an.winner, 'N').some(({ pos }) => {
         if (!isShijiaoSquare(pos, ctx.an.mated)) return false;
         if (Math.abs(pos[0] - ctx.an.king[0]) !== 2 || Math.abs(pos[1] - ctx.an.king[1]) !== 2) return false; // 斜对宫角
-        return !isChecker(ctx, pos) && coversEscape(ctx, pos) && isIndispensable(ctx, pos);
+        return !isChecker(ctx, pos) && solelyCoversEscape(ctx, pos);
       }),
   },
   // 双车错：双车分占两条不同的横线 / 纵线，交错将军
