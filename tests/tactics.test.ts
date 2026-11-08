@@ -619,6 +619,30 @@ describe('照将分支（闪将 / 将军抽）', () => {
     expect(hits[0].label).toBe('闪将');
   });
 
+  it('用户截图（v3.36）：红车进底线照将、将后同线黑马早已被红马看着 → 仍判将军抽马', () => {
+    const b = emptyBoard();
+    put(b, 9, 3, 'K', 'r'); // 红帅
+    put(b, 2, 4, 'K', 'b'); // 黑将（被照）
+    put(b, 2, 1, 'N', 'b'); // 将后同线（第 2 行）的黑马
+    put(b, 1, 3, 'N', 'r'); // 红马：走子前就已攻击 (2,1)（马腿 (1,2) 空）
+    put(b, 1, 7, 'R', 'r'); // 红车走到 (2,7) 沿第 2 行照将
+    const hits = run(b, [1, 7], [2, 7]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].kind).toBe('check-fork');
+    expect(hits[0].label).toBe('将军抽马');
+    expect(hits[0].threats).toEqual([[2, 1]]);
+  });
+
+  it('走子前本已照将（非本步新造）+ 将后同线子走子前已可吃 → 不算将军抽（v3.36 反证）', () => {
+    const b = emptyBoard();
+    kings(b, [1, 4]);
+    put(b, 1, 8, 'R', 'r'); // 走子前红车已在第 1 行照将
+    put(b, 1, 1, 'N', 'b'); // 将后同线黑马，走子前已被红马 (2,3) 攻击
+    put(b, 2, 3, 'N', 'r');
+    // 红车 (1,8)→(1,7)：仍是原来的照将（未新造），旧威胁不算「抽」
+    expect(run(b, [1, 8], [1, 7])).toHaveLength(0);
+  });
+
   it('被抽的子可反吃攻击子（对方能两全）→ 不成立', () => {
     const b = emptyBoard();
     kings(b);

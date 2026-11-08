@@ -22,7 +22,9 @@
  *    大子（车 / 马 / 炮）——攻击者可为将军的子、走动的子或其它子（图案口径，v3.25）。
  *    另含**被照之将同线后方的大子**（`behindKingVictim()`：将移开该线后即落入照将直线子的攻击口——
  *    经典抽将，如「车照将、将后车被抽」；这类子被将挡住、走子当步吃不到，仍按「将移开后必失」复核）。
- *    **被抽子须是这一步新造的威胁**——走子前我方就已能合法吃到的子与这步将军无关，不算「抽」。
+ *    **被抽子须是这一步新造的威胁**——走子前我方就已能合法吃到的子与这步将军无关，不算「抽」；
+ *    但「将后同线」的抽子（`behindKingVictim()`）须以**本步新造照将**为前提：即使该子走子前已被我方别的子
+ *    攻击着，「将被迫离开该线」后由照将直线子抽到的子仍是这一步创造的威胁（v3.36 用户截图）。
  *    **闪将**（闪开的子让线、将军由藏在后面的子发出）分两种：
  *    ① 移开的子本人将军 + **藏在后面的子**因让线**新捉到大子**（动的子将军且后方子力同时攻击大子）；
  *    ② 传统让线闪将——移开的子本人不将军，由让线露出的车 / 炮成将。
@@ -552,10 +554,15 @@ export function detectTactics(before: Board, move: Move, after: Board): TacticHi
     }
     // ② 被照之将同线后方的大子（将移开后即落入照将直线子的攻击口——经典抽将）；
     //    这类子走子当步并不「能被合法吃到」（被将挡住），仍按「将移开后必失」复核（`unavoidablyLost()`）。
+    //    「非本步新威胁」的排除须**本步新造的照将**为前提（v3.36 用户截图）：即使该子走子前已被我方
+    //    别的子（如马）攻击着，「将被迫离开该线」后由照将子抽到的子仍是这一步创造的威胁——
+    //    如「红车进底线照将、将后同线正是已被红马看着的黑马」应判「将军抽马」；只有走子前本就已在
+    //    将军、本步并未新造照将时，才按「走子前已可吃到」排除旧威胁。
+    const freshCheck = !attackersOf(before, oppKing, me).length;
     for (const checker of checkers) {
       if (!isLinePiece(after, checker)) continue; // 只有直线子（车 / 炮）才有「将后同线」
       const victim = behindKingVictim(after, checker, oppKing, opp);
-      if (!victim || winsBeforeSet.has(key(victim))) continue;
+      if (!victim || (!freshCheck && winsBeforeSet.has(key(victim)))) continue;
       const p = after[victim[0]][victim[1]];
       if (p && unavoidablyLost(winsOnce(), victim)) victims.push({ pos: victim, piece: p });
     }
