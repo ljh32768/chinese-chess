@@ -8,6 +8,11 @@ data/
 AGENTS.md
 .commit-msg.tmp
 
+# 本地工具与调试产物（不入库）
+.screenshots/
+.trae/
+.trae-html-share-packages/
+
 # 上游参考项目（MIT，仅本机比对用；需要的素材已复制进 src/renderer/assets/）
 Reference/
 # v1.6 覆盖主页署名用的一次性素材原图（大体积，不入库）
