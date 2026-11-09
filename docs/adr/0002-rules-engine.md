@@ -85,34 +85,37 @@
 
 ### 3.6 明确不做（MVP 范围外）
 
-自然限着、悔棋、计时读秒。**长将、长捉、重复局面已在 v2.11 落地**，见 §3.7——它们扩展在
-`shared/repetition.ts`（与规则引擎同层的纯模块），未改变 §3.1–§3.5 的纯函数边界。
+自然限着、悔棋、计时读秒。**长将、长捉、重复局面已在 v2.11 落地，v3.43 起改为只提示「请变招」、不判负**，
+见 §3.7——它们扩展在 `shared/repetition.ts`（与规则引擎同层的纯模块），未改变 §3.1–§3.5 的纯函数边界。
 
-### 3.7 重复局面裁决（`shared/repetition.ts`，v2.11）
+### 3.7 重复局面提示（长将 / 长捉，`shared/repetition.ts`；v2.11 起，v3.43 起不再判负）
 
 长将 / 长捉 / 三次重复**没有**直接写进 `rules.ts`：`rules.ts` 不得依赖 `tactics.ts`
 （反过来 `tactics.ts` 依赖 `rules.ts`），因此判定放在与规则引擎同层的独立纯模块 `repetition.ts`，
-它同时复用 `rules.ts`（`isInCheck`）与 `tactics.ts`（`profitableTargets`）；触发时机与终局结算仍由
-[ADR-0004 对局状态机](./0004-game-state-machine.md) 的 `Game` 负责。
+它同时复用 `rules.ts`（`isInCheck`）与 `tactics.ts`（`profitableTargets`）；触发时机仍由
+[ADR-0004 对局状态机](./0004-game-state-machine.md) 的 `Game` 负责，但**只提示、不结束对局**。
 
 | 项 | 规格 |
 |---|---|
-| 三次重复 `REPETITION_TIMES` | 同一局面（棋盘布局 + 行棋方**完全一致**）第 3 次出现即触发裁决 |
+| 三次重复 `REPETITION_TIMES` | 同一局面（棋盘布局 + 行棋方**完全一致**）第 3 次出现时参与提示判定 |
+| 连续「打」步数 `CHANGE_HINT_AT` | 某一方连续「打」（将 / 捉）达到第 **5** 步即提示「请变招」（长将 / 长捉不再判负） |
 | 局面键 `positionKey(board, turn)` | 90 格逐格序列化（有子记 `side+type`，空格记 `.`）后拼接行棋方 |
 | 每手性质 `classifyMove(before, after, mover)` | `check`（走子后对方被将军，**优先**）→ `chase` → `idle` |
 | 「捉」`chase` | 走子后**新出现**「可获利吃掉的对方棋子」（复用 `profitableTargets`：无根白吃 / 小换大），即这一步制造了新的得子威胁；若同一子走子前就已被咬住则不算新捉 |
 | 「闲」`idle` | 非将非捉（含兑子、拦、跟等官方规则中不算「打」的走法） |
 | 长打 | 重复循环内某方**每一步**都是「将」或「捉」 |
-| 裁决 `judgeRepetition(history)` | 恰好一方长打 → 该方判负；双方都长打或都不是 → **不判和**，返回 `hint`（`请变招`）提示继续对局 |
+| 提示判定 `judgeRepetition(history)` | ① 任一方的连续「打」步数达到第 5 步 → 返回 `hint`（`请变招`）；② 否则当前局面第 3 次出现且无人单方长打（双方都长打或都不是）→ 返回 `hint`；其余返回 `null`。**任何情况下都不返回判负 / 判和** |
 
-裁决只看**最后一次**重复循环（自该局面第 2 次出现起）内各方的每手性质，更早的循环不影响当前结论。
-判负文案按长打方的性质细分：全为将 → `长将判负`，全为捉 → `长捉判负`，将捉混合 → `长打判负`；
-无人长打时**不作和**，返回 `{ outcome: 'hint', reason: '请变招' }`（v3.5 起；对局继续，由 `Game`
-置位 `repetitionHint` 随快照下发，渲染层在状态框提示「重复局面 · 请变招」并弹一次轻提示）。
+连续「打」按走子方的着法顺序累计（从最后一手往前数该方自己的着法，遇到「闲」即中断）；
+三次重复分支只看**最后一次**重复循环（自该局面第 2 次出现起）内各方的每手性质，更早的循环不影响当前结论。
+恰好一方长打、但还没到第 5 步时不做任何裁定（继续走子，到第 5 步再提示）。
+提示结果为 `{ outcome: 'hint', reason: '请变招' }`，由 `Game` 置位 `repetitionHint` 随快照下发，
+渲染层在状态框提示「请变招」并弹一次轻提示（[ADR-0007 §3.5.7](./0007-renderer-ui.md)）。
 
 > 与官方规则的差异（本项目的可测试取舍）：不实现自然限着；「捉」只按「一手得子威胁」判定，
 > 不细分官方规则里的兑 / 献 / 拦 / 跟等例外（这些走法在此记作「闲」）；
-> 三次重复在「无人长打」时也不判和，改为「请变招」提示（不自动终局）。
+> **长将 / 长捉不判负**，连续「打」到第 5 步只提示「请变招」，对局继续；
+> 连续「打」按走子方着法累计，不要求这些着法一定构成同一局面的循环。
 
 ## 4. 代码入口
 
@@ -126,11 +129,13 @@
 | 合法走法过滤 `legalMoves` | [rules.ts](../../src/shared/rules.ts#L251-L263) |
 | 终局判定 `judgeAfterMove` | [rules.ts](../../src/shared/rules.ts#L299-L307) |
 | 权威校验 `validateMove` | [rules.ts](../../src/shared/rules.ts#L313-L330) |
-| 局面键 `positionKey` | [repetition.ts](../../src/shared/repetition.ts#L47-L60) |
-| 每手性质 `classifyMove` | [repetition.ts](../../src/shared/repetition.ts#L62-L75) |
-| 重复局面裁决 `judgeRepetition` | [repetition.ts](../../src/shared/repetition.ts#L82-L116) |
+| 连续「打」步数 `CHANGE_HINT_AT` | [repetition.ts](../../src/shared/repetition.ts#L31) |
+| 局面键 `positionKey` | [repetition.ts](../../src/shared/repetition.ts#L54-L63) |
+| 每手性质 `classifyMove` | [repetition.ts](../../src/shared/repetition.ts#L70-L78) |
+| 连续「打」计数 `attackStreak` | [repetition.ts](../../src/shared/repetition.ts#L84-L93) |
+| 重复局面提示 `judgeRepetition` | [repetition.ts](../../src/shared/repetition.ts#L109-L134) |
 
-调用方：主机 [game.ts `applyMove()`](../../src/shared/game.ts#L102-L146)（记录局面键 / 每手性质并触发裁决）、
+调用方：主机 [game.ts `applyMove()`](../../src/shared/game.ts#L146-L196)（记录局面键 / 每手性质并置位 `repetitionHint`）、
 客户端落点提示 [app.ts `onCell()`](../../src/renderer/app.ts#L449-L481)。
 
 ## 5. 验收标准
@@ -141,4 +146,5 @@
 - 将死返回 `{ winner: 对方, reason: '将死' }`；困毙返回 `{ winner: 对方, reason: '困毙' }`。
 - `validateMove` 六类拒绝原因逐一可复现。
 - 局面键只由棋盘布局与行棋方决定；每手性质可区分将 / 捉 / 闲（含「同一子仍被咬住不算新捉」）；
-  三次重复裁决可区分长将 / 长捉 / 长打 / 双方长打 / 双方长闲（[repetition.test.ts](../../tests/repetition.test.ts)）。
+  连续「打」到第 5 步提示「请变招」（第 4 步不提示），三次重复在无人单方长打时提示「请变招」，
+  **任何裁定都不会判负 / 判和**（[repetition.test.ts](../../tests/repetition.test.ts)）。

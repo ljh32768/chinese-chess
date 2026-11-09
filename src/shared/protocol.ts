@@ -147,7 +147,7 @@ export type ServerMessage =
       /** 双方吃子记录（含揭棋被吃暗子翻开后的真实身份） */
       capturedByRed: GameSnapshot['capturedByRed'];
       capturedByBlack: GameSnapshot['capturedByBlack'];
-      /** 重复局面提示：本手构成三次重复且无人长打（渲染层提示「请变招」，对局继续） */
+      /** 重复局面提示：连续长将 / 长捉到第 5 步或三次重复（渲染层提示「请变招」，对局继续） */
       repetitionHint?: GameSnapshot['repetitionHint'];
     }
   /** 走子被拒绝 */

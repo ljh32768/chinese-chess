@@ -198,7 +198,7 @@ const S = {
   /** 揭棋：双方吃子记录（快照下发，含被吃暗子翻开后的身份） */
   capRed: [] as PieceType[],
   capBlack: [] as PieceType[],
-  /** 重复局面提示：本手构成三次重复且无人长打 → 状态框提示「请变招」（对局继续，不判和） */
+  /** 重复局面提示：连续长将 / 长捉到第 5 步或三次重复 → 状态框提示「请变招」（对局继续） */
   repetitionHint: false,
   /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
   firstMode: 'guess' as FirstMode,
@@ -267,14 +267,14 @@ function toast(msg: string): void {
 }
 
 /**
- * 重复局面「请变招」轻提示：本手构成三次重复且无人长打时提示一次。
+ * 重复局面「请变招」轻提示：连续长将 / 长捉到第 5 步，或三次重复且无人单方长打时提示一次。
  * 同一手只提示一次——联机走子会连收 `move_applied` + 后续 `state` 同步，按 `seq` 去重。
  */
 let lastVarySeq = -1;
 function maybeVaryHint(seq: number, hint: boolean): void {
   if (!hint || seq === lastVarySeq) return;
   lastVarySeq = seq;
-  toast('重复局面，请变招');
+  toast('请变招');
 }
 
 // -------------------------------------------------------------- 正中提示条（将军 / 绝杀）
@@ -848,8 +848,8 @@ function updatePanel(): void {
         ? '⚠ 你被将军了'
         : '⚠ 对方被将军';
   } else if (active && S.repetitionHint) {
-    // 三次重复但无人长打：不判和，提示双方变招（将军警示优先于本行）
-    statusText = '重复局面 · 请变招';
+    // 连续长将 / 长捉到第 5 步，或三次重复且无人单方长打：不判负、不判和，提示变招（将军警示优先于本行）
+    statusText = '请变招';
   } else if (active) {
     statusText = S.spectator
       ? `${sideName(S.turn)}行棋中…`

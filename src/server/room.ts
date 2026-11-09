@@ -652,7 +652,7 @@ export class Room {
       capturedByBlack: s.capturedByBlack,
       // 揭棋：附带变体标记（棋盘已在 snapshot 中抹除暗子真实身份）
       ...(s.variant ? { variant: s.variant } : {}),
-      // 重复局面提示：本手构成三次重复且无人长打 → 渲染层提示「请变招」（对局继续，不判和）
+      // 重复局面提示：连续长将 / 长捉到第 5 步或三次重复 → 渲染层提示「请变招」（对局继续）
       ...(s.repetitionHint ? { repetitionHint: true } : {}),
     };
     this.broadcast(applied);

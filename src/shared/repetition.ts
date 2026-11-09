@@ -1,40 +1,40 @@
 /**
- * 重复局面裁决（长将 / 长捉 / 三次重复）——纯函数，无 DOM / 网络依赖，便于单元测试。
+ * 重复局面提示（长将 / 长捉 / 三次重复）——纯函数，无 DOM / 网络依赖，便于单元测试。
  *
  * 依据《中国象棋竞赛规则》「重复局面」条款的精神做可测试的简化实现：
  *
- * 1. **三次重复**：同一局面（棋盘布局 + 行棋方完全一致）第 3 次出现即触发裁决（`REPETITION_TIMES`）。
- * 2. **每步性质**（`classifyMove`，相对走子方而言）：
+ * 1. **每步性质**（`classifyMove`，相对走子方而言）：
  *    - **将**：走子后对方被将军（优先于「捉」判定）；
  *    - **捉**：走子后新出现「可获利吃掉的对方棋子」（无根白吃 / 小换大，复用 `profitableTargets`），
  *      即这一步制造了新的得子威胁；
  *    - **闲**：其余走子（含兑子、拦、跟等官方规则中不算「打」的走法）。
- * 3. **裁决**（`judgeRepetition`，只看重复循环内各方的每步性质）：
- *    - 一方每步都是「打」（将 / 捉）而另一方不是 → 该方判负
- *      （全为将 = `长将判负`，全为捉 = `长捉判负`，将捉混合 = `长打判负`）；
- *    - 双方都是「打」，或双方都不是 → **不判和**，返回提示 `请变招`（对局继续）：
- *      双方并无一方长打，本项目取舍是不直接判和，而是提示双方自行变招（见 ADR-0002 §3.7）。
+ * 2. **提示**（`judgeRepetition`）——v3.43 起长将 / 长捉**不再判负**，只提示「请变招」：
+ *    - 某一方**连续「打」（将 / 捉）到第 5 步**（`CHANGE_HINT_AT`）→ 提示变招（长将 / 长捉 / 将捉混合）；
+ *    - 同一局面（棋盘布局 + 行棋方完全一致）第 3 次出现，且无人单方长打
+ *      （双方都是「打」，或双方都不是）→ 提示变招（不判和、不判负，对局继续）。
+ *
+ * `judgeRepetition` 只返回 `hint` 或 `null`，任何情况下都不会结束对局。
  *
  * 简化说明（与官方规则的差异，均为本项目的可测试取舍）：不实现自然限着；
  * 「捉」只按「一手得子威胁」判定，不细分官方规则中的兑 / 献 / 拦 / 跟等例外；
- * 三次重复在「无人长打」时也不作和，改为「请变招」提示。
+ * 连续「打」按走子方的着法顺序累计，不要求这些着法一定构成同一局面的循环。
  */
 
 import { Board, Side } from './types.js';
 import { isInCheck } from './rules.js';
 import { profitableTargets } from './tactics.js';
 
-/** 触发裁决的重复次数：同一局面第 3 次出现即裁决 */
+/** 三次重复：同一局面第几次出现时参与提示判定 */
 export const REPETITION_TIMES = 3;
+
+/** 连续「打」（将 / 捉）到第几步即提示「请变招」（长将 / 长捉不再判负） */
+export const CHANGE_HINT_AT = 5;
 
 /** 一步走子相对走子方的性质：将 / 捉 / 闲 */
 export type MoveNature = 'check' | 'chase' | 'idle';
 
-/** 重复局面裁决结果；`null` 表示尚未构成重复，对局继续 */
-export type RepetitionRuling =
-  | { outcome: 'lose'; loser: Side; reason: '长将判负' | '长捉判负' | '长打判负' }
-  /** 双方都「打」或都不「打」：无人长打，不判和，改为提示「请变招」（对局继续） */
-  | { outcome: 'hint'; reason: '请变招' };
+/** 重复局面提示结果；`null` 表示尚未构成提示，对局照常继续 */
+export type RepetitionRuling = { outcome: 'hint'; reason: '请变招' };
 
 /** 重复循环的历史：局面键 + 每手性质 */
 export interface RepetitionHistory {
@@ -77,19 +77,41 @@ export function classifyMove(before: Board, after: Board, mover: Side): MoveNatu
   return 'idle';
 }
 
+/**
+ * 某一方当前连续「打」（将 / 捉）的步数：
+ * 从最后一手往前数**该方自己的**着法，一旦遇到「闲」即中断。
+ */
+function attackStreak(natures: Array<{ side: Side; nature: MoveNature }>, side: Side): number {
+  let n = 0;
+  for (let i = natures.length - 1; i >= 0; i--) {
+    const m = natures[i];
+    if (m.side !== side) continue;
+    if (m.nature === 'idle') break;
+    n += 1;
+  }
+  return n;
+}
+
 /** 循环内某一方每步都「打」（将或捉）——即官方规则里的「长打」 */
 function perpetuallyAttacks(natures: MoveNature[]): boolean {
   return natures.length > 0 && natures.every((n) => n !== 'idle');
 }
 
 /**
- * 重复局面裁决。
- * 当前局面（`keys` 末尾）第 `REPETITION_TIMES` 次出现时给出结论，否则返回 `null`。
+ * 重复局面提示判定。
  *
- * 裁决只看最后一次重复循环（自该局面第 `REPETITION_TIMES-1` 次出现起）内各方的每步性质：
- * 恰好一方「长打」→ 该方判负；双方都「长打」或都不是 → **不判和**，返回「请变招」提示（对局继续）。
+ * 1. 任一方的连续「打」步数达到 `CHANGE_HINT_AT`（第 5 步）→ 提示「请变招」（长将 / 长捉不再判负）；
+ * 2. 当前局面第 `REPETITION_TIMES` 次出现，且无人单方长打（双方都长打或都不长打）→ 提示「请变招」；
+ *    若恰好一方长打但还没到第 5 步，暂不提示（继续走子，到第 5 步再提示）。
+ *
+ * 任何情况下都不返回判负、不判和，对局照常继续。
  */
 export function judgeRepetition(h: RepetitionHistory): RepetitionRuling | null {
+  // 1) 连续长将 / 长捉达到第 5 步：提示变招
+  if (attackStreak(h.natures, 'r') >= CHANGE_HINT_AT || attackStreak(h.natures, 'b') >= CHANGE_HINT_AT) {
+    return { outcome: 'hint', reason: '请变招' };
+  }
+
   const now = h.keys.length - 1; // 当前局面下标
   if (now < 0) return null;
   const cur = h.keys[now];
@@ -106,14 +128,7 @@ export function judgeRepetition(h: RepetitionHistory): RepetitionRuling | null {
     r: perpetuallyAttacks(bySide.r),
     b: perpetuallyAttacks(bySide.b),
   };
+  // 2) 无人单方长打却反复不变（双方都长打 / 都不长打）：不判和，提示双方变招
   if (attacking.r === attacking.b) return { outcome: 'hint', reason: '请变招' };
-
-  const loser: Side = attacking.r ? 'r' : 'b';
-  const natures = bySide[loser];
-  const reason = natures.every((n) => n === 'check')
-    ? '长将判负'
-    : natures.every((n) => n === 'chase')
-      ? '长捉判负'
-      : '长打判负';
-  return { outcome: 'lose', loser, reason };
+  return null;
 }
