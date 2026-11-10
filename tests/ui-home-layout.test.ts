@@ -498,7 +498,7 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     expect(decl('.banner-name', 'font-family')).toBe('var(--font-chess)');
     expect(decl('.banner-name', 'font-weight')).toBe('900');
     expect(decl(".banner-name[data-kind='check']", 'color')).toBe('#fff3d6');
-    // v3.43：「吃」与「将」同位置同样式同字号（同一颜色声明，字号沿用 88px）
+    // v3.45：「吃」与「将」同位置同样式同字号（同一颜色声明，字号沿用 88px）
     expect(decl(".banner-name[data-kind='capture']", 'color')).toBe('#fff3d6');
     expect(decl(".banner-name[data-kind='capture']", 'font-size')).toBeUndefined();
     expect(decl(".banner-name[data-kind='mate']", 'color')).toBe('#ff3b30');
@@ -541,7 +541,7 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     // 联机走子（move_applied / game_over）与本地走子都接上动画与提示
     expect(APP).toContain('animateMove(msg.from, msg.to, hasLiftAt(msg.from))');
     expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
-    // v3.43：吃子提示（优先级 绝杀 > 将 > 吃）——按「这一手是否吃子」判定并接上同一个提示条
+    // v3.45：吃子提示（优先级 绝杀 > 将 > 吃）——按「这一手是否吃子」判定并接上同一个提示条
     expect(APP).toContain('bannerPriority');
     expect(APP).toContain("bannerContent('capture')");
     expect(APP).toContain('maybeBanner(!!before[msg.to[0]][msg.to[1]])');
