@@ -43,7 +43,7 @@
 | 对局 | `screen-game` | Canvas 棋盘 `board`、棋盘按钮条 `bn_box`（`actions-play`：`btn-undo/btn-draw/btn-resign/btn-leave`；**v2.5 残局** `actions-endgame`：`btn-eg-undo/btn-eg-hint/btn-eg-restart/btn-eg-leave`；`actions-over`：`btn-play-again/btn-home`；`actions-spectate`：`btn-spectate-leave`）、侧栏双方信息 `p-top/p-bottom`、状态框 `status-box`（含倒计时）、**残局目标块 `eg-box`（`eg-info`：残局名 / 难度 / 目标步数 / 已用步数 / 要点）**、请求等待提示 `req-hint`、吃子 `cap-red-list`/`cap-black-list`、角色提示 `role-hint`（**棋谱面板已移除，改由「对局回顾」复盘**） |
 | 对局回顾 | `screen-history` | 列表 `history-list`（每行：红黑方 / 取先方式 / 时间 / 胜负，点击进入复盘）、返回 `btn-history-back`、刷新 `btn-history-refresh` |
 | 复盘 | `screen-replay` | 复盘棋盘 `replay-board`、步进按钮 `btn-replay-first/prev/next/last`、返回列表 `btn-replay-back`、对局信息 `replay-info`、当前步 `replay-step`、AI 推荐 `replay-hint` |
-| 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；用于和棋/重开/悔棋请求、认输确认、猜先应答、对手离开与断线提示，**不用于对局结束** |
+| 通用弹层 | `modal` | 标题 `modal-title`、说明 `modal-sub`、动态按钮 `modal-btns`；ESC / 点击遮罩可关闭；用于和棋/重开/悔棋请求、认输确认、长将 / 长捉第 5 步「请变招」、猜先应答、对手离开与断线提示，**不用于对局结束** |
 | 轻提示 | `toast` | 1.8s 自动消失（席位结果 / 猜先结果也用它提示） |
 | 音效元素 | `click-audio` / `select-audio` | 常驻 `<audio preload="auto">`（与参考项目一致），由 `sound.ts` 直接 `play()` |
 
@@ -194,7 +194,7 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 按钮与状态 | `.btn` family 统一 hover 上浮 1px + 提亮、active 回落按压、`:disabled` 去饱和且 `not-allowed`；`.bn_box input` 与 `.btn` 同步；`.btn.ghost` 为木面反色（金字） |
 | 焦点可见 | 键盘 `:focus-visible` 统一金色焦点环（`--focus-ring`）；挂板入口 `a:focus-visible` 用 2px 金描边；鼠标点击不出现焦点环 |
 | 动效（克制） | 切屏 `screen-in`（淡入 + 上浮 10px，0.26s）、弹层遮罩 `fade-in` + 弹层 `modal-in`（缩放淡入）；列表行 hover 横移 2px 提示「可点进去」；`prefers-reduced-motion: reduce` 时动画与过渡降到 0.001ms |
-| 对局侧栏 | 「轮到你走棋」用浅金实底 `.status-box.mine`（与主按钮呼应，一眼可辨该谁走）；将军 `.check`、终局 `.over.*` 仍在 `.mine` 之后定义，优先级更高，保持原警示配色；玩家行左侧加红 / 黑细色条，走棋方整行加亮，「走棋中」为胶囊标签（`.tag:empty` 不渲染）；将死时状态框下方追加**终局杀法框**（`.kill-box`，与状态框同款面板 + 左侧金色发丝，只引用设计令牌；含杀法名 `/`.kill-name`/、解说 `/`.kill-def`/、同时构成的其它杀法 `/`.kill-also`/`，规则见 [ADR-0009 §3.11](./0009-c-d-extensions.md)）。**v3.5 起**：`S.repetitionHint` 为真（三次重复但无人长打）时状态框提示「请变招」；**v3.43 起**长将 / 长捉不再判负——某一方连续「打」（将 / 捉）到第 5 步同样置位该标志，状态框文案统一为「请变招」（将军 `.check` 警示优先于本行），并弹一次轻提示「请变招」（`maybeVaryHint`，同一手按 `moveSeq` 去重；显示时长沿用轻提示默认 1.8s） |
+| 对局侧栏 | 「轮到你走棋」用浅金实底 `.status-box.mine`（与主按钮呼应，一眼可辨该谁走）；将军 `.check`、终局 `.over.*` 仍在 `.mine` 之后定义，优先级更高，保持原警示配色；玩家行左侧加红 / 黑细色条，走棋方整行加亮，「走棋中」为胶囊标签（`.tag:empty` 不渲染）；将死时状态框下方追加**终局杀法框**（`.kill-box`，与状态框同款面板 + 左侧金色发丝，只引用设计令牌；含杀法名 `/`.kill-name`/、解说 `/`.kill-def`/、同时构成的其它杀法 `/`.kill-also`/`，规则见 [ADR-0009 §3.11](./0009-c-d-extensions.md)）。**v3.5 起**：`S.repetitionHint` 为真（三次重复但无人长打）时状态框提示「请变招」（将军 `.check` 警示优先于本行），并弹一次轻提示「请变招」（`maybeVaryHint`，同一手按 `moveSeq` 去重；显示时长沿用轻提示默认 1.8s）；**v3.43 起**长将 / 长捉不再判负；**v3.44 起**连续「打」到第 5 步的那一手**禁止落子**——本地 `applyMove` / 联机 `move_rejected` 的 `code === 'vary'` 走 `showVaryModal()`，沿用「确认认输」的 `showModal` 框架弹出标题「请变招」+ 说明 +「重新选子」按钮（不走状态框与轻提示）；除长将 / 长捉外无其它合法着法时服务端 / 状态机放行、不弹层 |
 | 列表与表单 | 房间号做成徽章（`.room-row .room-no`）；回顾页签未选中态改为描边幽灵样式（不再是深色块）；单选按钮 `accent-color: var(--accent)`；输入框 hover/focus 描边 + 金色光圈；滚动条统一细金色（`scrollbar-width/color` + `::-webkit-scrollbar`） |
 | 细节修正 | 轻提示允许换行（`max-width: min(86vw, 460px)`，窄屏不再溢出）并带 `role="status" aria-live="polite"`；右上角服务器 / 账号入口超宽省略（`max-width: 46vw` + ellipsis） |
 | 小屏 | `@media (max-width: 480px)` 除挂板回退 1 倍外，大面板内边距收紧（14px），右上角入口靠边 8px |
@@ -204,11 +204,11 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 `.status-box.mine`（含 `app.ts` 的 class 切换）、`.tag:empty`、toast 换行与 aria 语义、房间号徽章、暗角层、
 以及终局杀法框（HTML 结构 + 只引用令牌的样式 + 小屏同列铺满）。
 
-### 3.5.5 v2.8 走子动画与棋盘正中提示条（v2.9：改为「点击棋子抬起」；v3.40：文案与字号改版）
+### 3.5.5 v2.8 走子动画与棋盘正中提示条（v2.9：改为「点击棋子抬起」；v3.40：文案与字号改版；v3.44：新增「吃」提示）
 
 在 v1.4 的 Canvas + 素材渲染之上，给「选子 / 落子」与「将军 / 将死」补上动效反馈：
 **点击棋子即抬起**，走子时在抬起状态上平移、落点再放下；将军 / 绝杀在棋盘**正中**弹**纯文字大字**
-（v3.7 起去掉黑色圆底 / 圆框 / 暗红斜线与下方小字，改为楷体加粗大字；**v3.40 起将军改为单字「将」**，绝杀**先显示具体杀法名**——v3.8 起为纯杀法名，**特判显示结束后再接「绝杀」**，未命中特判直接显示「绝杀」，困毙只显示「困毙」），
+（v3.7 起去掉黑色圆底 / 圆框 / 暗红斜线与下方小字，改为楷体加粗大字；**v3.40 起将军改为单字「将」**，绝杀**先显示具体杀法名**——v3.8 起为纯杀法名，**特判显示结束后再接「绝杀」**，未命中特判直接显示「绝杀」，困毙只显示「困毙」；**v3.44 起吃子时显示单字「吃」，与「将」同位置同样式同字号，优先级 绝杀 > 将 > 吃**），
 显示 2.5s 后渐出消失；被将军的将（帅）同时**颤抖**（闪电 / 颤抖与战术 / 开局提示见 §3.5.7）。
 原则同 v2.4：克制、可被 `prefers-reduced-motion` 关闭（信息仍保留）。
 
@@ -217,14 +217,15 @@ v2.4 追加视觉精修契约，见 §3.5.4）。
 | 点击抬起 / 落下（v2.9） | `board.ts` 的 `BoardView.lifts = [{ pos, t }]`（`t` 为 0..1 抬起进度）驱动；纯函数 `liftFrame()` 只在原交叉点升降（升高 `0.42×格距`、放大到 1.14、出现落影）。`app.ts` 点击己方棋子 → `liftPiece()`（同一时刻只抬起一枚，先前拾起的先落下），取消选中 / 点到空位 / 右键 / ESC → `lowerAllLifts()` 落回；单帧时长 `LIFT_MS = 200ms`，由 `requestAnimationFrame` 推进 |
 | 走子动画（抬起 → 移动 → 放下） | `BoardView.anim = { from, to, piece, t, startLifted }` 驱动；`moveAnimFrame()` 给出该帧的贴图坐标 / 缩放 / 抬起量 / 落影。三段式：**抬起**（0→0.28）→ **移动**（→0.72：保持抬起平移，缓动 `easeInOut`）→ **放下**（→1）。`startLifted` 为真（点击选中时已抬起）时**省去起身段**，直接从平移开始；对手 / AI 走子仍是完整三段。动画期间该棋子起点 / 终点格不再静态贴图，抬起的棋子与走子帧（`DrawOp.scale` 以圆盘中心为锚点缩放）连同椭圆落影（`ShadowOp`）画在最上层，先落影后棋子 |
 | 动画接线与时长 | `app.ts` 在联机 `move_applied`、本地人机 / 残局的走子后调用 `animateMove(from, to, startLifted)`，用 `requestAnimationFrame` 在 `MOVE_ANIM_MS = 460ms` 内推进（抬起与走子共用一条帧循环，只有「正在动」时才持续重绘，保持抬起时停帧）。`prefers-reduced-motion: reduce` 时不做抬起 / 走子动画（选中仍以压暗 `alpha 0.75` + 落点框表达）。终局紧随 `move_applied` 到达的 `game_over` 用 `applySnapshot(state, { keepAnim: true })` 保留在跑的动画；悔棋 / 重开 / `state` 全量同步清空动画与抬起状态 |
-| 提示内容（banner.ts） | `renderer/banner.ts`（纯数据、无 DOM）：`bannerContent(kind, opts)` 只组装大字——**v3.40 起将军固定单字「将」**；**绝杀先显示具体杀法名**（`opts.label`，**v3.8 起为纯名称**，如「马后炮」「八脚马」），**特判显示结束后由 `app.ts` 的 `showMateBanner()` 再接一条「绝杀」**（`BANNER_MS + 200ms` 后切换）；未命中任何特判时 `bannerContent` 缺省名即为「绝杀」，直接显示；**困毙只显示「困毙」**。v3.7 起不再有副标题（下方小字已删除），也不再按杀法维护图案样式表 |
-| 显示与动效 | 结构：`.chess-box > .board-stage`（相对定位，仅包住画布）内，画布之后放 `.board-banner`（绝对定位铺满、居中、`pointer-events: none`）> `#banner-name`（**纯文字大字**，无背景 / 无边框 / 无圆角）。`.board-banner.show` 触发 `@keyframes banner-cycle 2.5s`：渐入（0→14%）→ 保持（→80%）→ 渐出（→100%），`app.ts` 在 `BANNER_MS = 2500ms` 后移除并隐藏；`showBanner()` 只写 `#banner-name` 的 `data-kind`（check / mate）与文本；每次走子按局面判定（`maybeBanner()`），联机的 `game_over` 与 `move_applied` 用 `moveSeq` + 类型去重 |
-| 字体与配色（v3.7 / v3.40） | 大字用 `--font-chess`（`"STKaiti", "KaiTi", "楷体", "Kaiti SC", "LiSu", "隶书", "SimSun", serif`）并 `font-weight: 900` + 1px 深色描边加粗；**v3.40 字号放大**：将（将军）`#fff3d6` **88px**（原 64px）、绝杀 `#ff3b30` **72px**（原 52px，略小以免长杀法名超出棋盘），小屏（窄窗口）为 **62px / 50px**（原 42px / 34px），均带深色描边 / 阴影保证压在木纹棋盘上也清晰 |
+| 提示内容（banner.ts） | `renderer/banner.ts`（纯数据、无 DOM）：`bannerContent(kind, opts)` 只组装大字——**v3.44 起新增 `capture`（吃子）固定单字「吃」**；**v3.40 起将军固定单字「将」**；**绝杀先显示具体杀法名**（`opts.label`，**v3.8 起为纯名称**，如「马后炮」「八脚马」），**特判显示结束后由 `app.ts` 的 `showMateBanner()` 再接一条「绝杀」**（`BANNER_MS + 200ms` 后切换）；未命中任何特判时 `bannerContent` 缺省名即为「绝杀」，直接显示；**困毙只显示「困毙」**。v3.7 起不再有副标题（下方小字已删除），也不再按杀法维护图案样式表 |
+| 提示优先级（v3.44） | 同一条提示条、同一时刻只显示一条，**绝杀 > 将 > 吃**：纯函数 `bannerPriority({ over, reason, check, captured })` 决定类型——将死 / 困毙 → `mate`，进行中被将军 → `check`，仅吃子 → `capture`，其余（含认输 / 超时等终局）返回 `null`。因此**同一手既吃子又将军 / 将死时只显示将军 / 绝杀**，吃子提示被压过；未吃子不显示「吃」 |
+| 显示与动效 | 结构：`.chess-box > .board-stage`（相对定位，仅包住画布）内，画布之后放 `.board-banner`（绝对定位铺满、居中、`pointer-events: none`）> `#banner-name`（**纯文字大字**，无背景 / 无边框 / 无圆角）。`.board-banner.show` 触发 `@keyframes banner-cycle 2.5s`：渐入（0→14%）→ 保持（→80%）→ 渐出（→100%），`app.ts` 在 `BANNER_MS = 2500ms` 后移除并隐藏；`showBanner()` 只写 `#banner-name` 的 `data-kind`（**capture** / check / mate）与文本；每次走子按局面判定（`maybeBanner(captured)`——联机 `move_applied` 与本地人机 / 残局按「落点走子前是否有子」判定这一手是否吃子），联机的 `game_over` 与 `move_applied` 用 `moveSeq` + 类型去重 |
+| 字体与配色（v3.7 / v3.40 / v3.44） | 大字用 `--font-chess`（`"STKaiti", "KaiTi", "楷体", "Kaiti SC", "LiSu", "隶书", "SimSun", serif`）并 `font-weight: 900` + 1px 深色描边加粗；**v3.40 字号放大**：将（将军）`#fff3d6` **88px**（原 64px）、绝杀 `#ff3b30` **72px**（原 52px，略小以免长杀法名超出棋盘），小屏（窄窗口）为 **62px / 50px**（原 42px / 34px）；**v3.44「吃」与「将」共用同一条颜色规则与 88px 字号**（同一选择器，小屏同为 62px），均带深色描边 / 阴影保证压在木纹棋盘上也清晰 |
 | 无障碍 / 减弱动效 | 提示条 `role="status" aria-live="assertive"`；`prefers-reduced-motion: reduce` 下**去掉缩放 / 淡入动效但保持可见**（信息不丢），2.5s 后由脚本隐藏 |
 
 验收（自动化）：[tests/board.test.ts](../../tests/board.test.ts)（抬起帧原地升降与夹取、抬起格跳过静态贴图、`startLifted` 省去起身段、动画一帧几何、落影、翻转与纯函数性、**`BoltOp` 闪电与 `kingShake` 抖动**）、
-[tests/banner.test.ts](../../tests/banner.test.ts)（**将军固定单字「将」/ 绝杀大字先显示具体杀法名（缺省即「绝杀」）/ 不改动传入参数**）、
-[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（`#banner-name` 纯文字结构（无 `banner-card` / `banner-slash` / `banner-sub`）/ 2.5s 渐入渐出 / 无黑底无圆框 / 楷体加粗与 `data-kind` 白红配色 / **v3.40 字号 88px · 72px（小屏 62px · 50px）** / 减弱动效仍可见 / `app.ts` 接线：点击抬起、取消落回、走子从抬起态平移、**将死先显杀法特判再接「绝杀」、困毙只显「困毙」**）。
+[tests/banner.test.ts](../../tests/banner.test.ts)（**将军固定单字「将」/ 绝杀大字先显示具体杀法名（缺省即「绝杀」）/ 不改动传入参数 / v3.44 吃子固定「吃」、吃子提示出现、与将军同时存在时被压过、无吃子不显示**）、
+[tests/ui-home-layout.test.ts](../../tests/ui-home-layout.test.ts)（`#banner-name` 纯文字结构（无 `banner-card` / `banner-slash` / `banner-sub`）/ 2.5s 渐入渐出 / 无黑底无圆框 / 楷体加粗与 `data-kind` 白红配色 / **v3.40 字号 88px · 72px（小屏 62px · 50px）** / **v3.44「吃」与「将」同色同样式** / 减弱动效仍可见 / `app.ts` 接线：点击抬起、取消落回、走子从抬起态平移、**将死先显杀法特判再接「绝杀」、困毙只显「困毙」、吃子按 `bannerPriority()` 接入**）。
 
 ### 3.5.6 v2.9 被吃掉的棋子展示（棋盘两侧缩略图；v3.3 放大并保留红黑原色；v3.16 同种合并 + 个数角标）
 

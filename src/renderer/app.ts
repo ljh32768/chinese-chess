@@ -81,7 +81,7 @@ import {
 import { initReview, ReviewController } from './review.js';
 import { playClick, playSelect } from './sound.js';
 import { Net } from './net.js';
-import { BannerContent, bannerContent } from './banner.js';
+import { BannerContent, bannerContent, bannerPriority } from './banner.js';
 import { detectOpening } from './openings.js';
 import { EndgameEditorController, initEndgameEditor } from './endgame-editor.js';
 
@@ -198,7 +198,7 @@ const S = {
   /** 揭棋：双方吃子记录（快照下发，含被吃暗子翻开后的身份） */
   capRed: [] as PieceType[],
   capBlack: [] as PieceType[],
-  /** 重复局面提示：连续长将 / 长捉到第 5 步或三次重复 → 状态框提示「请变招」（对局继续） */
+  /** 重复局面提示：三次重复且无人单方长打 → 状态框提示「请变招」（对局继续） */
   repetitionHint: false,
   /** 房主在等待页选择的取先（红方）方式；默认「猜先」 */
   firstMode: 'guess' as FirstMode,
@@ -267,7 +267,8 @@ function toast(msg: string): void {
 }
 
 /**
- * 重复局面「请变招」轻提示：连续长将 / 长捉到第 5 步，或三次重复且无人单方长打时提示一次。
+ * 重复局面「请变招」轻提示：三次重复且无人单方长打时提示一次。
+ * 注：长将 / 长捉第 5 步不在这里提示——那一手会被直接禁走，改用 [showVaryModal] 弹层。
  * 同一手只提示一次——联机走子会连收 `move_applied` + 后续 `state` 同步，按 `seq` 去重。
  */
 let lastVarySeq = -1;
@@ -329,22 +330,34 @@ function showBannerOnce(key: string, run: () => void): void {
 }
 
 /**
- * 按当前局面决定是否弹提示：「将死」→ 先杀法特判、随后接「绝杀」；「困毙」→ 只显示「困毙」；「将军」→「将」。
- * 在每次走子后调用（联机 move_applied / game_over、本地人机与残局）。
+ * 按当前局面决定是否弹提示，优先级「绝杀 > 将 > 吃」：
+ * 将死 → 先杀法特判、随后接「绝杀」；困毙 → 只显示「困毙」；将军 →「将」；仅吃子 →「吃」。
+ * 在每次走子后调用（联机 move_applied / game_over、本地人机与残局），
+ * `captured` 表示这一手是否吃掉了对方的棋子。
  */
-function maybeBanner(): void {
+function maybeBanner(captured = false): void {
   if (!$('screen-game').classList.contains('active')) return;
   const winner = S.winner;
-  if (S.status === 'over' && winner && S.reason === '困毙') {
-    showBannerOnce(`mate:kunbi:${S.moveSeq}`, () => showBanner(bannerContent('mate', { label: '困毙' })));
-  } else if (S.status === 'over' && winner && S.reason === '将死') {
+  const kind = bannerPriority({
+    over: S.status === 'over' && !!winner,
+    reason: S.reason,
+    check: S.status === 'playing' && S.check,
+    captured: S.status === 'playing' && captured,
+  });
+  if (kind === 'mate') {
     // 非困毙：命中特判先显示杀法名，特判显示完再接「绝杀」；未命中特判直接显示「绝杀」
+    if (S.reason === '困毙') {
+      showBannerOnce(`mate:kunbi:${S.moveSeq}`, () => showBanner(bannerContent('mate', { label: '困毙' })));
+      return;
+    }
     const mate = mateInfo();
     const id = mate?.pattern.id ?? 'generic';
     const label = mate ? mate.pattern.label : null;
     showBannerOnce(`mate:${id}:${S.moveSeq}`, () => showMateBanner(label));
-  } else if (S.status === 'playing' && S.check) {
+  } else if (kind === 'check') {
     showBannerOnce(`check:${S.turn}:${S.moveSeq}`, () => showBanner(bannerContent('check')));
+  } else if (kind === 'capture') {
+    showBannerOnce(`capture:${S.turn}:${S.moveSeq}`, () => showBanner(bannerContent('capture')));
   }
 }
 
@@ -449,6 +462,18 @@ function showModal(o: {
 
 function closeModal(): void {
   $('modal').classList.remove('show');
+}
+
+/**
+ * 长将 / 长捉第 5 步拦截：沿用「确认认输」的弹层框架提示「请变招」，本手不落子、玩家重新选子。
+ * 例外（除长将 / 长捉外无棋可走）由状态机放行，不会走到这里。
+ */
+function showVaryModal(): void {
+  showModal({
+    title: '请变招',
+    sub: '长将 / 长捉不可持续到第 5 步，请改走其它合法着法',
+    buttons: [{ label: '重新选子', primary: true }],
+  });
 }
 
 /** 本地存储读写（隐私模式下静默失败） */
@@ -848,7 +873,7 @@ function updatePanel(): void {
         ? '⚠ 你被将军了'
         : '⚠ 对方被将军';
   } else if (active && S.repetitionHint) {
-    // 连续长将 / 长捉到第 5 步，或三次重复且无人单方长打：不判负、不判和，提示变招（将军警示优先于本行）
+    // 三次重复且无人单方长打：不判和，提示变招（将军警示优先于本行；长将 / 长捉第 5 步走弹层拦截）
     statusText = '请变招';
   } else if (active) {
     statusText = S.spectator
@@ -1164,13 +1189,15 @@ function handleMessage(msg: ServerMessage): void {
       playClick();
       render();
       animateMove(msg.from, msg.to, hasLiftAt(msg.from));
-      maybeBanner();
+      maybeBanner(!!before[msg.to[0]][msg.to[1]]);
       maybeVaryHint(msg.seq, S.repetitionHint);
       applyMoveEffects(before, { from: msg.from, to: msg.to }, msg.seq);
       return;
     }
     case 'move_rejected':
-      toast(`走子无效：${msg.reason}`);
+      // 长将 / 长捉第 5 步被服务端拦截：用「确认认输」同款弹层提示「请变招」（本手未落子）
+      if (msg.code === 'vary') showVaryModal();
+      else toast(`走子无效：${msg.reason}`);
       lowerAllLifts(); // 抬起中的棋子落回原处
       return;
     case 'state':
@@ -1945,7 +1972,9 @@ function localMove(from: Pos, to: Pos, opts: { startLifted?: boolean } = {}): vo
   const before = cloneBoard(S.board); // 战术识别需要「走子前」局面（须在 applyMove 前取）
   const result = game.applyMove(from, to, S.side);
   if (!result.ok) {
-    toast(result.reason ?? '非法走子');
+    // 长将 / 长捉第 5 步：这一手禁止走，用「确认认输」同款弹层提示「请变招」
+    if (result.code === 'vary') showVaryModal();
+    else toast(result.reason ?? '非法走子');
     lowerAllLifts();
     return;
   }
@@ -1953,7 +1982,7 @@ function localMove(from: Pos, to: Pos, opts: { startLifted?: boolean } = {}): vo
   S.hint = null; // 走子后清除提示环
   applySnapshot(game.snapshot());
   animateMove(from, to, opts.startLifted);
-  maybeBanner();
+  maybeBanner(!!before[to[0]][to[1]]);
   applyMoveEffects(before, { from, to }, S.moveSeq);
   if (S.endgame) {
     endgameEvaluate();
@@ -1998,13 +2027,15 @@ async function runLocalAi(aiSide: Side): Promise<void> {
   if (localGame !== g || g.moveSeq !== seq || g.status !== 'playing' || g.turn !== aiSide) return;
   if (S.endgame?.result) return;
   const before = cloneBoard(g.board); // 战术识别需要「走子前」局面（须在 applyMove 前取）
-  g.applyMove(move.from, move.to, aiSide);
+  // 长将 / 长捉第 5 步会被拦截：AI 改走第一条不被拦截的合法着法（无其它着法时放行原着法）
+  const aiMove = g.pickVarySafeMove(aiSide, move);
+  g.applyMove(aiMove.from, aiMove.to, aiSide);
   playClick();
   S.hint = null; // 走子后清除提示环
   applySnapshot(g.snapshot());
-  animateMove(move.from, move.to);
-  maybeBanner();
-  applyMoveEffects(before, move, S.moveSeq);
+  animateMove(aiMove.from, aiMove.to);
+  maybeBanner(!!before[aiMove.to[0]][aiMove.to[1]]);
+  applyMoveEffects(before, aiMove, S.moveSeq);
   if (S.endgame) endgameEvaluate();
 }
 

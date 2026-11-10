@@ -18,7 +18,8 @@
 - 走子统一走 `applyMove(from, to, side)` 的**校验链**，任何一步失败都拒绝且不改动状态。
 - 胜负原因只使用固定文案（`GameOverReason`）：`将死`、`困毙`、`认输`、`同意和棋`、`超时判负`。
   重复局面（长将 / 长捉 / 三次重复）**从不作为终局原因**：v3.5 起三次重复不判和，v3.43 起长将 / 长捉
-  不再判负，统一改为下发 `repetitionHint` 提示「请变招」，对局继续。
+  不再判负，v3.44 起连续「打」到第 5 步改为**禁走该手**（`code: 'vary'`，弹层提示「请变招」；无其它合法着法时放行），
+  三次重复仍下发 `repetitionHint` 提示「请变招」，对局继续。
 - 和棋/重开采用「请求-回应」两段式：由主机服务记录发起方（`pendingDraw` / `pendingRestart`），
   `Game` 只负责终局结算与重置，不处理网络转发。
 
@@ -71,11 +72,13 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 | 1 | `status === 'playing'` | `对局未在进行中` |
 | 2 | `side === turn` | `还没轮到你走棋` |
 | 3 | `validateMove(board, from, to, side)` | 规则引擎给出的中文原因（见 ADR-0002 §3.5） |
+| 3.5 | `isVaryBlocked(from, to, side)`（长将 / 长捉第 5 步且存在其它不构成第 5 步的合法着法） | `{ ok:false, code:'vary', reason:'长将 / 长捉不可持续到第 5 步，请变招' }`（本手不落子） |
 | 4 | 记录走子前局面（`past`），执行 `makeMove`，追加 `history` / `posKeys` / `moveNatures`（本手性质：将 / 捉 / 闲），`lastMove` 更新，`moveSeq += 1`，`turn` 切换 | — |
 | 5 | `check = isInCheck(新 turn)`；`judgeAfterMove(新 turn)` | 终局则 `over` + `winner` + `reason`，并清空 `pendingDraw` / `pendingRestart` / `pendingUndo` |
-| 6 | `judgeRepetition(posKeys, moveNatures)`（连续「打」到第 5 步 / 同一局面第 3 次出现，见 §3.6） | **不终局**：置位或清除 `repetitionHint`，对局继续 |
+| 6 | `judgeRepetition(posKeys, moveNatures)`（同一局面第 3 次出现，见 §3.6） | **不终局**：置位或清除 `repetitionHint`，对局继续 |
 
-注意：第 4 步之后必然成功；失败均发生在第 1~3 步，因此**被拒绝的走子不会改变任何状态**（含 `moveSeq`）。
+注意：第 3.5 步被拦截时同样**不改变任何状态**（含 `moveSeq` / `turn` / `history`），玩家可改走其它合法着法；
+第 4 步之后必然成功，因此**被拒绝的走子不会改变任何状态**。
 
 ### 3.4 终局判定组合
 
@@ -83,7 +86,8 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 |---|---|---|---|
 | 对方被将死 | 走子方 | `将死` | `judgeAfterMove` |
 | 对方被困毙 | 走子方 | `困毙` | `judgeAfterMove` |
-| 长将 / 长捉 / 长打（连续「打」到第 5 步），或三次重复 | —（**不终局**） | 置 `repetitionHint`，提示 `请变招` | `judgeRepetition`（§3.6） |
+| 长将 / 长捉 / 长打（连续「打」到第 5 步） | —（**不终局、本手被禁**） | 返回 `code:'vary'`，弹层提示 `请变招`；无其它合法着法时放行 | `isVaryBlocked`（§3.6） |
+| 三次重复 | —（**不终局**） | 置 `repetitionHint`，提示 `请变招` | `judgeRepetition`（§3.6） |
 | 任意一方认输 | 对方 | `认输` | `resign` |
 | 一方求和且对方同意 | `null` | `同意和棋` | `acceptDraw` |
 
@@ -92,20 +96,27 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 自然限着、断线判负（意外断线由服务层进入宽限期保留对局，
 超时后回退 waiting/idle，不判负）、观战者状态。这些能力扩展时需保持「所有修改经由 `Game` 方法」这一约束。
 
-### 3.6 重复局面提示（v2.11 起；v3.5 起不判和、v3.43 起不判负）
+### 3.6 重复局面提示与长将 / 长捉拦截（v2.11 起；v3.5 起不判和、v3.43 起不判负、v3.44 起第 5 步禁走）
 
-`Game` 只做「记录 + 触发」，判定本身是纯函数，规格见 [ADR-0002 §3.7](./0002-rules-engine.md)。
+`Game` 只做「记录 + 触发 / 拦截」，判定本身是纯函数，规格见 [ADR-0002 §3.7](./0002-rules-engine.md)。
 
 - 每手成功后追加：`posKeys`（`positionKey(棋盘, 新行棋方)`）与 `moveNatures`（`classifyMove(走子前, 走子后, 走子方)`）。
+- **走子前**（`validateMove` 通过后）调 `isVaryBlocked(from, to, side)`：本手是该方连续「打」（将 / 捉）的
+  **第 5 步**、走完的局面与此前重复（`posKeys` 已包含该局面键，形成重复循环），且还存在其它不构成第 5 步的
+  合法着法 → 返回 `{ ok:false, code:'vary' }`，**这一手不落子**（局面 / `moveSeq` / `turn` / `history` 均不变），
+  渲染层用「确认认输」的弹层框架提示「请变招」。
+  **例外**：局面并未重复（正常进攻中一路向前的连续将军 / 捉子），或该方除这类着法外没有任何其它合法着法
+  （`alternatives` 为空或全部都是第 5 步）→ 放行、不提示。
 - 走子后若未立刻终局，则调 `judgeRepetition({ keys: posKeys, natures: moveNatures })`，**只置位公开字段
   `repetitionHint`，绝不以它结束对局**：
-  - 某一方连续「打」（将 / 捉）到**第 5 步** → 置位（长将 / 长捉不再判负，提示「请变招」）；
   - 同一局面第 3 次出现且**无人单方长打**（双方都长打或都不是）→ 置位（不判和，提示「请变招」）；
-  - 恰好一方长打但还没到第 5 步 → 不置位（继续走子，到第 5 步再提示）。
+  - 恰好一方长打但还没到第 5 步 → 不置位（继续走子，到第 5 步再拦截）。
   该标志每手重新计算（未构成提示即为 `false`），随快照 / `move_applied` 下发，渲染层提示「请变招」。
+- AI 兜底：`pickVarySafeMove(side, preferred)` 首先选着法若被拦截，则改走该方第一条不被拦截的合法着法；
+  全部被拦截时返回首选着法（例外分支放行）。服务端房间 AI 与本地人机 AI 均经此方法走子。
 - `reset()` / `setup()` 把两条历史重置为「只有当前局面 + 无着法」并清空 `repetitionHint`，
   `undo()` 与 `history` 一同 `pop` 且清空该标志，因此**悔棋、重开不会沿用旧的重复计数与提示**。
-- 人机（本地 / 服务器 AI 房间）与残局挑战共用同一份 `Game`，因此同一套提示自动生效。
+- 人机（本地 / 服务器 AI 房间）与残局挑战共用同一份 `Game`，因此同一套提示 / 拦截自动生效。
 
 ## 4. 代码入口
 
@@ -115,7 +126,8 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 | 重置 `reset()` | [game.ts](../../src/shared/game.ts#L73-L109) |
 | 自定义局面 `setup()` | [game.ts](../../src/shared/game.ts#L110-L118) |
 | 快照 `snapshot()` | [game.ts](../../src/shared/game.ts#L119-L145) |
-| 走子 `applyMove()`（含重复局面提示） | [game.ts](../../src/shared/game.ts#L146-L196) |
+| 走子 `applyMove()`（含第 5 步拦截与三次重复提示） | [game.ts](../../src/shared/game.ts#L146-L196) |
+| 第 5 步拦截 `isVaryBlocked()` / AI 兜底 `pickVarySafeMove()` | [game.ts](../../src/shared/game.ts) |
 | 终局结算 `endGame()` | [game.ts](../../src/shared/game.ts#L198-L207) |
 | 悔棋 `undo()` | [game.ts](../../src/shared/game.ts)（同步 `pop` `history` / `posKeys` / `moveNatures`） |
 | 认输 `resign()` / 超时 `timeout()` / 和棋 `acceptDraw()` / 可重开 `canRestart()` | [game.ts](../../src/shared/game.ts) |
@@ -133,6 +145,8 @@ idle ── setHosting(true) ──► waiting ── 双方 join ──► play
 - 认输、同意和棋分别以 `认输`、`同意和棋` 结束；`canRestart` 仅在 `over` 时为真。
 - `setup(board, turn)` 以自定义局面开局（残局挑战）：`status='playing'`、`moveSeq=0`、`history` 与悔棋栈清空、
   待处理请求清零，并按先行方是否被将军置 `check`；之后走子 / 悔棋 / 终局判定与标准开局完全一致。
-- 重复局面（v2.11，v3.43 改为提示）：长将 / 长捉连续「打」到第 5 步只置 `repetitionHint`，
-  **不判负、不判和、不产生 winner**；第 4 步不提示；双方长闲的三次重复同样只提示「请变招」；
+- 重复局面（v2.11，v3.43 改为提示，v3.44 第 5 步禁走）：长将 / 长捉连续「打」到第 5 步时
+  该手返回 `{ ok:false, code:'vary' }` 且**不落子**（局面 / `moveSeq` / `turn` / `history` 不变），
+  **不判负、不判和、不产生 winner**；第 4 步照常可走；除长将 / 长捉外无其它合法着法时放行、不提示；
+  AI 经 `pickVarySafeMove` 自动改走安全着法；双方长闲的三次重复仍只提示「请变招」；
   `undo()` 一并回退提示与重复计数、`reset()` / `setup()` 清空历史（[repetition.test.ts](../../tests/repetition.test.ts)）。

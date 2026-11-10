@@ -370,7 +370,13 @@ export class Room {
         }
         const result = this.applyAndBroadcast(from, to, seat);
         if (!result.ok) {
-          return wsSend(conn, { type: 'move_rejected', from, to, reason: result.reason ?? '非法走子' });
+          return wsSend(conn, {
+            type: 'move_rejected',
+            from,
+            to,
+            reason: result.reason ?? '非法走子',
+            ...(result.code ? { code: result.code } : {}),
+          });
         }
         return;
       }
@@ -792,7 +798,9 @@ export class Room {
       return;
     }
     logInfo(`房间 ${this.id}：AI 走子 ${move.from[0]},${move.from[1]} → ${move.to[0]},${move.to[1]}`);
-    this.applyAndBroadcast(move.from, move.to, 'b');
+    // 长将 / 长捉第 5 步会被拦截：AI 改走第一条不被拦截的合法着法（无其它着法时放行原着法）
+    const safe = this.game.pickVarySafeMove('b', move);
+    this.applyAndBroadcast(safe.from, safe.to, 'b');
   }
 
   /** 房间 AI 难度档位（1..4） */

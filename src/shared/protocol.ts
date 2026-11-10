@@ -150,8 +150,8 @@ export type ServerMessage =
       /** 重复局面提示：连续长将 / 长捉到第 5 步或三次重复（渲染层提示「请变招」，对局继续） */
       repetitionHint?: GameSnapshot['repetitionHint'];
     }
-  /** 走子被拒绝 */
-  | { type: 'move_rejected'; from: Pos; to: Pos; reason: string }
+  /** 走子被拒绝（`code: 'vary'` = 长将 / 长捉第 5 步被拦截，渲染层弹层提示「请变招」） */
+  | { type: 'move_rejected'; from: Pos; to: Pos; reason: string; code?: 'vary' }
   /** 全量状态同步（断线重连恢复 / 宽限结束回到等待 / 重开） */
   | { type: 'state'; state: GameSnapshot }
   /** 对手发起和棋请求 */

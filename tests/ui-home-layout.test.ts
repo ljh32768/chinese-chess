@@ -498,6 +498,9 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     expect(decl('.banner-name', 'font-family')).toBe('var(--font-chess)');
     expect(decl('.banner-name', 'font-weight')).toBe('900');
     expect(decl(".banner-name[data-kind='check']", 'color')).toBe('#fff3d6');
+    // v3.43：「吃」与「将」同位置同样式同字号（同一颜色声明，字号沿用 88px）
+    expect(decl(".banner-name[data-kind='capture']", 'color')).toBe('#fff3d6');
+    expect(decl(".banner-name[data-kind='capture']", 'font-size')).toBeUndefined();
     expect(decl(".banner-name[data-kind='mate']", 'color')).toBe('#ff3b30');
     // v3.40：将 / 绝杀字号整体调大（基准 64px → 88px、绝杀 52px → 72px）
     expect(decl('.banner-name', 'font-size')).toBe('88px');
@@ -538,6 +541,10 @@ describe('v2.8 走子动画与棋盘正中提示（v3.7：改为纯文字大字�
     // 联机走子（move_applied / game_over）与本地走子都接上动画与提示
     expect(APP).toContain('animateMove(msg.from, msg.to, hasLiftAt(msg.from))');
     expect(APP).toContain('applySnapshot(msg.state, { keepAnim: true })');
+    // v3.43：吃子提示（优先级 绝杀 > 将 > 吃）——按「这一手是否吃子」判定并接上同一个提示条
+    expect(APP).toContain('bannerPriority');
+    expect(APP).toContain("bannerContent('capture')");
+    expect(APP).toContain('maybeBanner(!!before[msg.to[0]][msg.to[1]])');
   });
 
   it('点击棋子抬起：点击选中即抬起、取消落回、走子从抬起态直接平移', () => {
@@ -818,8 +825,8 @@ describe('人机对弈「我执红 / 我执黑」选择契约', () => {
   });
 });
 
-describe('v3.43 长将 / 长捉「请变招」提示契约', () => {
-  it('状态框显示「请变招」（将军警示优先），并配一次轻提示 + 按手去重', () => {
+describe('v3.44 长将 / 长捉第 5 步拦截契约', () => {
+  it('三次重复仍走状态框 + 轻提示（按手去重）', () => {
     expect(APP).toContain("statusText = '请变招'");
     expect(APP).toContain('S.repetitionHint');
     expect(APP).toContain('function maybeVaryHint(');
@@ -828,17 +835,40 @@ describe('v3.43 长将 / 长捉「请变招」提示契约', () => {
     expect(APP).toContain('if (!hint || seq === lastVarySeq) return;');
   });
 
-  it('长将 / 长捉不再判负：第 5 步只提示，任何裁定都不会结束对局', () => {
+  it('第 5 步这一手被禁走：状态机返回 code=vary，走子流程不落子', () => {
     const REP = read('src/shared/repetition.ts');
     expect(REP).toContain('CHANGE_HINT_AT = 5');
-    expect(REP).toContain("outcome: 'hint'");
+    expect(REP).toContain('export function isVaryStep(');
+    expect(REP).toContain('export function blocksVaryStep(');
+    // 例外分支：所有合法着法都会构成第 5 步 → 不拦截
+    expect(REP).toContain('return alternatives.some((n) => !isVaryStep(natures, side, n));');
     expect(REP).not.toContain("outcome: 'lose'");
+
     const GAME = read('src/shared/game.ts');
+    expect(GAME).toContain('isVaryBlocked(from, to, side)');
+    expect(GAME).toContain("code: 'vary'");
+    // AI 兜底：避开被拦截的着法（全部被拦截时放行首选着法）
+    expect(GAME).toContain('pickVarySafeMove(side: Side, preferred: Move): Move');
+
+    // 长将 / 长捉不再判负
     expect(GAME).not.toContain("ruling?.outcome === 'lose'");
     expect(GAME).toContain("this.repetitionHint = ruling?.outcome === 'hint';");
     const TYPES = read('src/shared/types.ts');
     expect(TYPES).not.toContain('长将判负');
     expect(TYPES).not.toContain('长捉判负');
+  });
+
+  it('弹窗沿用「确认认输」的 showModal 框架：本地与联机被拦截时弹「请变招」', () => {
+    expect(APP).toContain('function showVaryModal(');
+    expect(APP).toContain("title: '请变招'");
+    expect(APP).toContain("if (result.code === 'vary') showVaryModal();");
+    expect(APP).toContain("if (msg.code === 'vary') showVaryModal();");
+    // 本地人机 AI 同样改走不被拦截的着法
+    expect(APP).toContain('g.pickVarySafeMove(aiSide, move)');
+    // 联机：服务端把 code 透传给拒绝回包，房间 AI 同样走 pickVarySafeMove
+    const ROOM = read('src/server/room.ts');
+    expect(ROOM).toContain('...(result.code ? { code: result.code } : {}),');
+    expect(ROOM).toContain("pickVarySafeMove('b', move)");
   });
 
   it('快照 / move_applied 均下发 repetitionHint（本地人机与联机一致）', () => {

@@ -2,19 +2,31 @@
  * 权威对局状态机（服务端房间 / 客户端本地人机对弈共用）。
  * 唯一真实棋盘状态在这里维护，所有走子都必须经过 applyMove 校验。
  *
- * 走子后除了判定将军 / 将死 / 困毙，还会记录局面历史并做重复局面提示
- * （长将 / 长捉不再判负：连续「打」到第 5 步、或同一局面第 3 次出现且无人单方长打时，
- * 置 `repetitionHint` 提示「请变招」，对局继续），见 [repetition.ts](./repetition.ts)。
+ * 走子后除了判定将军 / 将死 / 困毙，还会记录局面历史：连续「打」（将 / 捉）到第 5 步时
+ * **禁走这一手**（返回 `code: 'vary'`，渲染层弹层提示「请变招」；除长将 / 长捉外无棋可走时放行）；
+ * 同一局面第 3 次出现且无人单方长打时置 `repetitionHint` 提示「请变招」。任何情况都不判负，
+ * 见 [repetition.ts](./repetition.ts)。
  */
 
 import { Board, GameSnapshot, GameStatus, GameVariant, Move, PieceType, Pos, Side } from './types.js';
-import { cloneBoard, initBoard, isInCheck, judgeAfterMove, makeMove, validateMove } from './rules.js';
-import { classifyMove, judgeRepetition, MoveNature, positionKey } from './repetition.js';
+import {
+  boardAfterMove,
+  cloneBoard,
+  initBoard,
+  isInCheck,
+  judgeAfterMove,
+  legalMoves,
+  makeMove,
+  validateMove,
+} from './rules.js';
+import { blocksVaryStep, classifyMove, MoveNature, positionKey, judgeRepetition } from './repetition.js';
 import { dealBoard, redactBoard, revealAt } from './jieqi.js';
 
 export interface MoveResult {
   ok: boolean;
   reason?: string;
+  /** 失败码：`vary` = 长将 / 长捉第 5 步被拦截（渲染层用弹层提示「请变招」） */
+  code?: 'vary';
 }
 
 export class Game {
@@ -28,9 +40,9 @@ export class Game {
   check = false;
 
   /**
-   * 重复局面提示：连续长将 / 长捉到第 5 步，或本手构成三次重复且无人单方长打时置位
-   * （不判负、不判和，改为提示「请变招」）。
+   * 重复局面提示：本手构成三次重复且无人单方长打时置位（不判和，改为提示「请变招」）。
    * 每手走子重新计算（未构成提示则清零），悔棋 / 重开同步清除；随快照下发。
+   * 注：连续长将 / 长捉到第 5 步不再置位提示，而是在 `applyMove` 里直接禁走（`code: 'vary'`）。
    */
   repetitionHint = false;
 
@@ -63,7 +75,7 @@ export class Game {
     capBlack: PieceType[];
   }> = [];
 
-  /** 每个局面的键（下标 i = 第 i 手之后），用于重复局面裁决 */
+  /** 每个局面的键（下标 i = 第 i 手之后），用于三次重复提示 */
   private posKeys: string[] = [];
 
   /** 每一手相对走子方的性质（将 / 捉 / 闲），与 history 下标对齐 */
@@ -150,6 +162,11 @@ export class Game {
     const err = validateMove(this.board, from, to, side);
     if (err) return { ok: false, reason: err };
 
+    // 长将 / 长捉第 5 步：禁走这一手（除这类着法外无棋可走时放行），由渲染层弹层提示「请变招」
+    if (this.isVaryBlocked(from, to, side)) {
+      return { ok: false, reason: '长将 / 长捉不可持续到第 5 步，请变招', code: 'vary' };
+    }
+
     const target = this.board[to[0]][to[1]];
     // 记录走子前局面，供悔棋回退与「捉」判定
     this.past.push({
@@ -171,7 +188,7 @@ export class Game {
     // 揭棋：落点的暗子翻开
     if (this.variant === 'jieqi') revealAt(this.board, to);
     this.history.push({ from: [...from] as Pos, to: [...to] as Pos });
-    // 记录本手性质（将 / 捉 / 闲）与走子后的局面键，供重复局面裁决
+    // 记录本手性质（将 / 捉 / 闲）与走子后的局面键，供长将 / 长捉拦截与三次重复提示
     this.moveNatures.push({ side, nature: classifyMove(before, this.board, side) });
     this.lastMove = { from, to };
     this.moveSeq += 1;
@@ -187,11 +204,57 @@ export class Game {
       return { ok: true };
     }
 
-    // 重复局面提示：长将 / 长捉不再判负 —— 连续「打」到第 5 步，或同一局面第 3 次出现且
-    // 无人单方长打时置位 repetitionHint（随快照下发，渲染层提示「请变招」），对局继续
+    // 重复局面提示：长将 / 长捉已在上方拦截；这里只处理「同一局面第 3 次出现且无人单方长打」，
+    // 不判和、不判负，置位 repetitionHint（随快照下发，渲染层提示「请变招」），对局继续
     const ruling = judgeRepetition({ keys: this.posKeys, natures: this.moveNatures });
     this.repetitionHint = ruling?.outcome === 'hint';
     return { ok: true };
+  }
+
+  /**
+   * 长将 / 长捉拦截：本手是该方连续「打」（将 / 捉）的第 5 步、走完的局面与此前重复（形成循环），
+   * 且还存在其它不会构成第 5 步的合法着法 → 返回 `true`（禁走）。
+   * 例外：若所有合法着法都会构成第 5 步（除长将 / 长捉外无棋可走），或局面并未重复（正常进攻），
+   * 返回 `false` 放行。
+   */
+  isVaryBlocked(from: Pos, to: Pos, side: Side): boolean {
+    const after = boardAfterMove(this.board, from, to);
+    const nature = classifyMove(this.board, after, side);
+    if (nature === 'idle') return false;
+    // 只有形成重复循环的连续「打」才算长将 / 长捉：本手走完的局面此前出现过才拦截，
+    // 避免把正常进攻中的连续将军 / 捉子（局面一路向前、并未重复）误判为长打
+    if (!this.posKeys.includes(positionKey(after, side === 'r' ? 'b' : 'r'))) return false;
+    const alternatives: MoveNature[] = [];
+    for (let r = 0; r < this.board.length; r++) {
+      for (let c = 0; c < this.board[r].length; c++) {
+        const p = this.board[r][c];
+        if (!p || p.s !== side) continue;
+        for (const [tr, tc] of legalMoves(this.board, r, c)) {
+          // 排除本手自身
+          if (r === from[0] && c === from[1] && tr === to[0] && tc === to[1]) continue;
+          alternatives.push(classifyMove(this.board, boardAfterMove(this.board, [r, c], [tr, tc]), side));
+        }
+      }
+    }
+    return blocksVaryStep(this.moveNatures, side, nature, alternatives, true);
+  }
+
+  /**
+   * AI 专用：避开「请变招」拦截——首选着法不被拦截时直接返回；否则改选第一条不被拦截的合法着法。
+   * 若所有合法着法都被拦截（例外分支：除长将 / 长捉外无棋可走），返回首选着法（放行）。
+   */
+  pickVarySafeMove(side: Side, preferred: Move): Move {
+    if (!this.isVaryBlocked(preferred.from, preferred.to, side)) return preferred;
+    for (let r = 0; r < this.board.length; r++) {
+      for (let c = 0; c < this.board[r].length; c++) {
+        const p = this.board[r][c];
+        if (!p || p.s !== side) continue;
+        for (const to of legalMoves(this.board, r, c)) {
+          if (!this.isVaryBlocked([r, c], to, side)) return { from: [r, c], to };
+        }
+      }
+    }
+    return preferred;
   }
 
   /** 结算终局：置 over、记录胜方与原因，并清空待处理请求与计时 */

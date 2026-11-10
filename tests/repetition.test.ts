@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { Board, Pos, Side } from '../src/shared/types.js';
+import { Board, Move, Pos, Side } from '../src/shared/types.js';
 import { boardAfterMove, initBoard } from '../src/shared/rules.js';
 import { Game } from '../src/shared/game.js';
+import { MATE_LINE } from './mate-line.js';
 import {
+  attackStreak,
+  blocksVaryStep,
   CHANGE_HINT_AT,
   classifyMove,
+  isVaryStep,
   judgeRepetition,
   MoveNature,
   positionKey,
@@ -20,16 +24,19 @@ const hist = (keys: string[], natures: Array<[Side, MoveNature]>): RepetitionHis
   natures: natures.map(([side, nature]) => ({ side, nature })),
 });
 
-/** 不构成三次重复的唯一局面键（键数 = 手数 + 1） */
-const uniqueKeys = (plies: number): string[] => Array.from({ length: plies + 1 }, (_, i) => `k${i}`);
+/** 连续 `n` 次「打」+ 对方每次「闲」的历史 */
+const attackLog = (n: number, nature: MoveNature, side: Side = 'r'): Array<[Side, MoveNature]> => {
+  const out: Array<[Side, MoveNature]> = [];
+  for (let i = 0; i < n; i++) out.push([side, nature], ['b', 'idle']);
+  return out;
+};
 
-describe('重复局面提示（纯函数）', () => {
+describe('重复局面判定（纯函数）', () => {
   it('局面键只由棋盘布局与行棋方决定', () => {
     expect(positionKey(initBoard(), 'r')).toBe(positionKey(initBoard(), 'r'));
     expect(positionKey(initBoard(), 'r')).not.toBe(positionKey(initBoard(), 'b'));
     const moved = boardAfterMove(initBoard(), [6, 0], [5, 0]);
     expect(positionKey(moved, 'b')).not.toBe(positionKey(initBoard(), 'b'));
-    // 两次相同走子后的局面键一致（与棋盘对象无关）
     expect(positionKey(boardAfterMove(moved, [3, 0], [4, 0]), 'r')).toBe(
       positionKey(boardAfterMove(moved, [3, 0], [4, 0]), 'r'),
     );
@@ -64,7 +71,54 @@ describe('重复局面提示（纯函数）', () => {
     expect(classifyMove(before, after, 'r')).toBe('idle');
   });
 
-  it('同一局面不足 3 次重复、连续「打」也不足 5 步时不提示', () => {
+  it('连续「打」计数只数该方自己的着法，遇到「闲」即中断', () => {
+    const log = attackLog(3, 'check').map(([side, nature]) => ({ side, nature }));
+    expect(attackStreak(log, 'r')).toBe(3);
+    expect(attackStreak(log, 'b')).toBe(0);
+    expect(attackStreak([...log, { side: 'r', nature: 'idle' }], 'r')).toBe(0);
+    expect(CHANGE_HINT_AT).toBe(5);
+    expect(REPETITION_TIMES).toBe(3);
+  });
+
+  it('isVaryStep：第 4 步不拦截，第 5 步（及更后）才拦截，「闲」永不拦截', () => {
+    const four = attackLog(4, 'check').map(([side, nature]) => ({ side, nature }));
+    expect(isVaryStep(four, 'r', 'check')).toBe(true); // 第 5 步
+    expect(isVaryStep(four, 'r', 'chase')).toBe(true); // 将捉混合同样计入
+    expect(isVaryStep(four, 'r', 'idle')).toBe(false); // 「闲」不延长「打」
+    const three = attackLog(3, 'check').map(([side, nature]) => ({ side, nature }));
+    expect(isVaryStep(three, 'r', 'check')).toBe(false); // 第 4 步
+    expect(
+      isVaryStep(
+        attackLog(5, 'check').map(([s, n]) => ({ side: s, nature: n })),
+        'r',
+        'check',
+      ),
+    ).toBe(true); // 超过第 5 步仍拦截
+  });
+
+  it('blocksVaryStep：第 5 步、局面重复且还有其它着法 → 拦截', () => {
+    const log = attackLog(4, 'check').map(([side, nature]) => ({ side, nature }));
+    expect(blocksVaryStep(log, 'r', 'check', ['idle'], true)).toBe(true);
+    expect(blocksVaryStep(log, 'r', 'check', ['check', 'idle', 'chase'], true)).toBe(true);
+  });
+
+  it('blocksVaryStep：第 5 步但除长将 / 长捉外无棋可走 → 放行', () => {
+    const log = attackLog(4, 'chase').map(([side, nature]) => ({ side, nature }));
+    expect(blocksVaryStep(log, 'r', 'chase', [], true)).toBe(false); // 没有任何其它合法着法
+    expect(blocksVaryStep(log, 'r', 'chase', ['check', 'chase'], true)).toBe(false); // 其它着法也都是第 5 步
+  });
+
+  it('blocksVaryStep：第 4 步不受影响', () => {
+    const log = attackLog(3, 'check').map(([side, nature]) => ({ side, nature }));
+    expect(blocksVaryStep(log, 'r', 'check', ['idle'], true)).toBe(false);
+  });
+
+  it('blocksVaryStep：局面并未重复（正常进攻的连续将军 / 捉子）→ 不拦截', () => {
+    const log = attackLog(4, 'check').map(([side, nature]) => ({ side, nature }));
+    expect(blocksVaryStep(log, 'r', 'check', ['idle'], false)).toBe(false);
+  });
+
+  it('同一局面不足 3 次重复时不提示', () => {
     expect(
       judgeRepetition(
         hist(
@@ -76,78 +130,6 @@ describe('重复局面提示（纯函数）', () => {
         ),
       ),
     ).toBeNull();
-    expect(
-      judgeRepetition(
-        hist(
-          ['a', 'x', 'a', 'x'],
-          [
-            ['r', 'check'],
-            ['b', 'idle'],
-            ['r', 'idle'],
-          ],
-        ),
-      ),
-    ).toBeNull();
-    expect(REPETITION_TIMES).toBe(3);
-    expect(CHANGE_HINT_AT).toBe(5);
-  });
-
-  it('长将连续 4 步不提示，到第 5 步提示「请变招」', () => {
-    const natures: Array<[Side, MoveNature]> = [];
-    for (let i = 0; i < 5; i++) natures.push(['r', 'check'], ['b', 'idle']);
-    // 前 4 步（8 手）不提示
-    expect(judgeRepetition(hist(uniqueKeys(8), natures.slice(0, 8)))).toBeNull();
-    // 第 5 步（10 手）提示
-    expect(judgeRepetition(hist(uniqueKeys(10), natures))).toEqual({ outcome: 'hint', reason: '请变招' });
-  });
-
-  it('长捉连续 4 步不提示，到第 5 步提示「请变招」', () => {
-    const natures: Array<[Side, MoveNature]> = [];
-    for (let i = 0; i < 5; i++) natures.push(['r', 'chase'], ['b', 'idle']);
-    expect(judgeRepetition(hist(uniqueKeys(8), natures.slice(0, 8)))).toBeNull();
-    expect(judgeRepetition(hist(uniqueKeys(10), natures))).toEqual({ outcome: 'hint', reason: '请变招' });
-  });
-
-  it('将捉混合连续 5 步（长打）同样提示「请变招」', () => {
-    const h = hist(uniqueKeys(10), [
-      ['r', 'check'],
-      ['b', 'idle'],
-      ['r', 'chase'],
-      ['b', 'idle'],
-      ['r', 'check'],
-      ['b', 'idle'],
-      ['r', 'chase'],
-      ['b', 'idle'],
-      ['r', 'check'],
-      ['b', 'idle'],
-    ]);
-    expect(judgeRepetition(h)).toEqual({ outcome: 'hint', reason: '请变招' });
-  });
-
-  it('一方长将三次重复但未到 5 步 → 不判负、暂不提示', () => {
-    const h = hist(
-      ['a', 'x', 'a', 'x', 'a'],
-      [
-        ['r', 'check'],
-        ['b', 'idle'],
-        ['r', 'check'],
-        ['b', 'idle'],
-      ],
-    );
-    expect(judgeRepetition(h)).toBeNull();
-  });
-
-  it('一方长捉三次重复但未到 5 步 → 不判负、暂不提示', () => {
-    const h = hist(
-      ['a', 'x', 'a', 'x', 'a'],
-      [
-        ['r', 'chase'],
-        ['b', 'idle'],
-        ['r', 'chase'],
-        ['b', 'idle'],
-      ],
-    );
-    expect(judgeRepetition(h)).toBeNull();
   });
 
   it('双方都是长打 → 提示「请变招」', () => {
@@ -176,6 +158,19 @@ describe('重复局面提示（纯函数）', () => {
     expect(judgeRepetition(h)).toEqual({ outcome: 'hint', reason: '请变招' });
   });
 
+  it('一方单方长打但未被拦截（第 4 步三次重复）→ 不提示、不判负', () => {
+    const h = hist(
+      ['a', 'x', 'a', 'x', 'a'],
+      [
+        ['r', 'check'],
+        ['b', 'idle'],
+        ['r', 'check'],
+        ['b', 'idle'],
+      ],
+    );
+    expect(judgeRepetition(h)).toBeNull();
+  });
+
   it('只看最后一次重复循环（更早的循环不影响当前提示）', () => {
     const h = hist(
       ['a', 'a', 'a', 'x', 'a', 'x', 'a'],
@@ -192,7 +187,7 @@ describe('重复局面提示（纯函数）', () => {
   });
 });
 
-describe('重复局面提示（对局状态机集成）', () => {
+describe('长将 / 长捉拦截（对局状态机集成）', () => {
   /** 长将循环：红车在 4 / 5 路来回将军，黑将左右躲闪 */
   const CHECK_BOARD = (): Board => {
     const b = empty();
@@ -209,10 +204,8 @@ describe('重复局面提示（对局状态机集成）', () => {
     [[5, 5], [5, 4], 'r'], // 5 将军（第 3 步）→ 局面第 2 次
     [[0, 4], [0, 5], 'b'], // 6
     [[5, 4], [5, 5], 'r'], // 7 将军（第 4 步）
-    [[0, 5], [0, 4], 'b'], // 8 回到开局局面（第 3 次）：不判负、暂不提示
-    [[5, 5], [5, 4], 'r'], // 9 将军（第 5 步）：提示「请变招」
-    [[0, 4], [0, 5], 'b'], // 10
-    [[5, 4], [5, 5], 'r'], // 11 将军（第 6 步）：仍只提示，不判负
+    [[0, 5], [0, 4], 'b'], // 8 回到开局局面（第 3 次）：不判负、不提示
+    [[5, 5], [5, 4], 'r'], // 9 将军（第 5 步）：禁走 + 弹层「请变招」
   ];
 
   /** 长捉循环：红车追捉黑无根马，马在两个落点间往返 */
@@ -232,8 +225,8 @@ describe('重复局面提示（对局状态机集成）', () => {
     [[4, 7], [2, 7], 'r'], // 5 捉马（第 3 步）
     [[2, 1], [4, 2], 'b'], // 6
     [[2, 7], [4, 7], 'r'], // 7 再捉（第 4 步）
-    [[4, 2], [2, 1], 'b'], // 8 → 开局局面第 3 次：不判负、暂不提示
-    [[4, 7], [2, 7], 'r'], // 9 捉马（第 5 步）：提示「请变招」
+    [[4, 2], [2, 1], 'b'], // 8 → 开局局面第 3 次：不判负、不提示
+    [[4, 7], [2, 7], 'r'], // 9 捉马（第 5 步）：禁走 + 弹层「请变招」
   ];
 
   /** 双方长闲循环：两车各在本方底线上往返 */
@@ -263,44 +256,56 @@ describe('重复局面提示（对局状态机集成）', () => {
     }
   };
 
-  it('长将：第 4 步不提示，第 5 步提示「请变招」，且对局不判负', () => {
+  it('长将：第 4 步正常走，第 5 步被禁（code = vary）且不判负', () => {
     const g = new Game();
     g.setup(CHECK_BOARD(), 'r');
     play(g, CHECK_SEQ, 8); // 红方第 4 次将军 + 三次重复
     expect(g.status).toBe('playing');
     expect(g.reason).toBe('');
-    expect(g.repetitionHint).toBe(false); // 未到第 5 步：不提示、不判负
+    expect(g.repetitionHint).toBe(false); // 第 4 步：不提示、不判负
+    expect(g.moveSeq).toBe(8);
 
-    play(g, CHECK_SEQ.slice(8, 9)); // 红方第 5 次将军
-    expect(g.status).toBe('playing'); // 不判负
+    const banned = g.applyMove([5, 5], [5, 4], 'r'); // 第 5 次将军
+    expect(banned.ok).toBe(false);
+    expect(banned.code).toBe('vary'); // 渲染层据此用弹层提示「请变招」
+    // 这一手没有落子：局面 / 手数 / 行棋方都不变，对局继续
+    expect(g.moveSeq).toBe(8);
+    expect(g.turn).toBe('r');
+    expect(g.history.length).toBe(8);
+    expect(g.status).toBe('playing');
     expect(g.winner).toBeNull();
     expect(g.reason).toBe('');
-    expect(g.repetitionHint).toBe(true);
-    expect(g.snapshot().repetitionHint).toBe(true); // 随快照下发，供渲染层提示
+    // 仍然可以直接走其它合法着法
+    expect(g.applyMove([5, 5], [4, 5], 'r').ok).toBe(true);
+    expect(g.moveSeq).toBe(9);
   });
 
-  it('长捉：第 4 步不提示，第 5 步提示「请变招」，且对局不判负', () => {
+  it('长捉：第 4 步正常走，第 5 步被禁（code = vary）且不判负', () => {
     const g = new Game();
     g.setup(CHASE_BOARD(), 'r');
     play(g, CHASE_SEQ, 8); // 红方第 4 次捉子 + 三次重复
     expect(g.status).toBe('playing');
-    expect(g.reason).toBe('');
     expect(g.repetitionHint).toBe(false);
 
-    play(g, CHASE_SEQ.slice(8)); // 红方第 5 次捉子
+    const banned = g.applyMove([4, 7], [2, 7], 'r'); // 第 5 次捉子
+    expect(banned.ok).toBe(false);
+    expect(banned.code).toBe('vary');
+    expect(g.moveSeq).toBe(8);
     expect(g.status).toBe('playing');
     expect(g.winner).toBeNull();
-    expect(g.repetitionHint).toBe(true);
+    expect(g.applyMove([4, 7], [3, 7], 'r').ok).toBe(true); // 改走别的着法
   });
 
-  it('长将超过第 5 步仍只提示，不会判负', () => {
+  it('AI 用 pickVarySafeMove：被拦截时改走其它合法着法', () => {
     const g = new Game();
     g.setup(CHECK_BOARD(), 'r');
-    play(g, CHECK_SEQ); // 走到第 6 次将军
+    play(g, CHECK_SEQ, 8);
+    const preferred: Move = { from: [5, 5], to: [5, 4] }; // 第 5 步将军
+    expect(g.isVaryBlocked(preferred.from, preferred.to, 'r')).toBe(true);
+    const safe = g.pickVarySafeMove('r', preferred);
+    expect(safe).not.toEqual(preferred);
+    expect(g.applyMove(safe.from, safe.to, 'r').ok).toBe(true);
     expect(g.status).toBe('playing');
-    expect(g.winner).toBeNull();
-    expect(g.reason).toBe('');
-    expect(g.repetitionHint).toBe(true);
   });
 
   it('双方长闲三次重复 → 提示「请变招」（不判和、继续对局）', () => {
@@ -336,21 +341,17 @@ describe('重复局面提示（对局状态机集成）', () => {
     expect(g.repetitionHint).toBe(false);
   });
 
-  it('悔棋会一并回退重复局面计数，不会提前提示', () => {
+  it('悔棋会一并回退重复局面计数：第 4 步仍可走，到第 5 步才拦截', () => {
     const g = new Game();
     g.setup(CHECK_BOARD(), 'r');
-    play(g, CHECK_SEQ, 8);
+    play(g, CHECK_SEQ, 6); // 红方第 4 步之前
+    const fourth = CHECK_SEQ[6]; // 第 7 手：第 4 次将军
+    expect(g.applyMove(fourth[0], fourth[1], 'r').ok).toBe(true);
+    expect(g.undo()).toBe(true); // 回退第 4 步
+    expect(g.applyMove(fourth[0], fourth[1], 'r').ok).toBe(true); // 重放仍允许
     expect(g.status).toBe('playing');
     expect(g.repetitionHint).toBe(false);
-
-    expect(g.undo()).toBe(true);
-    play(g, CHECK_SEQ.slice(7, 8)); // 重放第 8 手：仍是第 4 步
-    expect(g.status).toBe('playing');
-    expect(g.repetitionHint).toBe(false);
-
-    play(g, CHECK_SEQ.slice(8, 9)); // 第 9 手（第 5 步）→ 提示，不判负
-    expect(g.status).toBe('playing');
-    expect(g.repetitionHint).toBe(true);
+    expect(g.moveSeq).toBe(7);
   });
 
   it('reset / setup 清空重复局面历史，重新开局不会沿用旧计数', () => {
@@ -367,7 +368,18 @@ describe('重复局面提示（对局状态机集成）', () => {
     expect(g.moveSeq).toBe(8);
   });
 
-  it('普通开局走子不受影响（不误判重复局面）', () => {
+  it('正常进攻的连续将军（局面不重复）不被误拦截：完整将死线全部可走', () => {
+    const g = new Game();
+    g.reset('playing');
+    for (let i = 0; i < MATE_LINE.length; i++) {
+      const side: Side = i % 2 === 0 ? 'r' : 'b';
+      expect(g.applyMove(MATE_LINE[i].from, MATE_LINE[i].to, side).ok).toBe(true);
+    }
+    expect(g.status).toBe('over');
+    expect(g.reason).toBe('将死');
+  });
+
+  it('普通开局走子不受影响（不误判重复局面、不误拦截）', () => {
     const g = new Game();
     g.reset('playing');
     play(g, [
