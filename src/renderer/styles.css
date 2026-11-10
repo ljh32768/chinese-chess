@@ -1157,7 +1157,9 @@ body::before {
   white-space: nowrap;
   -webkit-text-stroke: 1px rgba(28, 15, 6, 0.9);
 }
-.banner-name[data-kind='check'] {
+/* 将（将军）/ 吃（吃子）：同一位置、同一样式与字号（吃子优先级低于将 / 绝杀） */
+.banner-name[data-kind='check'],
+.banner-name[data-kind='capture'] {
   color: #fff3d6;
   text-shadow: 0 0 2px #1c0f06, 0 4px 14px rgba(0, 0, 0, 0.8);
 }
